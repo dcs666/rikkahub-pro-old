@@ -1,6 +1,7 @@
 #include "rikka/markdown/md.h"
 #include "rikka/core/buffer.h"
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,6 +14,7 @@ static void inline_append(RikkaMdBlock *b, const char *text, size_t start, size_
     if (len == 0 && t == RIKKA_INLINE_TEXT) return;
     if (b->inline_count == b->inline_cap) {
         size_t nc = b->inline_cap ? b->inline_cap * 2 : 8;
+        if (nc > SIZE_MAX / sizeof(RikkaInline)) return; /* 溢出防护 */
         RikkaInline *ni = (RikkaInline *)realloc(b->inlines, nc * sizeof(RikkaInline));
         if (!ni) return;
         b->inlines = ni;

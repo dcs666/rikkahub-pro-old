@@ -1,4 +1,5 @@
 #include "rikka/core/message.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,6 +14,7 @@ RikkaPart *rmsg_add_part(Arena *arena, RikkaMessage *m, RikkaPartType type) {
     if (!m || !arena) return NULL;
     if (m->part_count == m->part_cap) {
         size_t nc = m->part_cap ? m->part_cap * 2 : 4;
+        if (nc > SIZE_MAX / sizeof(RikkaPart)) return NULL; /* 溢出防护 */
         RikkaPart *np = (RikkaPart *)arena_alloc(arena, 8, nc * sizeof(RikkaPart));
         if (!np) return NULL;
         if (m->parts) memcpy(np, m->parts, m->part_count * sizeof(RikkaPart));
@@ -36,20 +38,22 @@ void rstream_init(RikkaStream *s, Arena *arena, RikkaRole role) {
     s->active = 1;
 }
 
-static void ensure_text_part(RikkaStream *s) {
+static int ensure_text_part(RikkaStream *s) {
     if (s->msg->part_count == 0 || s->msg->parts[s->msg->part_count - 1].type != RIKKA_PART_TEXT) {
         RikkaPart *p = rmsg_add_part(s->arena, s->msg, RIKKA_PART_TEXT);
+        if (!p) return 0; /* OOM */
         p->data = (const char *)s->text_buf.data;
         p->len = s->text_buf.len;
         s->text_part_idx = s->msg->part_count - 1;
     } else {
         s->text_part_idx = s->msg->part_count - 1;
     }
+    return 1;
 }
 
 void rstream_append_text(RikkaStream *s, const char *data, size_t len) {
     if (!s->active || len == 0) return;
-    ensure_text_part(s);
+    if (!ensure_text_part(s)) return; /* OOM */
     /* O(1) 摊销 append；part 指针同步更新（零拷贝：不重建字符串） */
     buf_append(&s->text_buf, data, len);
     RikkaPart *p = &s->msg->parts[s->text_part_idx];
@@ -57,20 +61,22 @@ void rstream_append_text(RikkaStream *s, const char *data, size_t len) {
     p->len = s->text_buf.len;
 }
 
-static void ensure_reasoning_part(RikkaStream *s) {
+static int ensure_reasoning_part(RikkaStream *s) {
     if (s->msg->part_count == 0 || s->msg->parts[s->msg->part_count - 1].type != RIKKA_PART_REASONING) {
         RikkaPart *p = rmsg_add_part(s->arena, s->msg, RIKKA_PART_REASONING);
+        if (!p) return 0; /* OOM */
         p->data = (const char *)s->reasoning_buf.data;
         p->len = s->reasoning_buf.len;
         s->reasoning_part_idx = s->msg->part_count - 1;
     } else {
         s->reasoning_part_idx = s->msg->part_count - 1;
     }
+    return 1;
 }
 
 void rstream_append_reasoning(RikkaStream *s, const char *data, size_t len) {
     if (!s->active || len == 0) return;
-    ensure_reasoning_part(s);
+    if (!ensure_reasoning_part(s)) return; /* OOM */
     buf_append(&s->reasoning_buf, data, len);
     RikkaPart *p = &s->msg->parts[s->reasoning_part_idx];
     p->data = (const char *)s->reasoning_buf.data;
@@ -110,6 +116,7 @@ void rstream_destroy(RikkaStream *s) {
 static void node_add_child(RNode *parent, RNode *child) {
     if (parent->child_count == parent->child_cap) {
         size_t nc = parent->child_cap ? parent->child_cap * 2 : 2;
+        if (nc > SIZE_MAX / sizeof(RNode *)) return; /* 溢出防护 */
         RNode **nc2 = (RNode **)realloc(parent->children, nc * sizeof(RNode *));
         if (!nc2) return;
         parent->children = nc2;
@@ -209,6 +216,7 @@ size_t rconv_active_messages(const RConversation *c, const RikkaMessage **out, s
     for (RNode *cur = c->active; cur && cur->parent; cur = cur->parent) depth++;
     if (depth > cap) depth = cap;
     if (depth == 0) return 0;
+    if (depth > SIZE_MAX / sizeof(RNode *)) return 0; /* 溢出防护 */
     RNode **path = (RNode **)malloc(depth * sizeof(RNode *));
     if (!path) return 0;
     size_t d2 = 0;

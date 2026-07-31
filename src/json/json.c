@@ -1,5 +1,6 @@
 #include "rikka/json/json.h"
 #include "rikka/core/buffer.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -145,6 +146,7 @@ static RJson *parse_object(ParseCtx *c) {
         RJson *val = parse_value(c);
         if (!val) { c->depth--; return NULL; }
         if (v->u.obj.count == cap) {
+            if (cap > SIZE_MAX / 2 / sizeof(RJson *)) return NULL; /* 溢出防护 */
             cap *= 2;
             const char **nk = (const char **)arena_alloc0(c->arena, 8, cap * sizeof(char *));
             RJson **nv = (RJson **)arena_alloc0(c->arena, 8, cap * sizeof(RJson *));
@@ -181,6 +183,7 @@ static RJson *parse_array(ParseCtx *c) {
         RJson *val = parse_value(c);
         if (!val) { c->depth--; return NULL; }
         if (v->u.arr.count == cap) {
+            if (cap > SIZE_MAX / 2 / sizeof(RJson *)) return NULL; /* 溢出防护 */
             cap *= 2;
             RJson **ni = (RJson **)arena_alloc0(c->arena, 8, cap * sizeof(RJson *));
             if (!ni) return NULL;
