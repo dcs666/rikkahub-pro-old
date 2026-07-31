@@ -138,6 +138,7 @@ int run_http_suite(void) {
         RIKKA_TEST_REGISTER(http, http_sse_split_events),
         RIKKA_TEST_REGISTER(http, http_sync_json),
         RIKKA_TEST_REGISTER(http, http_404),
+        RIKKA_TEST_REGISTER(http, tls_smoke),
     };
     return run_suite("http", tests, sizeof(tests) / sizeof(tests[0]));
 }
