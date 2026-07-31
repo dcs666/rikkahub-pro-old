@@ -9,30 +9,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-static pid_t g_server_pid = -1;
-static int g_port = 18888;
-
-static void stop_mock_server(void) {
-    if (g_server_pid > 0) {
-        kill(g_server_pid, SIGKILL); /* 立即释放端口，避免测试间竞态 */
-        waitpid(g_server_pid, NULL, 0);
-        g_server_pid = -1;
-    }
-}
-
-static void start_mock_server(void) {
-    g_port = 30000 + (int)(getpid() % 8000); /* 与 http suite 端口区间隔离 */
-    char portstr[16];
-    snprintf(portstr, sizeof(portstr), "%d", g_port);
-    g_server_pid = fork();
-    if (g_server_pid == 0) {
-        execlp("python3", "python3", "tests/mock_sse_server.py", portstr, (char *)NULL);
-        _exit(1);
-    }
-    ASSERT(g_server_pid > 0);
-    atexit(stop_mock_server);
-    sleep(1);
-}
+#include "test_server.h"
 
 /* 消息构造辅助 */
 static RikkaMessage *mk_msg(Arena *a, RikkaRole role, const char *text) {

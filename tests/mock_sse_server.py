@@ -24,9 +24,12 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
 
             def chunk(s):
-                b = s.encode('utf-8')
-                self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
-                self.wfile.flush()
+                try:
+                    b = s.encode('utf-8')
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    pass
 
             chunk('data: Hello\n\n')
             time.sleep(0.05)
@@ -34,8 +37,11 @@ class H(BaseHTTPRequestHandler):
             time.sleep(0.05)
             chunk('event: done\ndata: \n\n')
             time.sleep(0.05)
-            self.wfile.write(b'0\r\n\r\n')  # chunked 结束
-            self.wfile.flush()
+            try:
+                self.wfile.write(b'0\r\n\r\n')  # chunked 结束
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         elif self.path == '/json':
             body = b'{"ok":true,"value":42}'
             self.send_response(200)
@@ -49,10 +55,16 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/event-stream')
             self.end_headers()
             for i in range(5):
-                self.wfile.write(('data: tick%d\n\n' % i).encode())
-                self.wfile.flush()
+                try:
+                    self.wfile.write(('data: tick%d\n\n' % i).encode())
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
                 time.sleep(0.05)
-            self.wfile.close()
+            try:
+                self.wfile.close()
+            except Exception:
+                pass
         elif self.path == '/openai':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -66,11 +78,17 @@ class H(BaseHTTPRequestHandler):
                 'data: [DONE]\n\n',
             ]
             for e in evs:
-                b = e.encode()
-                self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+            try:
+                self.wfile.write(b'0\r\n\r\n')
                 self.wfile.flush()
-            self.wfile.write(b'0\r\n\r\n')
-            self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         elif self.path == '/claude':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -84,11 +102,17 @@ class H(BaseHTTPRequestHandler):
                 'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
             ]
             for e in evs:
-                b = e.encode()
-                self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+            try:
+                self.wfile.write(b'0\r\n\r\n')
                 self.wfile.flush()
-            self.wfile.write(b'0\r\n\r\n')
-            self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         elif self.path == '/google':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -99,11 +123,17 @@ class H(BaseHTTPRequestHandler):
                 'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"answer"}]}}]}\n\n',
             ]
             for e in evs:
-                b = e.encode()
-                self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+            try:
+                self.wfile.write(b'0\r\n\r\n')
                 self.wfile.flush()
-            self.wfile.write(b'0\r\n\r\n')
-            self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         else:
             self.send_response(404)
             self.end_headers()

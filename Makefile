@@ -38,4 +38,4 @@ bench: $(BENCH_BIN)
 	@for b in $(BENCH_BIN); do echo "== $$b =="; ./$$b; done
 
 clean:
-	rm -rf build $(OBJ)
+	rm -rf build $(OBJ) $(TEST_OBJ)

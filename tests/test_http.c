@@ -26,31 +26,7 @@ static void sse_cb(void *ctx, const char *event, const char *data, size_t data_l
     g_ncap++;
 }
 
-static pid_t g_server_pid = -1;
-static int g_port = 18888;
-
-static void stop_mock_server(void) {
-    if (g_server_pid > 0) {
-        kill(g_server_pid, SIGKILL); /* 立即释放端口，避免测试间竞态 */
-        waitpid(g_server_pid, NULL, 0);
-        g_server_pid = -1;
-    }
-}
-
-/* 随机端口避免冲突 + atexit 清理（断言失败也清理） */
-static void start_mock_server(void) {
-    g_port = 20000 + (int)(getpid() % 10000);
-    char portstr[16];
-    snprintf(portstr, sizeof(portstr), "%d", g_port);
-    g_server_pid = fork();
-    if (g_server_pid == 0) {
-        execlp("python3", "python3", "tests/mock_sse_server.py", portstr, (char *)NULL);
-        _exit(1);
-    }
-    ASSERT(g_server_pid > 0);
-    atexit(stop_mock_server);
-    sleep(1); /* 等服务器就绪 */
-}
+#include "test_server.h"
 
 TEST(http_sse_stream) {
     start_mock_server();

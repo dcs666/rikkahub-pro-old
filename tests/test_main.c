@@ -13,6 +13,7 @@ int run_suite(const char *suite_name, const RikkaTest *tests, size_t count) {
     return passed == (int)count ? 0 : 1;
 }
 
+int run_md_suite(void);
 int run_highlight_suite(void);
 int run_provider_suite(void);
 int run_http_suite(void);
@@ -23,6 +24,7 @@ int run_arena_suite(void);
 int run_log_suite(void);
 
 int main(void) {
+    setvbuf(stdout, NULL, _IONBF, 0); /* 卡死时也能看到进度 */
     int failed = 0;
     failed |= run_buffer_suite();
     failed |= run_arena_suite();
@@ -32,6 +34,7 @@ int main(void) {
     failed |= run_http_suite();
     failed |= run_provider_suite();
     failed |= run_highlight_suite();
+    failed |= run_md_suite();
     if (failed == 0) {
         printf("\nALL SUITES PASSED\n");
         return 0;
