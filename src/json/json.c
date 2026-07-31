@@ -10,7 +10,10 @@ typedef struct {
     Arena *arena;
     const char *p, *end;
     size_t err_pos;
+    int depth;
 } ParseCtx;
+
+#define RJSON_MAX_DEPTH 512
 
 static void skip_ws(ParseCtx *c) {
     while (c->p < c->end && (*c->p == ' ' || *c->p == '\t' || *c->p == '\n' || *c->p == '\r'))
@@ -119,6 +122,7 @@ done:
 static RJson *parse_value(ParseCtx *c);
 
 static RJson *parse_object(ParseCtx *c) {
+    if (++c->depth > RJSON_MAX_DEPTH) { c->err_pos = (size_t)(c->p - c->p); return NULL; }
     RJson *v = new_node(c, RJSON_OBJECT);
     if (!v) return NULL;
     c->p++; /* { */
@@ -135,11 +139,11 @@ static RJson *parse_object(ParseCtx *c) {
         const char *key = parse_string(c, &klen);
         if (!key) return NULL;
         skip_ws(c);
-        if (c->p >= c->end || *c->p != ':') { c->err_pos = (size_t)(c->p - c->p); return NULL; }
+        if (c->p >= c->end || *c->p != ':') { c->err_pos = (size_t)(c->p - c->p); c->depth--; return NULL; }
         c->p++;
         skip_ws(c);
         RJson *val = parse_value(c);
-        if (!val) return NULL;
+        if (!val) { c->depth--; return NULL; }
         if (v->u.obj.count == cap) {
             cap *= 2;
             const char **nk = (const char **)arena_alloc0(c->arena, 8, cap * sizeof(char *));
@@ -155,13 +159,15 @@ static RJson *parse_object(ParseCtx *c) {
         skip_ws(c);
         if (c->p >= c->end) { c->err_pos = (size_t)(c->p - c->p); return NULL; }
         if (*c->p == ',') { c->p++; continue; }
-        if (*c->p == '}') { c->p++; return v; }
+        if (*c->p == '}') { c->p++; c->depth--; return v; }
         c->err_pos = (size_t)(c->p - c->p);
+        c->depth--;
         return NULL;
     }
 }
 
 static RJson *parse_array(ParseCtx *c) {
+    if (++c->depth > RJSON_MAX_DEPTH) { c->err_pos = (size_t)(c->p - c->p); return NULL; }
     RJson *v = new_node(c, RJSON_ARRAY);
     if (!v) return NULL;
     c->p++; /* [ */
@@ -169,11 +175,11 @@ static RJson *parse_array(ParseCtx *c) {
     v->u.arr.items = (RJson **)arena_alloc0(c->arena, 8, cap * sizeof(RJson *));
     if (!v->u.arr.items) return NULL;
     skip_ws(c);
-    if (c->p < c->end && *c->p == ']') { c->p++; return v; }
+    if (c->p < c->end && *c->p == ']') { c->p++; c->depth--; return v; }
     for (;;) {
         skip_ws(c);
         RJson *val = parse_value(c);
-        if (!val) return NULL;
+        if (!val) { c->depth--; return NULL; }
         if (v->u.arr.count == cap) {
             cap *= 2;
             RJson **ni = (RJson **)arena_alloc0(c->arena, 8, cap * sizeof(RJson *));
@@ -183,10 +189,11 @@ static RJson *parse_array(ParseCtx *c) {
         }
         v->u.arr.items[v->u.arr.count++] = val;
         skip_ws(c);
-        if (c->p >= c->end) { c->err_pos = (size_t)(c->p - c->p); return NULL; }
+        if (c->p >= c->end) { c->err_pos = (size_t)(c->p - c->p); c->depth--; return NULL; }
         if (*c->p == ',') { c->p++; continue; }
-        if (*c->p == ']') { c->p++; return v; }
+        if (*c->p == ']') { c->p++; c->depth--; return v; }
         c->err_pos = (size_t)(c->p - c->p);
+        c->depth--;
         return NULL;
     }
 }
@@ -258,6 +265,7 @@ RJson *rjson_parse(Arena *arena, const char *text, size_t len, size_t *err_pos) 
     c.p = text;
     c.end = text + len;
     c.err_pos = 0;
+    c.depth = 0;
     RJson *v = parse_value(&c);
     if (!v) {
         if (err_pos) *err_pos = c.err_pos;

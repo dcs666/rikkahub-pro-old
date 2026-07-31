@@ -57,6 +57,40 @@ TEST(rbin_roundtrip) {
     arena_destroy(a2);
 }
 
+TEST(rbin_truncation_guard) {
+    /* 回归: 合法文件每字节截断, 解析必须返回错误不崩溃 */
+    Arena *a = arena_create(0);
+    RConversation c;
+    rconv_init(&c, a);
+    for (int i = 0; i < 20; i++) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "msg %d with data", i);
+        RikkaMessage *m = mk_msg(a, RIKKA_ROLE_USER, buf);
+        rconv_append(&c, m);
+    }
+    Buf bin;
+    buf_init(&bin);
+    ASSERT_EQ_INT(0, rbin_save(&c, &bin));
+    for (size_t cut = 0; cut < bin.len; cut += 3) {
+        Arena *a2 = arena_create(0);
+        RikkaMessage **msgs = NULL;
+        size_t n = 0;
+        int rc = rbin_load(bin.data, cut, a2, &msgs, &n);
+        ASSERT(rc != 0); /* 截断必须报错 */
+        arena_destroy(a2);
+    }
+    /* 完整加载仍成功 */
+    Arena *a3 = arena_create(0);
+    RikkaMessage **msgs = NULL;
+    size_t n = 0;
+    ASSERT_EQ_INT(0, rbin_load(bin.data, bin.len, a3, &msgs, &n));
+    ASSERT_EQ_SIZE(20, n);
+    buf_free(&bin);
+    rconv_destroy(&c);
+    arena_destroy(a);
+    arena_destroy(a3);
+}
+
 TEST(rbin_bad_magic) {
     Arena *a = arena_create(0);
     const char *bad = "NOTRIKKABIN";
@@ -206,6 +240,7 @@ int run_data_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(data, rbin_roundtrip),
         RIKKA_TEST_REGISTER(data, rbin_bad_magic),
+        RIKKA_TEST_REGISTER(data, rbin_truncation_guard),
         RIKKA_TEST_REGISTER(data, rbin_file_snapshot),
         RIKKA_TEST_REGISTER(data, lru_basic),
         RIKKA_TEST_REGISTER(data, lru_eviction),

@@ -66,6 +66,25 @@ TEST(parse_errors) {
     arena_destroy(a);
 }
 
+TEST(parse_deep_nesting_guarded) {
+    /* 回归: 超深嵌套(10万层)必须返回 NULL 而非栈溢出 */
+    Arena *a = arena_create(0);
+    const int D = 100000;
+    char *buf = (char *)malloc(D * 2 + 1);
+    for (int i = 0; i < D; i++) buf[i] = '[';
+    for (int i = 0; i < D; i++) buf[D + i] = ']';
+    buf[D * 2] = '\0';
+    size_t err = 0;
+    RJson *v = rjson_parse(a, buf, D * 2, &err);
+    ASSERT_NULL(v); /* 超深拒绝，不崩溃 */
+    /* 正常深度仍工作 */
+    const char *ok = "[[1],[2],[3]]";
+    v = rjson_parse(a, ok, strlen(ok), &err);
+    ASSERT_NOT_NULL(v);
+    free(buf);
+    arena_destroy(a);
+}
+
 TEST(parse_nested) {
     Arena *a = arena_create(0);
     const char *txt = "[[1,[2,3]],{\"x\":{\"y\":[null]}}]";
@@ -264,6 +283,19 @@ TEST(stream_whitespace_and_finish) {
     rjson_stream_destroy(st);
 }
 
+TEST(stream_deep_nesting_error) {
+    /* 回归: 超深嵌套流式输入必须 error 而非栈溢出（stack 上限 64） */
+    const int D = 1000;
+    char *buf = (char *)malloc(D + 1);
+    for (int i = 0; i < D; i++) buf[i] = '[';
+    buf[D] = '\0';
+    RJsonStream *st = rjson_stream_create(path_choices_content, sink_cb, NULL);
+    RJsonStreamStatus sts = rjson_stream_feed(st, buf, D);
+    ASSERT(sts == RJSON_STREAM_ERROR); /* 深嵌套 error */
+    free(buf);
+    rjson_stream_destroy(st);
+}
+
 TEST(stream_lone_surrogate_tolerant) {
     /* 孤立 high surrogate 后接普通字符：不 error，输出替换符继续 */
     const char *ev = "{\"choices\":[{\"delta\":{\"content\":\"a\\uD83D!b\"}}]}";
@@ -286,6 +318,7 @@ int run_json_suite(void) {
         RIKKA_TEST_REGISTER(json, parse_basic),
         RIKKA_TEST_REGISTER(json, parse_escapes),
         RIKKA_TEST_REGISTER(json, parse_errors),
+        RIKKA_TEST_REGISTER(json, parse_deep_nesting_guarded),
         RIKKA_TEST_REGISTER(json, parse_nested),
         RIKKA_TEST_REGISTER(json, serialize_roundtrip),
         RIKKA_TEST_REGISTER(json, stream_extract_content),
@@ -297,6 +330,7 @@ int run_json_suite(void) {
         RIKKA_TEST_REGISTER(json, stream_array_index_mismatch),
         RIKKA_TEST_REGISTER(json, stream_whitespace_and_finish),
         RIKKA_TEST_REGISTER(json, stream_lone_surrogate_tolerant),
+        RIKKA_TEST_REGISTER(json, stream_deep_nesting_error),
     };
     return run_suite("json", tests, sizeof(tests) / sizeof(tests[0]));
 }

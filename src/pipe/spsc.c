@@ -28,6 +28,7 @@ void rk_spsc_destroy(RkSpsc *q) {
 
 int rk_spsc_push(RkSpsc *q, const void *data, size_t len) {
     if (q->closed) return -1;
+    if (len == 0) return -1; /* 空块禁止：pop 返回 0 的语义是"关闭且空" */
     size_t need = HDR + len;
     if (need > q->cap) return -1;
     size_t used = q->head - __atomic_load_n(&q->tail, __ATOMIC_ACQUIRE);

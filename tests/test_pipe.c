@@ -138,6 +138,44 @@ static void *consumer(void *v) {
     return NULL;
 }
 
+TEST(spsc_empty_block_rejected) {
+    RkSpsc q;
+    rk_spsc_init(&q, 64);
+    char out[16];
+    ASSERT_EQ_INT(-1, rk_spsc_push(&q, "x", 0)); /* 空块拒绝 */
+    ASSERT_EQ_INT(-1, rk_spsc_pop(&q, out, sizeof(out))); /* 队列空 */
+    rk_spsc_destroy(&q);
+}
+
+TEST(spsc_single_byte) {
+    RkSpsc q;
+    rk_spsc_init(&q, 64);
+    char out[16];
+    char b = 'Z';
+    ASSERT_EQ_INT(0, rk_spsc_push(&q, &b, 1));
+    ssize_t n = rk_spsc_pop(&q, out, sizeof(out));
+    ASSERT_EQ_SIZE(1, n);
+    ASSERT(out[0] == 'Z');
+    rk_spsc_destroy(&q);
+}
+
+TEST(spsc_max_block_boundary) {
+    /* 块大小 = cap-4（长度前缀后恰好填满） */
+    RkSpsc q;
+    rk_spsc_init(&q, 128); /* cap 取 2 的幂 = 128 */
+    char big[124];
+    memset(big, 'B', sizeof(big));
+    char out[256];
+    ASSERT_EQ_INT(0, rk_spsc_push(&q, big, sizeof(big)));
+    ssize_t n = rk_spsc_pop(&q, out, sizeof(out));
+    ASSERT_EQ_SIZE(124, n);
+    ASSERT(memcmp(out, big, 124) == 0);
+    /* 超 cap 的块拒绝 */
+    char huge[256];
+    ASSERT_EQ_INT(-1, rk_spsc_push(&q, huge, sizeof(huge)));
+    rk_spsc_destroy(&q);
+}
+
 TEST(pipeline_sse_to_stream) {
     const int N = 500;
     RkSpsc q;
@@ -176,6 +214,9 @@ int run_pipe_suite(void) {
         RIKKA_TEST_REGISTER(pipe, spsc_order),
         RIKKA_TEST_REGISTER(pipe, spsc_wraparound),
         RIKKA_TEST_REGISTER(pipe, spsc_full),
+        RIKKA_TEST_REGISTER(pipe, spsc_single_byte),
+        RIKKA_TEST_REGISTER(pipe, spsc_empty_block_rejected),
+        RIKKA_TEST_REGISTER(pipe, spsc_max_block_boundary),
         RIKKA_TEST_REGISTER(pipe, pipeline_sse_to_stream),
     };
     return run_suite("pipe", tests, sizeof(tests) / sizeof(tests[0]));

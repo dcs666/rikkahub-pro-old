@@ -214,6 +214,22 @@ static void run_stream_test(RikkaProviderId id, const char *mock_path,
     stop_mock_server();
 }
 
+TEST(build_empty_messages) {
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk", "gpt-4o", 0, 0};
+    Buf out;
+    buf_init(&out);
+    ASSERT_EQ_INT(0, rp_build_request(&cfg, NULL, 0, 1, &out));
+    Arena *a = arena_create(0);
+    size_t err = 0;
+    RJson *v = rjson_parse(a, (const char *)out.data, out.len, &err);
+    ASSERT_NOT_NULL(v);
+    const RJson *messages = rjson_obj_get(v, "messages");
+    ASSERT(rjson_is(messages, RJSON_ARRAY));
+    ASSERT_EQ_SIZE(0, messages->u.arr.count);
+    buf_free(&out);
+    arena_destroy(a);
+}
+
 TEST(stream_openai) {
     run_stream_test(RIKKA_PROVIDER_OPENAI, "/openai", "Hello world", "think");
 }
@@ -260,6 +276,7 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, build_openai),
         RIKKA_TEST_REGISTER(provider, build_claude),
         RIKKA_TEST_REGISTER(provider, build_google),
+        RIKKA_TEST_REGISTER(provider, build_empty_messages),
         RIKKA_TEST_REGISTER(provider, stream_openai),
         RIKKA_TEST_REGISTER(provider, stream_claude),
         RIKKA_TEST_REGISTER(provider, stream_google),

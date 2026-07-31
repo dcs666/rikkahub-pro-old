@@ -26,7 +26,8 @@ typedef struct {
 void rk_spsc_init(RkSpsc *q, size_t cap);
 void rk_spsc_destroy(RkSpsc *q);
 
-/* 入队（写线程）：复制 data 到环形缓冲。返回 0 成功，-1 满/已关闭 */
+/* 入队（写线程）：复制 data 到环形缓冲。返回 0 成功，-1 满/已关闭/空块。
+ * 禁止 len==0（pop 返回 0 的语义是"关闭且空"，空块会误导调用方）。 */
 int rk_spsc_push(RkSpsc *q, const void *data, size_t len);
 
 /* 出队（读线程）：拷贝到 out（cap 容量）。返回 >0 字节数；0 = 已关闭且空；-1 = 空（等待后重试） */

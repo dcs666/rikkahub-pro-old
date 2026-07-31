@@ -4,7 +4,10 @@
 
 static size_t grow_cap(size_t need) {
     size_t cap = 64;
-    while (cap < need) cap *= 2;
+    while (cap < need) {
+        if (cap > (SIZE_MAX / 2)) return need; /* 防倍增溢出死循环 */
+        cap *= 2;
+    }
     return cap;
 }
 

@@ -174,6 +174,23 @@ TEST(incremental_fence_cross_feed) {
     rmd_destroy(p);
 }
 
+TEST(long_single_line) {
+    /* 100KB 单行（无换行）不崩 */
+    RikkaMdParser *p = rmd_create();
+    size_t big = 100 * 1024;
+    char *line = (char *)malloc(big + 1);
+    memset(line, 'a', big);
+    line[big] = '\0';
+    rmd_feed(p, line, big);
+    size_t n = 0;
+    const RikkaMdBlock *b = rmd_blocks(p, &n);
+    ASSERT_EQ_SIZE(1, n);
+    ASSERT_EQ_INT(RIKKA_MD_PARAGRAPH, b[0].type);
+    ASSERT_EQ_SIZE(big, b[0].len);
+    rmd_destroy(p);
+    free(line);
+}
+
 TEST(incremental_boundary) {
     /* feed 段落中（无空行）→ 1 块；feed 空行 → 新段落 */
     RikkaMdParser *p = rmd_create();
@@ -204,6 +221,7 @@ int run_md_suite(void) {
         RIKKA_TEST_REGISTER(md, incremental_feed),
         RIKKA_TEST_REGISTER(md, fence_close_reopen_single_feed),
         RIKKA_TEST_REGISTER(md, incremental_fence_cross_feed),
+        RIKKA_TEST_REGISTER(md, long_single_line),
         RIKKA_TEST_REGISTER(md, incremental_boundary),
     };
     return run_suite("md", tests, sizeof(tests) / sizeof(tests[0]));
