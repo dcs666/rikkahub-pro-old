@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
 #include "test.h"
 #include "rikka/pipe/spsc.h"
 #include "rikka/http/sse.h"
@@ -7,7 +8,15 @@
 #include "rikka/util/arena.h"
 #include <pthread.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
+
+static void msleep(long ms) {
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+}
 
 /* ---------- SPSC 基本 ---------- */
 
@@ -85,7 +94,7 @@ static void *producer(void *v) {
         char ev[128];
         snprintf(ev, sizeof(ev),
                  "data: {\"choices\":[{\"delta\":{\"content\":\"token%d \"}}]}\n\n", i);
-        while (rk_spsc_push(pc->q, ev, strlen(ev)) != 0) usleep(50);
+        while (rk_spsc_push(pc->q, ev, strlen(ev)) != 0) msleep(1);
     }
     rk_spsc_close(pc->q);
     return NULL;
@@ -120,7 +129,7 @@ static void *consumer(void *v) {
     for (;;) {
         ssize_t n = rk_spsc_pop(cc->q, buf, sizeof(buf));
         if (n == 0) break;
-        if (n < 0) { usleep(50); continue; }
+        if (n < 0) { msleep(1); continue; }
         rsse_feed(sse, buf, (size_t)n);
     }
     rsse_finish(sse);

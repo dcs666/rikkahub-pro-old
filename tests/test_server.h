@@ -7,6 +7,7 @@
  * 根治测试间端口竞态（残留 server/TIME_WAIT/垂死进程）。
  */
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
 #include <arpa/inet.h>
 #include <signal.h>
 #include <stdint.h>
@@ -14,8 +15,16 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include "test.h"
+
+static void msleep(long ms) {
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+}
 
 static pid_t g_server_pid = -1;
 static int g_port = 18888;
@@ -71,7 +80,7 @@ static void start_mock_server(void) {
     int ready = 0;
     for (int i = 0; i < 100; i++) {
         if (can_connect(g_port)) { ready = 1; break; }
-        usleep(100000);
+        msleep(100);
     }
     ASSERT(ready);
 }

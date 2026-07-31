@@ -164,7 +164,6 @@ TEST(stream_fragmented_bytes) {
 
 TEST(stream_fragmented_escape_split) {
     /* 转义序列本身跨分片：\\n 拆成 '\\' 和 'n' 两次喂入 */
-    const char *ev = "{\"choices\":[{\"delta\":{\"content\":\"ab\\nc\"}}]}";
     SinkCtx ctx; buf_init(&ctx.b);
     RJsonStream *st = rjson_stream_create(path_choices_content, sink_cb, &ctx);
     const char *prefix = "{\"choices\":[{\"delta\":{\"content\":\"ab\\";

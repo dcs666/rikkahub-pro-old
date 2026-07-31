@@ -87,9 +87,6 @@ TEST(rbin_file_snapshot) {
     size_t n = 0;
     ASSERT_EQ_INT(0, rbin_parse(data, len, a2, &msgs, &n));
     ASSERT_EQ_SIZE(100, n);
-    size_t sl = 0;
-    const char *s = rjson_str(NULL, &sl); /* 占位防未用 */
-    (void)s;
     ASSERT(memcmp(msgs[99]->parts[0].data, "message number 99", 17) == 0);
     rbin_munmap(data, len);
     arena_destroy(a);

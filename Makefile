@@ -1,7 +1,7 @@
 # RikkaHub core engine — M0 infrastructure
 CC      ?= cc
 CFLAGS  ?= -O2 -g -Wall -Wextra -Wpedantic -std=c11
-CPPFLAGS += -Iinclude
+CPPFLAGS += -Iinclude -MMD -MP
 LDFLAGS += -lpthread -lssl -lcrypto
 
 SRC := $(wildcard src/*/*.c)
@@ -34,8 +34,10 @@ test: $(TEST_BIN)
 $(BENCH_BIN): build/bench_%: benchmarks/bench_%.c $(OBJ) | build
 	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(OBJ) -o $@ $(LDFLAGS)
 
+-include $(OBJ:.o=.d) $(TEST_OBJ:.o=.d)
+
 bench: $(BENCH_BIN)
 	@for b in $(BENCH_BIN); do echo "== $$b =="; ./$$b; done
 
 clean:
-	rm -rf build $(OBJ) $(TEST_OBJ)
+	rm -rf build $(OBJ) $(TEST_OBJ) $(OBJ:.o=.d) $(TEST_OBJ:.o=.d)

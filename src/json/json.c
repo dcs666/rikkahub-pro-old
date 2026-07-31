@@ -494,10 +494,7 @@ static void key_append(RJsonStream *s, char ch) {
 static void compute_match(RJsonStream *s) {
     int d = s->depth;
     s->pending_match = 0;
-    if (d == 0) {
-        s->pending_match = (s->path_len == 0) ? 0 : 0; /* 根不匹配任何非空路径 */
-        return;
-    }
+    if (d == 0) return; /* 根不匹配任何非空路径 */
     SFrame *f = top(s);
     if (f->on_path_len != d - 1) { s->pending_match = 0; return; } /* 父不在路径上 */
     if (d > (int)s->path_len) { s->pending_match = 0; return; }

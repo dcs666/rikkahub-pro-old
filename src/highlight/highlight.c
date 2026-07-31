@@ -128,31 +128,32 @@ typedef struct {
     int preproc;         /* #include/#define（C 系） */
     int backtick_string; /* `...` */
     int html;            /* HTML 模式 */
+    int is_css;          /* CSS 模式（专用 lexer） */
     const char *line_comment; /* "//" 或 NULL */
-    int block_comment;   /* /* *​/ */
+    int block_comment;   /* C 块注释 */
 } HlLangCfg;
 
 static const HlLangCfg LANGS[] = {
-    {"c",      KW_C, TY_C, BU_C, 0, 0, 1, 0, 0, "//", 1},
-    {"cpp",    KW_CPP, TY_CPP, BU_C, 0, 0, 1, 0, 0, "//", 1},
-    {"c++",    KW_CPP, TY_CPP, BU_C, 0, 0, 1, 0, 0, "//", 1},
-    {"python", KW_PY, NULL, BU_PY, 1, 0, 0, 0, 0, NULL, 0},
-    {"py",     KW_PY, NULL, BU_PY, 1, 0, 0, 0, 0, NULL, 0},
-    {"js",     KW_JS, NULL, BU_JS, 0, 0, 0, 1, 0, "//", 1},
-    {"javascript", KW_JS, NULL, BU_JS, 0, 0, 0, 1, 0, "//", 1},
-    {"ts",     KW_JS, TY_TS, BU_JS, 0, 0, 0, 1, 0, "//", 1},
-    {"typescript", KW_JS, TY_TS, BU_JS, 0, 0, 0, 1, 0, "//", 1},
-    {"java",   KW_JAVA, TY_JAVA, NULL, 0, 0, 0, 0, 0, "//", 1},
-    {"kotlin", KW_KT, TY_KT, BU_KT, 0, 0, 0, 0, 0, "//", 1},
-    {"go",     KW_GO, TY_GO, BU_GO, 0, 0, 0, 1, 0, "//", 1},
-    {"rust",   KW_RS, TY_RS, BU_RS, 0, 0, 0, 0, 0, "//", 1},
-    {"sql",    KW_SQL, NULL, NULL, 0, 1, 0, 0, 0, NULL, 0},
-    {"bash",   KW_BASH, NULL, BU_BASH, 1, 0, 0, 0, 0, NULL, 0},
-    {"sh",     KW_BASH, NULL, BU_BASH, 1, 0, 0, 0, 0, NULL, 0},
-    {"json",   KW_JSON, NULL, NULL, 0, 0, 0, 0, 0, NULL, 0},
-    {"html",   NULL, NULL, NULL, 0, 0, 0, 0, 1, NULL, 0},
-    {"xml",    NULL, NULL, NULL, 0, 0, 0, 0, 1, NULL, 0},
-    {"css",    NULL, NULL, NULL, 0, 0, 0, 0, 0, NULL, 1},
+    {"c",      KW_C, TY_C, BU_C, 0, 0, 1, 0, 0, 0, "//", 1},
+    {"cpp",    KW_CPP, TY_CPP, BU_C, 0, 0, 1, 0, 0, 0, "//", 1},
+    {"c++",    KW_CPP, TY_CPP, BU_C, 0, 0, 1, 0, 0, 0, "//", 1},
+    {"python", KW_PY, NULL, BU_PY, 1, 0, 0, 0, 0, 0, NULL, 0},
+    {"py",     KW_PY, NULL, BU_PY, 1, 0, 0, 0, 0, 0, NULL, 0},
+    {"js",     KW_JS, NULL, BU_JS, 0, 0, 0, 1, 0, 0, "//", 1},
+    {"javascript", KW_JS, NULL, BU_JS, 0, 0, 0, 1, 0, 0, "//", 1},
+    {"ts",     KW_JS, TY_TS, BU_JS, 0, 0, 0, 1, 0, 0, "//", 1},
+    {"typescript", KW_JS, TY_TS, BU_JS, 0, 0, 0, 1, 0, 0, "//", 1},
+    {"java",   KW_JAVA, TY_JAVA, NULL, 0, 0, 0, 0, 0, 0, "//", 1},
+    {"kotlin", KW_KT, TY_KT, BU_KT, 0, 0, 0, 0, 0, 0, "//", 1},
+    {"go",     KW_GO, TY_GO, BU_GO, 0, 0, 0, 1, 0, 0, "//", 1},
+    {"rust",   KW_RS, TY_RS, BU_RS, 0, 0, 0, 0, 0, 0, "//", 1},
+    {"sql",    KW_SQL, NULL, NULL, 0, 1, 0, 0, 0, 0, NULL, 0},
+    {"bash",   KW_BASH, NULL, BU_BASH, 1, 0, 0, 0, 0, 0, NULL, 0},
+    {"sh",     KW_BASH, NULL, BU_BASH, 1, 0, 0, 0, 0, 0, NULL, 0},
+    {"json",   KW_JSON, NULL, NULL, 0, 0, 0, 0, 0, 0, NULL, 0},
+    {"html",   NULL, NULL, NULL, 0, 0, 0, 0, 1, 0, NULL, 0},
+    {"xml",    NULL, NULL, NULL, 0, 0, 0, 0, 1, 0, NULL, 0},
+    {"css",    NULL, NULL, NULL, 0, 0, 0, 0, 0, 1, NULL, 1},
 };
 
 size_t rikka_hl_lang_count(void) { return sizeof(LANGS) / sizeof(LANGS[0]); }
@@ -320,7 +321,7 @@ size_t rikka_hl_tokenize(const char *lang, const char *code, size_t len,
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { i++; continue; }
 
         if (cfg->html) { lex_html(code, len, &i, out, cap, &n); continue; }
-        if (cfg->name[0] == 'c' && cfg->name[1] == 's' && cfg->name[2] == 's') {
+        if (cfg->is_css) {
             lex_css(code, len, &i, out, cap, &n);
             continue;
         }

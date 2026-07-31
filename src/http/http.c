@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <strings.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -490,7 +491,7 @@ char *rhttp_request_sync(const char *url, const char *const *headers,
     if (status) *status = resp.status;
     if (out_len) *out_len = out.len;
     if (!out.data) { /* 空响应：返回可 free 的空串 */
-        out.data = (char *)malloc(1);
+        out.data = (uint8_t *)malloc(1);
         if (out.data) out.data[0] = '\0';
     }
     return (char *)out.data; /* 调用方负责 free（buf.data 是 malloc 的） */

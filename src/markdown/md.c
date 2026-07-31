@@ -9,6 +9,7 @@
 static void inline_append(RikkaMdBlock *b, const char *text, size_t start, size_t len,
                           RikkaInlineType t, const char *href, size_t href_len,
                           const char *alt, size_t alt_len) {
+    (void)text;
     if (len == 0 && t == RIKKA_INLINE_TEXT) return;
     if (b->inline_count == b->inline_cap) {
         size_t nc = b->inline_cap ? b->inline_cap * 2 : 8;

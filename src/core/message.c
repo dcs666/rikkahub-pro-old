@@ -79,13 +79,16 @@ void rstream_append_reasoning(RikkaStream *s, const char *data, size_t len) {
 
 void rstream_freeze(RikkaStream *s) {
     if (!s->active) return;
-    /* 空文本/reasoning 不需要 part：若最后 part 是空的 text，移除 */
-    if (s->msg->part_count > 0) {
-        RikkaPart *last = &s->msg->parts[s->msg->part_count - 1];
-        if ((last->type == RIKKA_PART_TEXT || last->type == RIKKA_PART_REASONING) && last->len == 0) {
-            s->msg->part_count--;
-        }
+    /* 空文本/reasoning 不需要 part：清理所有空 part（可能 text/reasoning 交替） */
+    size_t w = 0;
+    for (size_t i = 0; i < s->msg->part_count; i++) {
+        RikkaPart *p = &s->msg->parts[i];
+        if ((p->type == RIKKA_PART_TEXT || p->type == RIKKA_PART_REASONING) && p->len == 0)
+            continue;
+        if (w != i) s->msg->parts[w] = *p;
+        w++;
     }
+    s->msg->part_count = w;
     /* 转移缓冲所有权给消息（冻结后消息持有 buf，数据指针保持有效） */
     if (s->text_buf.cap > 0 && s->msg->part_count > 0) {
         s->msg->owned_buf = &s->text_buf;

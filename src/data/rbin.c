@@ -15,10 +15,6 @@
 /* ---------- 小端读写 ---------- */
 
 static void wr_u8(Buf *b, uint8_t v) { buf_append_byte(b, v); }
-static void wr_u16(Buf *b, uint16_t v) {
-    uint8_t t[2] = {(uint8_t)(v & 0xff), (uint8_t)(v >> 8)};
-    buf_append(b, t, 2);
-}
 static void wr_u32(Buf *b, uint32_t v) {
     uint8_t t[4] = {(uint8_t)(v & 0xff), (uint8_t)((v >> 8) & 0xff),
                     (uint8_t)((v >> 16) & 0xff), (uint8_t)((v >> 24) & 0xff)};
@@ -44,12 +40,6 @@ typedef struct {
 static uint8_t rd_u8(Rd *r) {
     if (r->off + 1 > r->len) { r->err = 1; return 0; }
     return r->p[r->off++];
-}
-static uint16_t rd_u16(Rd *r) {
-    if (r->off + 2 > r->len) { r->err = 1; return 0; }
-    uint16_t v = (uint16_t)(r->p[r->off] | (r->p[r->off + 1] << 8));
-    r->off += 2;
-    return v;
 }
 static uint32_t rd_u32(Rd *r) {
     if (r->off + 4 > r->len) { r->err = 1; return 0; }
@@ -78,6 +68,7 @@ static const char *rd_bytes(Rd *r, size_t *n) {
 
 static void wr_part(Buf *b, const RikkaPart *p) {
     wr_u8(b, (uint8_t)p->type);
+    if (p->len > 0xFFFFFFFFu) return; /* 超长截断防御（>4GB part 不合法） */
     wr_bytes(b, p->data, p->len);
     wr_u8(b, p->tool_name ? 1 : 0);
     if (p->tool_name) wr_bytes(b, p->tool_name, strlen(p->tool_name));

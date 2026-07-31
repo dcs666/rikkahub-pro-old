@@ -37,7 +37,7 @@ static void text_of(const RikkaStream *s, char *out, size_t cap, int reasoning) 
 
 TEST(build_openai) {
     Arena *a = arena_create(0);
-    RikkaMessage *msgs[4];
+    const RikkaMessage *msgs[4];
     msgs[0] = mk_msg(a, RIKKA_ROLE_SYSTEM, "sys");
     msgs[1] = mk_msg(a, RIKKA_ROLE_USER, "hi");
     /* assistant + tool_call */
@@ -96,7 +96,7 @@ TEST(build_openai) {
 
 TEST(build_claude) {
     Arena *a = arena_create(0);
-    RikkaMessage *msgs[3];
+    const RikkaMessage *msgs[3];
     msgs[0] = mk_msg(a, RIKKA_ROLE_SYSTEM, "be concise");
     msgs[1] = mk_msg(a, RIKKA_ROLE_USER, "hello");
     RikkaMessage *asst = rmsg_new(a, RIKKA_ROLE_ASSISTANT);
@@ -144,7 +144,7 @@ TEST(build_claude) {
 
 TEST(build_google) {
     Arena *a = arena_create(0);
-    RikkaMessage *msgs[2];
+    const RikkaMessage *msgs[2];
     msgs[0] = mk_msg(a, RIKKA_ROLE_SYSTEM, "sys");
     msgs[1] = mk_msg(a, RIKKA_ROLE_USER, "q?");
 
@@ -182,7 +182,7 @@ static void run_stream_test(RikkaProviderId id, const char *mock_path,
     RikkaProviderCfg cfg = {id, base, "test-key", "mock-model", 100, 0};
 
     Arena *a = arena_create(0);
-    RikkaMessage *msgs[1];
+    const RikkaMessage *msgs[1];
     msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hello");
     RikkaStream out;
     rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
