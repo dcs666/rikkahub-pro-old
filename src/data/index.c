@@ -182,13 +182,14 @@ typedef struct {
     RkIndex *ix;
     const TokNode *nodes[64];
     size_t ntok;
+    int missing; /* 存在未索引 token：AND 结果必空 */
 } QCtx;
 
 static void q_cb(void *vctx, const char *tok, size_t tlen) {
     QCtx *q = (QCtx *)vctx;
     uint64_t h = fnv1a(tok, tlen);
     TokNode *n = find_node(q->ix, tok, tlen, h);
-    if (!n) return; /* 未索引的 token：结果必空 */
+    if (!n) { q->missing = 1; return; } /* 未索引 token：结果必空 */
     if (q->ntok < 64) q->nodes[q->ntok] = n;
     q->ntok++;
 }
@@ -204,7 +205,9 @@ size_t rk_index_search(RkIndex *ix, const char *query, size_t len,
     QCtx q;
     q.ix = ix;
     q.ntok = 0;
+    q.missing = 0;
     rk_tokenize(query, len, q_cb, &q);
+    if (q.missing) return 0; /* 有未索引 token：无文档可命中 */
     if (q.ntok == 0 || q.ntok > 64) return 0;
     /* 选 posting 最短的做候选集 */
     const TokNode *best = q.nodes[0];

@@ -189,6 +189,9 @@ TEST(index_search) {
     /* 无命中 */
     n = rk_index_search(ix, "nonexistent", 11, out, 8);
     ASSERT_EQ_SIZE(0, n);
+    /* 混合：有未索引 token 的 AND 必须空 */
+    n = rk_index_search(ix, "quick nonexistent", 17, out, 8);
+    ASSERT_EQ_SIZE(0, n);
     rk_index_destroy(ix);
 }
 
