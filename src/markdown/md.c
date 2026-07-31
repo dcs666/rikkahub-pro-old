@@ -374,6 +374,9 @@ struct RikkaMdParser {
     size_t count, cap;
     size_t parse_from;      /* 重解析起点（文本偏移） */
     size_t open_block_off;  /* 未以换行结束的开放块起点；SIZE_MAX = 无 */
+    int in_fence;           /* 文本末尾在未闭合代码块内 */
+    size_t fence_line_off;  /* 开 fence 行起点 */
+    size_t fence_content_off; /* 代码块内容起点（开 fence 行后） */
 };
 
 /* 找最后块边界（从后向前）。
@@ -492,7 +495,27 @@ void rmd_destroy(RikkaMdParser *p) {
     free(p);
 }
 
+/* 统计文本 [start, end) 内的 fence 行数 */
+static int count_fence_lines(const char *t, size_t start, size_t end) {
+    int n = 0;
+    size_t i = start;
+    while (i < end) {
+        size_t le = i;
+        while (le < end && t[le] != '\n') le++;
+        size_t ll = le - i;
+        if (ll > 0 && t[le - 1] == '\r') ll--;
+        const char *l = t + i;
+        size_t j = 0;
+        while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
+        if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0))
+            n++;
+        i = le + 1;
+    }
+    return n;
+}
+
 void rmd_feed(RikkaMdParser *p, const char *text, size_t len) {
+    size_t old_len = p->text.len;
     uint8_t *old_data = p->text.data;
     buf_append(&p->text, text, len);
     /* Buf realloc 会移动 data：平移保留块的所有指针（text/inline href/alt） */
@@ -504,6 +527,18 @@ void rmd_feed(RikkaMdParser *p, const char *text, size_t len) {
                 if (p->blocks[i].inlines[j].href) p->blocks[i].inlines[j].href += delta;
                 if (p->blocks[i].inlines[j].alt) p->blocks[i].inlines[j].alt += delta;
             }
+        }
+    }
+    /* fence 快速路径：仍在代码块内时只追加尾部（不重解析整个块） */
+    if (p->in_fence && p->count > 0) {
+        int new_fences = count_fence_lines((const char *)p->text.data, old_len, p->text.len);
+        RikkaMdBlock *last = &p->blocks[p->count - 1];
+        if (new_fences % 2 == 0 && last->type == RIKKA_MD_CODE_BLOCK) {
+            /* 无闭合 fence：只更新内容区（text 指向新缓冲 + 内容偏移） */
+            last->text = (const char *)p->text.data + p->fence_content_off;
+            last->len = p->text.len - p->fence_content_off;
+            p->open_block_off = SIZE_MAX;
+            return;
         }
     }
     size_t b = find_boundary((const char *)p->text.data, p->text.len);
@@ -520,6 +555,36 @@ void rmd_feed(RikkaMdParser *p, const char *text, size_t len) {
             size_t end = text_off + last->len;
             if (end >= p->text.len || p->text.data[end] != '\n')
                 p->open_block_off = last->line_off;
+        }
+    }
+    /* 更新 fence 状态：末尾是否在未闭合代码块内 */
+    p->in_fence = 0;
+    {
+        const char *t = (const char *)p->text.data;
+        size_t i = 0, total = p->text.len;
+        int parity = 0;
+        size_t last_open_line = 0, last_open_content = 0;
+        while (i < total) {
+            size_t le = i;
+            while (le < total && t[le] != '\n') le++;
+            size_t ll = le - i;
+            if (ll > 0 && t[le - 1] == '\r') ll--;
+            const char *l = t + i;
+            size_t j = 0;
+            while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
+            if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
+                parity = !parity;
+                if (parity) {
+                    last_open_line = i;
+                    last_open_content = le + 1;
+                }
+            }
+            i = le + 1;
+        }
+        if (parity) {
+            p->in_fence = 1;
+            p->fence_line_off = last_open_line;
+            p->fence_content_off = last_open_content;
         }
     }
 }

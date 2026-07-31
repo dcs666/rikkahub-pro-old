@@ -81,8 +81,16 @@ int rbin_save(const RConversation *c, Buf *out) {
     if (!c || !out) return -1;
     size_t depth = 0;
     for (RNode *cur = c->active; cur && cur->parent; cur = cur->parent) depth++;
-    const RikkaMessage **msgs = (const RikkaMessage **)malloc((depth ? depth : 1) * sizeof(RikkaMessage *));
-    if (!msgs) return -1;
+    /* 线程局部复用缓冲（高频保存避免每次 malloc） */
+    static _Thread_local const RikkaMessage **msgs = NULL;
+    static _Thread_local size_t msgs_cap = 0;
+    if (depth > msgs_cap) {
+        const RikkaMessage **nm = (const RikkaMessage **)realloc((void *)msgs,
+                                          depth * sizeof(RikkaMessage *));
+        if (!nm) return -1;
+        msgs = nm;
+        msgs_cap = depth;
+    }
     size_t n = rconv_active_messages(c, msgs, depth);
     buf_reset(out);
     buf_append(out, RBIN_MAGIC, 8);
@@ -100,7 +108,6 @@ int rbin_save(const RConversation *c, Buf *out) {
             wr_u64(out, m->total_tokens);
         }
     }
-    free((void *)msgs);
     return 0;
 }
 

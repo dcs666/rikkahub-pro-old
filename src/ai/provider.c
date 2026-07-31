@@ -3,9 +3,20 @@
 #include "rikka/http/http.h"
 #include "rikka/http/sse.h"
 #include "rikka/json/json.h"
+#include "rikka/pipe/spsc.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+static void pm_msleep(long ms) {
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+}
 
 /* ================= 请求构建 ================= */
 
@@ -527,6 +538,59 @@ int rp_stream_pump(RikkaStreamSession *ss, int timeout_ms) {
     return 0;
 }
 
+/* ---------- S5 异步流水线：读线程 + 提取线程 ---------- */
+
+typedef struct {
+    RkSpsc q;
+    RikkaStreamSession *ss;
+    int timeout_ms;
+    int rc;
+} PipeIO;
+
+static void *pipe_reader(void *v) {
+    PipeIO *io = (PipeIO *)v;
+    RikkaStreamSession *ss = io->ss;
+    char buf[16384];
+    for (;;) {
+        ssize_t n = rhttp_read_body(ss->conn, buf, sizeof(buf), io->timeout_ms);
+        if (n < 0) { io->rc = -1; break; }
+        if (n == 0) break;
+        while (rk_spsc_push(&io->q, buf, (size_t)n) != 0) pm_msleep(1);
+    }
+    rk_spsc_close(&io->q);
+    return NULL;
+}
+
+static void *pipe_processor(void *v) {
+    PipeIO *io = (PipeIO *)v;
+    RikkaStreamSession *ss = io->ss;
+    char buf[16384];
+    for (;;) {
+        ssize_t n = rk_spsc_pop(&io->q, buf, sizeof(buf));
+        if (n == 0) break;
+        if (n < 0) { pm_msleep(1); continue; }
+        if (rsse_feed(ss->sse, buf, (size_t)n) != 0) { io->rc = -1; break; }
+    }
+    rsse_finish(ss->sse);
+    return NULL;
+}
+
+int rp_stream_pump_async(RikkaStreamSession *ss, int timeout_ms) {
+    if (!ss || !ss->conn) return -1;
+    PipeIO io;
+    io.ss = ss;
+    io.timeout_ms = timeout_ms;
+    io.rc = 0;
+    rk_spsc_init(&io.q, 1 << 20);
+    pthread_t rt, pt;
+    pthread_create(&rt, NULL, pipe_reader, &io);
+    pthread_create(&pt, NULL, pipe_processor, &io);
+    pthread_join(rt, NULL);
+    pthread_join(pt, NULL);
+    rk_spsc_destroy(&io.q);
+    return io.rc;
+}
+
 const RikkaSessionStats *rp_session_stats(const RikkaStreamSession *ss) {
     return ss ? &ss->stats : NULL;
 }
@@ -542,7 +606,7 @@ int rp_chat_stream(const RikkaProviderCfg *cfg,
     if (!ss) { buf_free(&body); return -1; }
     int status = 0;
     int rc = rp_stream_start(ss, NULL, (const char *)body.data, body.len, out, timeout_ms, &status);
-    if (rc == 0) rc = rp_stream_pump(ss, timeout_ms);
+    if (rc == 0) rc = rp_stream_pump_async(ss, timeout_ms);
     if (stats_out && ss) *stats_out = *rp_session_stats(ss);
     buf_free(&body);
     rp_session_destroy(ss);

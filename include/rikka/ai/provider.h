@@ -69,6 +69,10 @@ int rp_stream_pump(RikkaStreamSession *ss, int timeout_ms);
 
 const RikkaSessionStats *rp_session_stats(const RikkaStreamSession *ss);
 
+/* 异步泵送（S5）：读线程(rhttp_read_body→SPSC) + 提取线程(SPSC→SSE→累积) 并行。
+ * 与 rp_stream_pump 语义相同，但读/解析在不同线程（吞吐=阶段并行）。 */
+int rp_stream_pump_async(RikkaStreamSession *ss, int timeout_ms);
+
 /* 便捷：全流程（构建 + 流式 + 累积）。返回 0 成功 */
 int rp_chat_stream(const RikkaProviderCfg *cfg,
                    const RikkaMessage *const *msgs, size_t n,
