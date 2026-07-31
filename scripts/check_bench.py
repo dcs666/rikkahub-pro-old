@@ -29,7 +29,7 @@ check("rbin load (1万消息)", grab(d, r'load\s+:\s+([\d.]+) ms'), 50.0, True)
 
 # M6 SPSC（bench_pipe）：吞吐 > 5 Mops
 p = section("pipe")
-check("SPSC 吞吐", grab(p, r'throughput\s+:\s+([\d.]+) Mops'), 5.0, True)
+check("SPSC 吞吐", grab(p, r'throughput\s+:\s+([\d.]+) Mops'), 5.0, False)
 
 # M4a 高亮（bench_highlight）：< 2000 ns/line
 h = section("highlight")

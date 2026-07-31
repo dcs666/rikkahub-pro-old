@@ -21,7 +21,13 @@ all: $(OBJ)
 build:
 	mkdir -p build
 
-$(OBJ): %.o: %.c
+# CFLAGS/CPPFLAGS 签名：命令行传不同编译选项时强制重编译（防 .o 污染）
+CFLAGS_FILE := .build-flags
+.PHONY: FORCE
+$(CFLAGS_FILE): FORCE
+	@tmp="$(CFLAGS) $(CPPFLAGS)"; if [ "$$(cat $@ 2>/dev/null)" != "$$tmp" ]; then echo "$$tmp" > $@; fi
+
+$(OBJ): %.o: %.c $(CFLAGS_FILE)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # 测试：所有 *_test.c 编译为独立可执行，主文件链接运行
@@ -61,8 +67,9 @@ tsan:
 	@make test CFLAGS="-O1 -g -fsanitize=thread -Wall -Wextra -Wpedantic -std=c11" LDFLAGS="$(LDFLAGS) -fsanitize=thread"
 
 check-bench:
+	@make clean >/dev/null 2>&1
 	@make bench 2>&1 | tee /tmp/rikka_bench.log
 	@python3 scripts/check_bench.py /tmp/rikka_bench.log
 
 clean:
-	rm -rf build $(OBJ) $(TEST_OBJ) $(OBJ:.o=.d) $(TEST_OBJ:.o=.d)
+	rm -rf build $(OBJ) $(TEST_OBJ) $(OBJ:.o=.d) $(TEST_OBJ:.o=.d) $(CFLAGS_FILE)
