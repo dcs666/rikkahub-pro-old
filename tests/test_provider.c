@@ -226,6 +226,35 @@ TEST(stream_google) {
     run_stream_test(RIKKA_PROVIDER_GOOGLE, "/google", "Google answer", NULL);
 }
 
+TEST(stream_bad_sse_no_deadlock) {
+    /* 回归: 畸形 SSE（超长行）触发解析错误时, pump_async 不得死锁 */
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0};
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaStream out;
+    rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+    RikkaStreamSession *ss = rp_session_create(&cfg);
+    ASSERT_NOT_NULL(ss);
+    Buf body;
+    buf_init(&body);
+    rp_build_request(&cfg, msgs, 1, 1, &body);
+    int status = 0;
+    ASSERT_EQ_INT(0, rp_stream_start(ss, "/sse_bad", (const char *)body.data, body.len, &out, 5000, &status));
+    ASSERT_EQ_INT(200, status);
+    /* 必须返回（-1 解析错误），不得死锁（超时会暴露） */
+    int rc = rp_stream_pump_async(ss, 3000);
+    ASSERT_EQ_INT(-1, rc);
+    rstream_destroy(&out);
+    buf_free(&body);
+    rp_session_destroy(ss);
+    arena_destroy(a);
+    stop_mock_server();
+}
+
 int run_provider_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(provider, build_openai),
@@ -234,6 +263,7 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, stream_openai),
         RIKKA_TEST_REGISTER(provider, stream_claude),
         RIKKA_TEST_REGISTER(provider, stream_google),
+        RIKKA_TEST_REGISTER(provider, stream_bad_sse_no_deadlock),
     };
     return run_suite("provider", tests, sizeof(tests) / sizeof(tests[0]));
 }

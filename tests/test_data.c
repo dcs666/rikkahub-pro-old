@@ -52,6 +52,7 @@ TEST(rbin_roundtrip) {
     ASSERT_EQ_SIZE(11, msgs[2]->parts[0].len);
 
     buf_free(&bin);
+    rconv_destroy(&c);
     arena_destroy(a);
     arena_destroy(a2);
 }
@@ -89,6 +90,7 @@ TEST(rbin_file_snapshot) {
     ASSERT_EQ_SIZE(100, n);
     ASSERT(memcmp(msgs[99]->parts[0].data, "message number 99", 17) == 0);
     rbin_munmap(data, len);
+    rconv_destroy(&c);
     arena_destroy(a);
     arena_destroy(a2);
     unlink(path);

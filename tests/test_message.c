@@ -108,6 +108,7 @@ TEST(cow_fork_shared_prefix) {
     ASSERT(c.active == n2);
     ASSERT(n2->active == 1);
     ASSERT(n3->active == 0);
+    rconv_destroy(&c);
     arena_destroy(a);
 }
 
@@ -125,6 +126,7 @@ TEST(active_messages_chain) {
     size_t n = rconv_active_messages(&c, out, 16);
     ASSERT_EQ_SIZE(5, n);
     for (size_t i = 0; i < n; i++) ASSERT_NOT_NULL(out[i]);
+    rconv_destroy(&c);
     arena_destroy(a);
 }
 

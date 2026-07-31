@@ -198,6 +198,22 @@ static void pool_put(RHttpConn *c, const char *host, uint16_t port, int tls) {
     pthread_mutex_lock(&g_pool_mutex);
     e->next = g_pool;
     g_pool = e;
+    /* 池上限：超过 32 条淘汰链尾（最旧） */
+    {
+        int n = 0;
+        RkPoolConn *prev = NULL, *last = g_pool;
+        for (RkPoolConn *it = g_pool; it; it = it->next) {
+            n++;
+            if (!it->next) break;
+            prev = it;
+            last = it->next;
+        }
+        if (n > 32 && prev) {
+            prev->next = NULL;
+            rhttp_close(last->conn);
+            free(last);
+        }
+    }
     pthread_mutex_unlock(&g_pool_mutex);
 }
 

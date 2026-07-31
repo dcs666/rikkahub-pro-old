@@ -177,6 +177,25 @@ RNode *rconv_regenerate(RConversation *c, RNode *at) {
     return n;
 }
 
+static void rnode_free_tree(RNode *n) {
+    if (!n) return;
+    for (size_t i = 0; i < n->child_count; i++) rnode_free_tree(n->children[i]);
+    if (n->stream) {
+        rstream_destroy(n->stream);
+        free(n->stream);
+    }
+    free(n->children);
+    free(n);
+}
+
+void rconv_destroy(RConversation *c) {
+    if (!c) return;
+    if (c->root) rnode_free_tree(c->root);
+    c->root = NULL;
+    c->active = NULL;
+    c->node_count = 0;
+}
+
 void rconv_set_active(RConversation *c, RNode *n) {
     if (!n) return;
     c->active->active = 0;

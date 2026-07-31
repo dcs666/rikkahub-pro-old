@@ -68,6 +68,7 @@ int main(void) {
     printf("  index build : %6.2f ms  (%zu tokens)\n", idx_ms, rk_index_token_count(ix));
     printf("  search      : %zu hits\n", hn);
     buf_free(&bin);
+    rconv_destroy(&c);
     arena_destroy(a);
     arena_destroy(a2);
     rk_index_destroy(ix);

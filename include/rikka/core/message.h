@@ -102,6 +102,8 @@ typedef struct {
 } RConversation;
 
 void rconv_init(RConversation *c, Arena *arena);
+/* 释放会话节点树（heap RNode/children/stream）；消息数据在 arena 由调用方释放 */
+void rconv_destroy(RConversation *c);
 RNode *rconv_append(RConversation *c, RikkaMessage *frozen); /* 追加到 active 之后并激活 */
 RNode *rconv_regenerate(RConversation *c, RNode *at);        /* 从 at fork 新分支并激活（返回活动节点） */
 void rconv_set_active(RConversation *c, RNode *n);           /* 切换激活分支 */

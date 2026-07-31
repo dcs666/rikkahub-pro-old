@@ -545,7 +545,8 @@ typedef struct {
     RkSpsc q;
     RikkaStreamSession *ss;
     int timeout_ms;
-    int rc;
+    int reader_rc;
+    int proc_rc;
 } PipeIO;
 
 static void *pipe_reader(void *v) {
@@ -554,7 +555,7 @@ static void *pipe_reader(void *v) {
     char buf[16384];
     for (;;) {
         ssize_t n = rhttp_read_body(ss->conn, buf, sizeof(buf), io->timeout_ms);
-        if (n < 0) { io->rc = -1; break; }
+        if (n < 0) { io->reader_rc = -1; break; }
         if (n == 0) break;
         while (rk_spsc_push(&io->q, buf, (size_t)n) != 0) pm_msleep(1);
     }
@@ -570,9 +571,11 @@ static void *pipe_processor(void *v) {
         ssize_t n = rk_spsc_pop(&io->q, buf, sizeof(buf));
         if (n == 0) break;
         if (n < 0) { pm_msleep(1); continue; }
-        if (rsse_feed(ss->sse, buf, (size_t)n) != 0) { io->rc = -1; break; }
+        /* 出错后继续消费（排空队列让 reader 完成），不再喂解析器 */
+        if (io->proc_rc == 0 && rsse_feed(ss->sse, buf, (size_t)n) != 0)
+            io->proc_rc = -1;
     }
-    rsse_finish(ss->sse);
+    if (io->proc_rc == 0) rsse_finish(ss->sse);
     return NULL;
 }
 
@@ -581,7 +584,8 @@ int rp_stream_pump_async(RikkaStreamSession *ss, int timeout_ms) {
     PipeIO io;
     io.ss = ss;
     io.timeout_ms = timeout_ms;
-    io.rc = 0;
+    io.reader_rc = 0;
+    io.proc_rc = 0;
     rk_spsc_init(&io.q, 1 << 20);
     pthread_t rt, pt;
     pthread_create(&rt, NULL, pipe_reader, &io);
@@ -589,7 +593,7 @@ int rp_stream_pump_async(RikkaStreamSession *ss, int timeout_ms) {
     pthread_join(rt, NULL);
     pthread_join(pt, NULL);
     rk_spsc_destroy(&io.q);
-    return io.rc;
+    return io.reader_rc != 0 ? io.reader_rc : io.proc_rc;
 }
 
 const RikkaSessionStats *rp_session_stats(const RikkaStreamSession *ss) {
