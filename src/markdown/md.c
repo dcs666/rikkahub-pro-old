@@ -377,6 +377,7 @@ struct RikkaMdParser {
     int in_fence;           /* 文本末尾在未闭合代码块内 */
     size_t fence_line_off;  /* 开 fence 行起点 */
     size_t fence_content_off; /* 代码块内容起点（开 fence 行后） */
+    size_t fence_scan_off;  /* fence 增量扫描位置（上次完整行边界） */
 };
 
 /* 找最后块边界（从后向前）。
@@ -385,38 +386,18 @@ struct RikkaMdParser {
  * - 空行后 / 结构行（heading/quote/list/hr）起点
  * - 普通文本行 → 同一段落，继续向前
  */
-static size_t find_boundary(const char *t, size_t n) {
-    /* 预扫 fence 行 */
-    size_t fences[128];
-    int nf = 0;
-    {
-        size_t i = 0;
-        while (i < n) {
-            size_t le = i;
-            while (le < n && t[le] != '\n') le++;
-            size_t ll = le - i;
-            if (ll > 0 && t[le - 1] == '\r') ll--;
-            const char *l = t + i;
-            size_t j = 0;
-            while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
-            if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
-                if (nf < 128) fences[nf] = i;
-                nf++;
-            }
-            i = le + 1;
-        }
-    }
-    if (nf > 128) return 0; /* fence 行超多：回退全量重解析（配对信息不全） */
-    if (nf % 2 == 1) return fences[nf - 1]; /* 未闭合：从开 fence 重解析 */
-
-    /* 从后向前找块边界 */
+/* 增量边界查找：用 in_fence 状态替代全文 fence 扫描；从 new_len 向前到 parse_from */
+static size_t find_boundary_inc(RikkaMdParser *p, size_t n) {
+    const char *t = (const char *)p->text.data;
+    if (p->in_fence) return p->fence_line_off; /* 未闭合：从开 fence 重解析 */
+    size_t stop = p->parse_from; /* 只扫到上次重解析起点 */
+    /* 从后向前找块边界（到 stop 为止） */
     size_t line_start = n;
-    while (line_start > 0) {
+    while (line_start > stop) {
         size_t prev_nl = line_start;
-        /* line_start 若已在行首（前一个字符是 \n），先跳过该行的 \n 找更早的 */
-        if (prev_nl > 0 && t[prev_nl - 1] == '\n') prev_nl--;
-        while (prev_nl > 0 && t[prev_nl - 1] != '\n') prev_nl--;
-        if (prev_nl == 0) return 0;
+        if (prev_nl > stop && t[prev_nl - 1] == '\n') prev_nl--;
+        while (prev_nl > stop && t[prev_nl - 1] != '\n') prev_nl--;
+        if (prev_nl <= stop) return stop;
         size_t ls = prev_nl;
         size_t le = line_start;
         if (le > ls && t[le - 1] == '\n') le--;
@@ -438,15 +419,12 @@ static size_t find_boundary(const char *t, size_t n) {
                 if (l[k] != '-' && l[k] != ' ') { all_dash = 0; break; }
             if (all_dash) return ls;
         }
-        if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
-            /* 闭合 fence：返回配对的开 fence */
-            for (int k = 0; k < nf; k++)
-                if (fences[k] == ls) return k > 0 ? fences[k - 1] : 0;
-            return ls;
-        }
-        line_start = prev_nl; /* 普通文本：同一段落 */
+        /* 代码块的 ``` 行：返回开 fence 行（代码块起点，fence_line_off 记录） */
+        if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0))
+            return p->fence_line_off;
+        line_start = prev_nl;
     }
-    return 0;
+    return stop;
 }
 
 static void rebuild_blocks(RikkaMdParser *p) {
@@ -532,24 +510,80 @@ void rmd_feed(RikkaMdParser *p, const char *text, size_t len) {
             }
         }
     }
+    /* 增量 fence 状态：只扫新段 [fence_scan_off, 最后完整行边界) */
+    {
+        const char *t = (const char *)p->text.data;
+        size_t scan_start = p->fence_scan_off;
+        size_t scan_end = p->text.len;
+        while (scan_end > scan_start && t[scan_end - 1] != '\n') scan_end--;
+        size_t i = scan_start;
+        while (i < scan_end) {
+            size_t le = i;
+            while (le < scan_end && t[le] != '\n') le++;
+            size_t ll = le - i;
+            if (ll > 0 && t[le - 1] == '\r') ll--;
+            const char *l = t + i;
+            size_t j = 0;
+            while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
+            if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
+                p->in_fence = !p->in_fence;
+                if (p->in_fence) {
+                    p->fence_line_off = i;
+                    p->fence_content_off = le + 1;
+                }
+            }
+            i = le + 1;
+        }
+        p->fence_scan_off = scan_end;
+    }
     /* fence 快速路径：仍在代码块内时只追加尾部（不重解析整个块） */
     if (p->in_fence && p->count > 0) {
         int new_fences = count_fence_lines((const char *)p->text.data, old_len, p->text.len);
         RikkaMdBlock *last = &p->blocks[p->count - 1];
-        /* 快速路径仅当新段无任何 fence 行（闭合或重开都必须走 rebuild 处理） */
         if (new_fences == 0 && last->type == RIKKA_MD_CODE_BLOCK) {
-            /* 无闭合 fence：只更新内容区（text 指向新缓冲 + 内容偏移） */
             last->text = (const char *)p->text.data + p->fence_content_off;
             last->len = p->text.len - p->fence_content_off;
             p->open_block_off = SIZE_MAX;
             return;
         }
     }
-    size_t b = find_boundary((const char *)p->text.data, p->text.len);
+    /* 段落快速路径：新段无空行且最后块是段落 → 只更新 len（inline 延迟到空行时解析） */
+    if (!p->in_fence && p->count > 0) {
+        RikkaMdBlock *last = &p->blocks[p->count - 1];
+        if (last->type == RIKKA_MD_PARAGRAPH) {
+            const char *t = (const char *)p->text.data;
+            int has_blank = 0;
+            for (size_t i = old_len; i + 1 < p->text.len; i++) {
+                if (t[i] == '\n' && t[i + 1] == '\n') { has_blank = 1; break; }
+            }
+            if (!has_blank) {
+                last->len = p->text.len - last->line_off;
+                p->open_block_off = last->line_off;
+                p->parse_from = last->line_off; /* 回退：段落跨 feed 边界时从起点重解析 */
+                return;
+            }
+        }
+    }
+    size_t b = find_boundary_inc(p, p->text.len);
     if (p->open_block_off != SIZE_MAX && p->open_block_off < b) b = p->open_block_off;
     if (b < p->parse_from) b = p->parse_from;
     p->parse_from = b;
     rebuild_blocks(p);
+    /* 前进到"最后完整块的 end"：未完成块（heading/段落无 \n 结尾）保持起点 */
+    {
+        const char *t = (const char *)p->text.data;
+        size_t last_complete = p->parse_from;
+        for (size_t i = 0; i < p->count; i++) {
+            RikkaMdBlock *blk = &p->blocks[i];
+            size_t blk_end = (size_t)(blk->text - t) + blk->len;
+            /* 代码块未完成（in_fence）时不前进；段落以 \n 结尾才完整 */
+            if ((blk->type == RIKKA_MD_CODE_BLOCK && !p->in_fence) ||
+                (blk->type != RIKKA_MD_CODE_BLOCK && blk_end < p->text.len && t[blk_end] == '\n')) {
+                last_complete = blk_end;
+            }
+        }
+        p->parse_from = last_complete;
+    }
     /* 更新开放块状态：最后块未以换行结束时记录起点 */
     p->open_block_off = SIZE_MAX;
     if (p->count > 0) {
@@ -559,36 +593,6 @@ void rmd_feed(RikkaMdParser *p, const char *text, size_t len) {
             size_t end = text_off + last->len;
             if (end >= p->text.len || p->text.data[end] != '\n')
                 p->open_block_off = last->line_off;
-        }
-    }
-    /* 更新 fence 状态：末尾是否在未闭合代码块内 */
-    p->in_fence = 0;
-    {
-        const char *t = (const char *)p->text.data;
-        size_t i = 0, total = p->text.len;
-        int parity = 0;
-        size_t last_open_line = 0, last_open_content = 0;
-        while (i < total) {
-            size_t le = i;
-            while (le < total && t[le] != '\n') le++;
-            size_t ll = le - i;
-            if (ll > 0 && t[le - 1] == '\r') ll--;
-            const char *l = t + i;
-            size_t j = 0;
-            while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
-            if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
-                parity = !parity;
-                if (parity) {
-                    last_open_line = i;
-                    last_open_content = le + 1;
-                }
-            }
-            i = le + 1;
-        }
-        if (parity) {
-            p->in_fence = 1;
-            p->fence_line_off = last_open_line;
-            p->fence_content_off = last_open_content;
         }
     }
 }
