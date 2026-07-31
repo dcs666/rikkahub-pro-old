@@ -1,0 +1,65 @@
+        -:    0:Source:src/core/buffer.c
+        -:    0:Graph:src/core/buffer.gcno
+        -:    0:Data:src/core/buffer.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/core/buffer.h"
+        -:    2:#include <stdlib.h>
+        -:    3:#include <string.h>
+        -:    4:
+      246:    5:static size_t grow_cap(size_t need) {
+      246:    6:    size_t cap = 64;
+      588:    7:    while (cap < need) {
+     342*:    8:        if (cap > (SIZE_MAX / 2)) return need; /* 防倍增溢出死循环 */
+      342:    9:        cap *= 2;
+        -:   10:    }
+      246:   11:    return cap;
+        -:   12:}
+        -:   13:
+      174:   14:void buf_init(Buf *b) {
+      174:   15:    b->data = NULL;
+      174:   16:    b->len  = 0;
+      174:   17:    b->cap  = 0;
+      174:   18:}
+        -:   19:
+   104463:   20:void buf_reserve(Buf *b, size_t extra) {
+   104463:   21:    size_t need = b->len + extra;
+   104463:   22:    if (need <= b->cap) return;
+      246:   23:    size_t nc = grow_cap(need);
+      246:   24:    uint8_t *nd = (uint8_t *)realloc(b->data, nc);
+      246:   25:    if (!nd) { /* 保持原状，调用方需处理 */
+    #####:   26:        return;
+        -:   27:    }
+      246:   28:    b->data = nd;
+      246:   29:    b->cap  = nc;
+        -:   30:}
+        -:   31:
+   101867:   32:void buf_append(Buf *b, const void *src, size_t n) {
+   101867:   33:    if (n == 0) return;
+   101866:   34:    buf_reserve(b, n);
+   101866:   35:    memcpy(b->data + b->len, src, n);
+   101866:   36:    b->len += n;
+        -:   37:}
+        -:   38:
+      198:   39:void buf_append_str(Buf *b, const char *s) {
+      198:   40:    buf_append(b, s, strlen(s));
+      198:   41:}
+        -:   42:
+     2597:   43:void buf_append_byte(Buf *b, uint8_t c) {
+     2597:   44:    buf_reserve(b, 1);
+     2597:   45:    b->data[b->len++] = c;
+     2597:   46:}
+        -:   47:
+      551:   48:void buf_reset(Buf *b) {
+      551:   49:    b->len = 0;
+      551:   50:}
+        -:   51:
+      160:   52:void buf_free(Buf *b) {
+      160:   53:    free(b->data);
+      160:   54:    b->data = NULL;
+      160:   55:    b->len = b->cap = 0;
+      160:   56:}
+        -:   57:
+        2:   58:int buf_equal(const Buf *a, const Buf *b) {
+        2:   59:    if (a->len != b->len) return 0;
+        1:   60:    return memcmp(a->data, b->data, a->len) == 0;
+        -:   61:}

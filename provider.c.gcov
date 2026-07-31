@@ -1,0 +1,637 @@
+        -:    0:Source:src/ai/provider.c
+        -:    0:Graph:src/ai/provider.gcno
+        -:    0:Data:src/ai/provider.gcda
+        -:    0:Runs:1
+        -:    1:#define _POSIX_C_SOURCE 200809L
+        -:    2:#include "rikka/ai/provider.h"
+        -:    3:#include "rikka/http/http.h"
+        -:    4:#include "rikka/http/sse.h"
+        -:    5:#include "rikka/json/json.h"
+        -:    6:#include "rikka/pipe/spsc.h"
+        -:    7:#include <pthread.h>
+        -:    8:#include <stdio.h>
+        -:    9:#include <stdlib.h>
+        -:   10:#include <string.h>
+        -:   11:#include <time.h>
+        -:   12:#include <unistd.h>
+        -:   13:
+    #####:   14:static void pm_msleep(long ms) {
+        -:   15:    struct timespec ts;
+    #####:   16:    ts.tv_sec = ms / 1000;
+    #####:   17:    ts.tv_nsec = (ms % 1000) * 1000000L;
+    #####:   18:    nanosleep(&ts, NULL);
+    #####:   19:}
+        -:   20:
+        -:   21:/* ================= 请求构建 ================= */
+        -:   22:
+       34:   23:static void jstr(Buf *out, const char *s, size_t len) {
+        -:   24:    /* 转义字符串（复用 json 序列化器） */
+        -:   25:    RJsonOut o;
+       34:   26:    rjson_out_init(&o);
+       34:   27:    rjson_write_string(&o, s, len);
+       34:   28:    buf_append(out, o.buf, o.len);
+       34:   29:    rjson_out_free(&o);
+       34:   30:}
+        -:   31:
+       22:   32:static void jstrz(Buf *out, const char *s) { jstr(out, s, strlen(s)); }
+        -:   33:
+        1:   34:static void part_text(Buf *out, const RikkaPart *p) { jstr(out, p->data, p->len); }
+        -:   35:
+        -:   36:/* 消息的纯文本内容（若无 text part 返回 0） */
+        8:   37:static int msg_text(const RikkaMessage *m, const char **text, size_t *len) {
+       8*:   38:    for (size_t i = 0; i < m->part_count; i++) {
+        8:   39:        if (m->parts[i].type == RIKKA_PART_TEXT) {
+        8:   40:            *text = m->parts[i].data;
+        8:   41:            *len = m->parts[i].len;
+        8:   42:            return 1;
+        -:   43:        }
+        -:   44:    }
+    #####:   45:    return 0;
+        -:   46:}
+        -:   47:
+        -:   48:/* ---------- OpenAI ---------- */
+        -:   49:
+        6:   50:static void openai_msg(Buf *out, const RikkaMessage *m) {
+        6:   51:    buf_append_str(out, "{\"role\":");
+        6:   52:    switch (m->role) {
+        3:   53:        case RIKKA_ROLE_USER:      jstrz(out, "user"); break;
+        1:   54:        case RIKKA_ROLE_ASSISTANT: jstrz(out, "assistant"); break;
+        1:   55:        case RIKKA_ROLE_SYSTEM:    jstrz(out, "system"); break;
+        1:   56:        case RIKKA_ROLE_TOOL:      jstrz(out, "tool"); break;
+        -:   57:    }
+        6:   58:    if (m->role == RIKKA_ROLE_TOOL) {
+        -:   59:        /* tool 消息：{role, tool_call_id, content} */
+        1:   60:        const RikkaPart *tp = NULL;
+       1*:   61:        for (size_t i = 0; i < m->part_count; i++)
+        1:   62:            if (m->parts[i].type == RIKKA_PART_TOOL_RESULT) { tp = &m->parts[i]; break; }
+        1:   63:        if (tp) {
+        1:   64:            buf_append_str(out, ",\"tool_call_id\":");
+       1*:   65:            jstrz(out, tp->tool_id ? tp->tool_id : "");
+        1:   66:            buf_append_str(out, ",\"content\":");
+        1:   67:            part_text(out, tp);
+        -:   68:        } else {
+    #####:   69:            buf_append_str(out, ",\"tool_call_id\":\"\",\"content\":\"\"");
+        -:   70:        }
+        1:   71:        buf_append_str(out, "}");
+        1:   72:        return;
+        -:   73:    }
+        -:   74:    /* 检查 tool_calls */
+        5:   75:    int has_tc = 0;
+        9:   76:    for (size_t i = 0; i < m->part_count; i++)
+        5:   77:        if (m->parts[i].type == RIKKA_PART_TOOL_CALL) { has_tc = 1; break; }
+        5:   78:    if (has_tc) {
+        1:   79:        buf_append_str(out, ",\"content\":null,\"tool_calls\":[");
+        1:   80:        int first = 1;
+        2:   81:        for (size_t i = 0; i < m->part_count; i++) {
+       1*:   82:            if (m->parts[i].type != RIKKA_PART_TOOL_CALL) continue;
+        1:   83:            const RikkaPart *tc = &m->parts[i];
+       1*:   84:            if (!first) buf_append_str(out, ",");
+        1:   85:            first = 0;
+        1:   86:            buf_append_str(out, "{\"id\":");
+       1*:   87:            jstrz(out, tc->tool_id ? tc->tool_id : "");
+        1:   88:            buf_append_str(out, ",\"type\":\"function\",\"function\":{\"name\":");
+       1*:   89:            jstrz(out, tc->tool_name ? tc->tool_name : "");
+        1:   90:            buf_append_str(out, ",\"arguments\":");
+        -:   91:            /* arguments 是 JSON 字符串 */
+        1:   92:            jstr(out, tc->data, tc->len);
+        1:   93:            buf_append_str(out, "}}");
+        -:   94:        }
+        1:   95:        buf_append_str(out, "]}");
+        1:   96:        return;
+        -:   97:    }
+        -:   98:    /* 纯文本或 image blocks */
+        4:   99:    buf_append_str(out, ",\"content\":");
+        4:  100:    int has_image = 0;
+        8:  101:    for (size_t i = 0; i < m->part_count; i++)
+       4*:  102:        if (m->parts[i].type == RIKKA_PART_IMAGE) { has_image = 1; break; }
+        4:  103:    if (!has_image) {
+        -:  104:        const char *t; size_t tl;
+        4:  105:        if (msg_text(m, &t, &tl)) jstr(out, t, tl);
+    #####:  106:        else buf_append_str(out, "\"\"");
+        -:  107:    } else {
+    #####:  108:        buf_append_str(out, "[");
+    #####:  109:        int first = 1;
+    #####:  110:        for (size_t i = 0; i < m->part_count; i++) {
+    #####:  111:            const RikkaPart *p = &m->parts[i];
+    #####:  112:            if (p->type == RIKKA_PART_IMAGE) {
+    #####:  113:                if (!first) buf_append_str(out, ",");
+    #####:  114:                first = 0;
+    #####:  115:                buf_append_str(out, "{\"type\":\"image_url\",\"image_url\":{\"url\":");
+    #####:  116:                jstr(out, p->data, p->len);
+    #####:  117:                buf_append_str(out, "}}");
+    #####:  118:            } else if (p->type == RIKKA_PART_TEXT && p->len > 0) {
+    #####:  119:                if (!first) buf_append_str(out, ",");
+    #####:  120:                first = 0;
+    #####:  121:                buf_append_str(out, "{\"type\":\"text\",\"text\":");
+    #####:  122:                part_text(out, p);
+    #####:  123:                buf_append_str(out, "}");
+        -:  124:            }
+        -:  125:        }
+    #####:  126:        buf_append_str(out, "]");
+        -:  127:    }
+        4:  128:    buf_append_str(out, "}");
+        -:  129:}
+        -:  130:
+        -:  131:/* ---------- Claude ---------- */
+        -:  132:
+        3:  133:static void claude_content(Buf *out, const RikkaMessage *m) {
+        -:  134:    /* 单纯文本：字符串；否则 blocks */
+        3:  135:    int has_block = 0;
+        6:  136:    for (size_t i = 0; i < m->part_count; i++) {
+        3:  137:        RikkaPartType t = m->parts[i].type;
+        3:  138:        if (t == RIKKA_PART_IMAGE || t == RIKKA_PART_TOOL_CALL || t == RIKKA_PART_TOOL_RESULT) has_block = 1;
+        -:  139:    }
+        3:  140:    if (!has_block) {
+        -:  141:        const char *t; size_t tl;
+        2:  142:        if (msg_text(m, &t, &tl)) jstr(out, t, tl);
+    #####:  143:        else buf_append_str(out, "\"\"");
+        2:  144:        return;
+        -:  145:    }
+        1:  146:    buf_append_str(out, "[");
+        1:  147:    int first = 1;
+        2:  148:    for (size_t i = 0; i < m->part_count; i++) {
+        1:  149:        const RikkaPart *p = &m->parts[i];
+       1*:  150:        if (!first) buf_append_str(out, ",");
+        1:  151:        switch (p->type) {
+    #####:  152:            case RIKKA_PART_TEXT:
+    #####:  153:                if (p->len == 0) { first = first; continue; }
+    #####:  154:                buf_append_str(out, "{\"type\":\"text\",\"text\":");
+    #####:  155:                part_text(out, p);
+    #####:  156:                buf_append_str(out, "}");
+    #####:  157:                break;
+    #####:  158:            case RIKKA_PART_IMAGE:
+    #####:  159:                buf_append_str(out, "{\"type\":\"image\",\"source\":{\"type\":\"url\",\"url\":");
+    #####:  160:                jstr(out, p->data, p->len);
+    #####:  161:                buf_append_str(out, "}}");
+    #####:  162:                break;
+        1:  163:            case RIKKA_PART_TOOL_CALL:
+        1:  164:                buf_append_str(out, "{\"type\":\"tool_use\",\"id\":");
+       1*:  165:                jstrz(out, p->tool_id ? p->tool_id : "");
+        1:  166:                buf_append_str(out, ",\"name\":");
+       1*:  167:                jstrz(out, p->tool_name ? p->tool_name : "");
+        1:  168:                buf_append_str(out, ",\"input\":");
+        -:  169:                /* input 是对象：数据本身是 JSON 对象文本 */
+        1:  170:                if (p->len > 0) buf_append(out, p->data, p->len);
+    #####:  171:                else buf_append_str(out, "{}");
+        1:  172:                buf_append_str(out, "}");
+        1:  173:                break;
+    #####:  174:            case RIKKA_PART_TOOL_RESULT:
+    #####:  175:                buf_append_str(out, "{\"type\":\"tool_result\",\"tool_use_id\":");
+    #####:  176:                jstrz(out, p->tool_id ? p->tool_id : "");
+    #####:  177:                buf_append_str(out, ",\"content\":");
+    #####:  178:                part_text(out, p);
+    #####:  179:                buf_append_str(out, "}");
+    #####:  180:                break;
+    #####:  181:            default:
+    #####:  182:                break;
+        -:  183:        }
+        1:  184:        first = 0;
+        -:  185:    }
+        1:  186:    buf_append_str(out, "]");
+        -:  187:}
+        -:  188:
+        -:  189:/* ---------- Google ---------- */
+        -:  190:
+        2:  191:static void google_part(Buf *out, const RikkaPart *p) {
+        2:  192:    buf_append_str(out, "{\"text\":");
+        2:  193:    jstr(out, p->data, p->len);
+        2:  194:    buf_append_str(out, "}");
+        2:  195:}
+        -:  196:
+        2:  197:static void google_content(Buf *out, const RikkaMessage *m) {
+        2:  198:    buf_append_str(out, "{\"role\":");
+       2*:  199:    if (m->role == RIKKA_ROLE_ASSISTANT) jstrz(out, "model");
+        2:  200:    else jstrz(out, "user");
+        2:  201:    buf_append_str(out, ",\"parts\":[");
+        2:  202:    int first = 1;
+        4:  203:    for (size_t i = 0; i < m->part_count; i++) {
+       2*:  204:        if (m->parts[i].type != RIKKA_PART_TEXT) continue;
+       2*:  205:        if (!first) buf_append_str(out, ",");
+        2:  206:        google_part(out, &m->parts[i]);
+        2:  207:        first = 0;
+        -:  208:    }
+        2:  209:    buf_append_str(out, "]}");
+        2:  210:}
+        -:  211:
+        -:  212:/* ---------- 入口 ---------- */
+        -:  213:
+        8:  214:int rp_build_request(const RikkaProviderCfg *cfg,
+        -:  215:                     const RikkaMessage *const *msgs, size_t n,
+        -:  216:                     int stream, Buf *out) {
+       8*:  217:    if (!cfg || !out) return -1;
+        8:  218:    buf_reset(out);
+        8:  219:    switch (cfg->id) {
+        4:  220:    case RIKKA_PROVIDER_OPENAI: {
+        4:  221:        buf_append_str(out, "{\"model\":");
+       4*:  222:        jstrz(out, cfg->model ? cfg->model : "");
+        4:  223:        buf_append_str(out, ",\"stream\":");
+       4*:  224:        buf_append_str(out, stream ? "true" : "false");
+        4:  225:        if (cfg->max_tokens > 0) {
+        -:  226:            char tmp[64];
+        3:  227:            int k = snprintf(tmp, sizeof(tmp), ",\"max_tokens\":%d", cfg->max_tokens);
+        3:  228:            buf_append(out, tmp, (size_t)k);
+        -:  229:        }
+        4:  230:        buf_append_str(out, ",\"messages\":[");
+       10:  231:        for (size_t i = 0; i < n; i++) {
+        6:  232:            if (i) buf_append_str(out, ",");
+        6:  233:            openai_msg(out, msgs[i]);
+        -:  234:        }
+        4:  235:        buf_append_str(out, "]}");
+        4:  236:        break;
+        -:  237:    }
+        2:  238:    case RIKKA_PROVIDER_CLAUDE: {
+        -:  239:        /* system 提取 */
+        2:  240:        const char *sys = NULL; size_t sys_len = 0;
+        3:  241:        for (size_t i = 0; i < n; i++) {
+        2:  242:            if (msgs[i]->role == RIKKA_ROLE_SYSTEM && msg_text(msgs[i], &sys, &sys_len)) break;
+        -:  243:        }
+        2:  244:        buf_append_str(out, "{\"model\":");
+       2*:  245:        jstrz(out, cfg->model ? cfg->model : "");
+        2:  246:        buf_append_str(out, ",\"max_tokens\":");
+        -:  247:        char tmp[32];
+       2*:  248:        int k = snprintf(tmp, sizeof(tmp), "%d", cfg->max_tokens > 0 ? cfg->max_tokens : 4096);
+        2:  249:        buf_append(out, tmp, (size_t)k);
+        2:  250:        buf_append_str(out, ",\"stream\":");
+       2*:  251:        buf_append_str(out, stream ? "true" : "false");
+        2:  252:        if (sys) {
+        1:  253:            buf_append_str(out, ",\"system\":[{\"type\":\"text\",\"text\":");
+        1:  254:            jstr(out, sys, sys_len);
+        1:  255:            if (cfg->enable_cache_control)
+    #####:  256:                buf_append_str(out, ",\"cache_control\":{\"type\":\"ephemeral\"}");
+        1:  257:            buf_append_str(out, "}]");
+        -:  258:        }
+        2:  259:        buf_append_str(out, ",\"messages\":[");
+        2:  260:        int first = 1;
+        6:  261:        for (size_t i = 0; i < n; i++) {
+        4:  262:            if (msgs[i]->role == RIKKA_ROLE_SYSTEM) continue;
+        3:  263:            if (!first) buf_append_str(out, ",");
+        3:  264:            first = 0;
+        3:  265:            buf_append_str(out, "{\"role\":");
+        3:  266:            jstrz(out, msgs[i]->role == RIKKA_ROLE_ASSISTANT ? "assistant" : "user");
+        3:  267:            buf_append_str(out, ",\"content\":");
+        3:  268:            claude_content(out, msgs[i]);
+        3:  269:            buf_append_str(out, "}");
+        -:  270:        }
+        2:  271:        buf_append_str(out, "]}");
+        2:  272:        break;
+        -:  273:    }
+        2:  274:    case RIKKA_PROVIDER_GOOGLE: {
+        2:  275:        const char *sys = NULL; size_t sys_len = 0;
+        3:  276:        for (size_t i = 0; i < n; i++) {
+        2:  277:            if (msgs[i]->role == RIKKA_ROLE_SYSTEM && msg_text(msgs[i], &sys, &sys_len)) break;
+        -:  278:        }
+        2:  279:        buf_append_str(out, "{");
+        2:  280:        int need_comma = 0;
+        2:  281:        if (sys) {
+        1:  282:            buf_append_str(out, "\"systemInstruction\":{\"parts\":[{\"text\":");
+        1:  283:            jstr(out, sys, sys_len);
+        1:  284:            buf_append_str(out, "}]}");
+        1:  285:            need_comma = 1;
+        -:  286:        }
+        2:  287:        if (need_comma) buf_append_str(out, ",");
+        2:  288:        buf_append_str(out, "\"contents\":[");
+        2:  289:        int first = 1;
+        5:  290:        for (size_t i = 0; i < n; i++) {
+        3:  291:            if (msgs[i]->role == RIKKA_ROLE_SYSTEM || msgs[i]->role == RIKKA_ROLE_TOOL) continue;
+       2*:  292:            if (!first) buf_append_str(out, ",");
+        2:  293:            first = 0;
+        2:  294:            google_content(out, msgs[i]);
+        -:  295:        }
+        2:  296:        buf_append_str(out, "]");
+        2:  297:        if (cfg->max_tokens > 0) {
+        -:  298:            char t2[96];
+        1:  299:            int k2 = snprintf(t2, sizeof(t2), ",\"generationConfig\":{\"maxOutputTokens\":%d}", cfg->max_tokens);
+        1:  300:            buf_append(out, t2, (size_t)k2);
+        -:  301:        }
+        2:  302:        buf_append_str(out, "}");
+        2:  303:        break;
+        -:  304:    }
+    #####:  305:    default:
+    #####:  306:        return -1;
+        -:  307:    }
+        8:  308:    return 0;
+        -:  309:}
+        -:  310:
+        -:  311:/* ================= 统一流式管线 ================= */
+        -:  312:
+        -:  313:struct RikkaStreamSession {
+        -:  314:    RikkaProviderCfg cfg;
+        -:  315:    RHttpConn *conn;
+        -:  316:    RsseParser *sse;
+        -:  317:    RJsonStream *js_type;    /* Claude delta.type → type_buf */
+        -:  318:    RJsonStream *js_text;    /* content/text → text part */
+        -:  319:    RJsonStream *js_reason;  /* reasoning/thinking → reasoning part */
+        -:  320:    RikkaStream *out;
+        -:  321:    RikkaSessionStats stats;
+        -:  322:    Buf type_buf;
+        -:  323:};
+        -:  324:
+        -:  325:/* 提取路径表 */
+        -:  326:static const RJsonStreamPathElem P_OAI_CONTENT[] = {
+        -:  327:    {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}}, {0, {.key = "content"}}, {-2, {0}}};
+        -:  328:static const RJsonStreamPathElem P_OAI_REASON[] = {
+        -:  329:    {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}}, {0, {.key = "reasoning_content"}}, {-2, {0}}};
+        -:  330:static const RJsonStreamPathElem P_CLAUDE_TYPE[] = {
+        -:  331:    {0, {.key = "delta"}}, {0, {.key = "type"}}, {-2, {0}}};
+        -:  332:static const RJsonStreamPathElem P_CLAUDE_TEXT[] = {
+        -:  333:    {0, {.key = "delta"}}, {0, {.key = "text"}}, {-2, {0}}};
+        -:  334:static const RJsonStreamPathElem P_CLAUDE_THINK[] = {
+        -:  335:    {0, {.key = "delta"}}, {0, {.key = "thinking"}}, {-2, {0}}};
+        -:  336:static const RJsonStreamPathElem P_GOOG_TEXT[] = {
+        -:  337:    {0, {.key = "candidates"}}, {1, {.index = 0}}, {0, {.key = "content"}},
+        -:  338:    {0, {.key = "parts"}}, {1, {.index = 0}}, {0, {.key = "text"}}, {-2, {0}}};
+        -:  339:
+        6:  340:static void sink_text(void *ctx, const char *data, size_t len) {
+        6:  341:    RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
+        6:  342:    rstream_append_text(ss->out, data, len);
+        6:  343:    ss->stats.text_chunks++;
+        6:  344:}
+        -:  345:
+        2:  346:static void sink_reason(void *ctx, const char *data, size_t len) {
+        2:  347:    RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
+        2:  348:    rstream_append_reasoning(ss->out, data, len);
+        2:  349:    ss->stats.reasoning_chunks++;
+        2:  350:}
+        -:  351:
+        3:  352:static void sink_type(void *ctx, const char *data, size_t len) {
+        3:  353:    RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
+        3:  354:    buf_append(&ss->type_buf, data, len);
+        3:  355:}
+        -:  356:
+       18:  357:static void run_extract(RJsonStream *js, const char *data, size_t len) {
+       18:  358:    rjson_stream_reset(js);
+       18:  359:    rjson_stream_feed(js, data, len);
+       18:  360:    rjson_stream_finish(js);
+       18:  361:}
+        -:  362:
+       12:  363:static void on_sse_event(void *ctx, const char *event, const char *data, size_t len,
+        -:  364:                         const char *id, long long retry_ms) {
+        -:  365:    (void)id; (void)retry_ms;
+       12:  366:    RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
+       12:  367:    ss->stats.events++;
+       12:  368:    ss->stats.bytes_received += len;
+      12*:  369:    if (!data || len == 0) return;
+       12:  370:    switch (ss->cfg.id) {
+        5:  371:    case RIKKA_PROVIDER_OPENAI:
+        5:  372:        if (strcmp(event, "message") == 0) {
+        -:  373:            /* 双提取：content 与 reasoning_content 各进各的 part（零拷贝分流） */
+        5:  374:            run_extract(ss->js_text, data, len);
+        5:  375:            run_extract(ss->js_reason, data, len);
+        -:  376:        }
+        5:  377:        break;
+        5:  378:    case RIKKA_PROVIDER_CLAUDE:
+        5:  379:        if (strcmp(event, "content_block_delta") == 0) {
+        3:  380:            buf_reset(&ss->type_buf);
+        3:  381:            run_extract(ss->js_type, data, len);
+        6:  382:            int is_thinking = ss->type_buf.len >= 8 &&
+        3:  383:                              memcmp(ss->type_buf.data, "thinking", 8) == 0;
+        3:  384:            run_extract(is_thinking ? ss->js_reason : ss->js_text, data, len);
+        2:  385:        } else if (strcmp(event, "error") == 0) {
+    #####:  386:            ss->stats.error_events++;
+        -:  387:        }
+        5:  388:        break;
+        2:  389:    case RIKKA_PROVIDER_GOOGLE:
+        2:  390:        if (strcmp(event, "message") == 0) {
+        2:  391:            run_extract(ss->js_text, data, len);
+        -:  392:        }
+        2:  393:        break;
+        -:  394:    }
+        -:  395:}
+        -:  396:
+        -:  397:/* base_url 解析（host/port/tls/prefix） */
+        4:  398:static int parse_base(const char *url, char *host, size_t host_cap, uint16_t *port,
+        -:  399:                      int *tls, char *prefix, size_t prefix_cap) {
+        4:  400:    const char *p = url;
+        4:  401:    *tls = 0;
+       4*:  402:    if (strncmp(p, "https://", 8) == 0) { *tls = 1; p += 8; }
+        4:  403:    else if (strncmp(p, "http://", 7) == 0) { p += 7; }
+    #####:  404:    else return -1;
+        4:  405:    const char *he = p;
+       40:  406:    while (*he && *he != ':' && *he != '/') he++;
+        4:  407:    size_t hn = (size_t)(he - p);
+       4*:  408:    if (hn >= host_cap) return -1;
+        4:  409:    memcpy(host, p, hn);
+        4:  410:    host[hn] = '\0';
+       4*:  411:    *port = *tls ? 443 : 80;
+        4:  412:    if (*he == ':') {
+        4:  413:        const char *ps = he + 1;
+        4:  414:        long po = 0;
+       24:  415:        while (*ps >= '0' && *ps <= '9') po = po * 10 + (*ps - '0'), ps++;
+        4:  416:        if (po > 0 && po < 65536) *port = (uint16_t)po;
+        4:  417:        he = ps;
+        -:  418:    }
+        4:  419:    if (*he == '/') {
+    #####:  420:        size_t pn = strlen(he);
+    #####:  421:        if (pn >= prefix_cap) return -1;
+    #####:  422:        memcpy(prefix, he, pn + 1);
+        -:  423:    } else {
+        4:  424:        snprintf(prefix, prefix_cap, "/");
+        -:  425:    }
+        4:  426:    return 0;
+        -:  427:}
+        -:  428:
+    #####:  429:static const char *default_chat_path(RikkaProviderId id) {
+    #####:  430:    switch (id) {
+    #####:  431:        case RIKKA_PROVIDER_OPENAI: return "/chat/completions";
+    #####:  432:        case RIKKA_PROVIDER_CLAUDE: return "/v1/messages";
+    #####:  433:        case RIKKA_PROVIDER_GOOGLE: return "/v1beta/models/%s:streamGenerateContent?alt=sse";
+    #####:  434:        default: return "/";
+        -:  435:    }
+        -:  436:}
+        -:  437:
+        4:  438:RikkaStreamSession *rp_session_create(const RikkaProviderCfg *cfg) {
+        4:  439:    RikkaStreamSession *ss = (RikkaStreamSession *)calloc(1, sizeof(RikkaStreamSession));
+       4*:  440:    if (!ss) return NULL;
+        4:  441:    ss->cfg = *cfg;
+        4:  442:    buf_init(&ss->type_buf);
+        4:  443:    return ss;
+        -:  444:}
+        -:  445:
+        4:  446:void rp_session_destroy(RikkaStreamSession *ss) {
+       4*:  447:    if (!ss) return;
+        4:  448:    if (ss->conn) rhttp_close(ss->conn);
+        4:  449:    if (ss->sse) rsse_destroy(ss->sse);
+        4:  450:    if (ss->js_type) rjson_stream_destroy(ss->js_type);
+        4:  451:    if (ss->js_text) rjson_stream_destroy(ss->js_text);
+        4:  452:    if (ss->js_reason) rjson_stream_destroy(ss->js_reason);
+        4:  453:    buf_free(&ss->type_buf);
+        4:  454:    free(ss);
+        -:  455:}
+        -:  456:
+        4:  457:int rp_stream_start(RikkaStreamSession *ss, const char *path,
+        -:  458:                    const char *body, size_t body_len,
+        -:  459:                    RikkaStream *out, int timeout_ms, int *http_status) {
+       4*:  460:    if (!ss || !out) return -1;
+        4:  461:    ss->out = out;
+        -:  462:    char host[256], prefix[512], full[1024];
+        -:  463:    uint16_t port;
+        -:  464:    int tls;
+        4:  465:    if (parse_base(ss->cfg.base_url, host, sizeof(host), &port, &tls,
+        -:  466:                   prefix, sizeof(prefix)) != 0)
+    #####:  467:        return -1;
+        4:  468:    if (!path) {
+    #####:  469:        if (ss->cfg.id == RIKKA_PROVIDER_GOOGLE) {
+    #####:  470:            snprintf(full, sizeof(full), "%s%s", prefix, default_chat_path(ss->cfg.id));
+        -:  471:            /* 字面量格式串：model 作为 %s 参数（防 model 含 % 被当格式符） */
+        -:  472:            char model_path[1024];
+    #####:  473:            snprintf(model_path, sizeof(model_path),
+        -:  474:                     "/v1beta/models/%.240s:streamGenerateContent?alt=sse",
+    #####:  475:                     ss->cfg.model ? ss->cfg.model : "");
+    #####:  476:            snprintf(full, sizeof(full), "%s%s", prefix, model_path);
+        -:  477:        } else {
+    #####:  478:            snprintf(full, sizeof(full), "%s%s", prefix, default_chat_path(ss->cfg.id));
+        -:  479:        }
+    #####:  480:        path = full;
+        -:  481:    }
+        4:  482:    ss->conn = rhttp_connect(host, port, tls, timeout_ms);
+       4*:  483:    if (!ss->conn) return -1;
+        -:  484:
+        -:  485:    char auth[512];
+        -:  486:    const char *hdrs[8];
+        4:  487:    int nh = 0;
+        4:  488:    if (ss->cfg.api_key && ss->cfg.id != RIKKA_PROVIDER_GOOGLE) {
+        3:  489:        snprintf(auth, sizeof(auth), "Bearer %s", ss->cfg.api_key);
+        3:  490:        hdrs[nh++] = "Authorization";
+        3:  491:        hdrs[nh++] = auth;
+        1:  492:    } else if (ss->cfg.api_key) {
+        1:  493:        hdrs[nh++] = "x-goog-api-key";
+        1:  494:        hdrs[nh++] = ss->cfg.api_key;
+        -:  495:    }
+        4:  496:    hdrs[nh++] = "Content-Type";
+        4:  497:    hdrs[nh++] = "application/json";
+        4:  498:    hdrs[nh++] = "Accept";
+        4:  499:    hdrs[nh++] = "text/event-stream";
+        4:  500:    hdrs[nh] = NULL;
+        -:  501:
+       4*:  502:    if (rhttp_send(ss->conn, "POST", path, hdrs, body, body_len) != 0) return -1;
+        -:  503:    RHttpResp resp;
+       4*:  504:    if (rhttp_read_headers(ss->conn, &resp, timeout_ms) != 0) return -1;
+        4:  505:    if (http_status) *http_status = resp.status;
+       4*:  506:    if (resp.status < 200 || resp.status >= 300) return -2; /* 非 2xx */
+        -:  507:
+        4:  508:    ss->sse = rsse_create(on_sse_event, ss);
+        4:  509:    ss->js_type = rjson_stream_create(P_CLAUDE_TYPE, sink_type, ss);
+        4:  510:    ss->js_text = rjson_stream_create(P_OAI_CONTENT, sink_text, ss);
+        4:  511:    ss->js_reason = rjson_stream_create(P_OAI_REASON, sink_reason, ss);
+       4*:  512:    if (!ss->sse || !ss->js_type || !ss->js_text || !ss->js_reason) return -1; /* OOM 防御 */
+        4:  513:    switch (ss->cfg.id) {
+        2:  514:        case RIKKA_PROVIDER_OPENAI:
+        2:  515:            rjson_stream_set_path(ss->js_text, P_OAI_CONTENT);
+        2:  516:            rjson_stream_set_path(ss->js_reason, P_OAI_REASON);
+        2:  517:            break;
+        1:  518:        case RIKKA_PROVIDER_CLAUDE:
+        1:  519:            rjson_stream_set_path(ss->js_type, P_CLAUDE_TYPE);
+        1:  520:            rjson_stream_set_path(ss->js_text, P_CLAUDE_TEXT);
+        1:  521:            rjson_stream_set_path(ss->js_reason, P_CLAUDE_THINK);
+        1:  522:            break;
+        1:  523:        case RIKKA_PROVIDER_GOOGLE:
+        1:  524:            rjson_stream_set_path(ss->js_text, P_GOOG_TEXT);
+        1:  525:            break;
+        -:  526:    }
+        4:  527:    return 0;
+        -:  528:}
+        -:  529:
+        3:  530:int rp_stream_pump(RikkaStreamSession *ss, int timeout_ms) {
+       3*:  531:    if (!ss || !ss->conn) return -1;
+        -:  532:    char buf[16384];
+       12:  533:    for (;;) {
+       15:  534:        ssize_t n = rhttp_read_body(ss->conn, buf, sizeof(buf), timeout_ms);
+      15*:  535:        if (n < 0) return -1;
+       15:  536:        if (n == 0) break;
+      12*:  537:        if (rsse_feed(ss->sse, buf, (size_t)n) != 0) return -1;
+        -:  538:    }
+        3:  539:    rsse_finish(ss->sse);
+        3:  540:    return 0;
+        -:  541:}
+        -:  542:
+        -:  543:/* ---------- S5 异步流水线：读线程 + 提取线程 ---------- */
+        -:  544:
+        -:  545:typedef struct {
+        -:  546:    RkSpsc q;
+        -:  547:    RikkaStreamSession *ss;
+        -:  548:    int timeout_ms;
+        -:  549:    int reader_rc;
+        -:  550:    int proc_rc;
+        -:  551:} PipeIO;
+        -:  552:
+        1:  553:static void *pipe_reader(void *v) {
+        1:  554:    PipeIO *io = (PipeIO *)v;
+        1:  555:    RikkaStreamSession *ss = io->ss;
+        -:  556:    char buf[16384];
+        2:  557:    for (;;) {
+        3:  558:        ssize_t n = rhttp_read_body(ss->conn, buf, sizeof(buf), io->timeout_ms);
+       3*:  559:        if (n < 0) { io->reader_rc = -1; break; }
+        3:  560:        if (n == 0) break;
+       2*:  561:        while (rk_spsc_push(&io->q, buf, (size_t)n) != 0) pm_msleep(1);
+        -:  562:    }
+        1:  563:    rk_spsc_close(&io->q);
+        1:  564:    return NULL;
+        -:  565:}
+        -:  566:
+        1:  567:static void *pipe_processor(void *v) {
+        1:  568:    PipeIO *io = (PipeIO *)v;
+        1:  569:    RikkaStreamSession *ss = io->ss;
+        -:  570:    char buf[16384];
+        2:  571:    for (;;) {
+        3:  572:        ssize_t n = rk_spsc_pop(&io->q, buf, sizeof(buf));
+        3:  573:        if (n == 0) break;
+       2*:  574:        if (n < 0) { pm_msleep(1); continue; }
+        -:  575:        /* 出错后继续消费（排空队列让 reader 完成），不再喂解析器 */
+        2:  576:        if (io->proc_rc == 0 && rsse_feed(ss->sse, buf, (size_t)n) != 0)
+        1:  577:            io->proc_rc = -1;
+        -:  578:    }
+       1*:  579:    if (io->proc_rc == 0) rsse_finish(ss->sse);
+        1:  580:    return NULL;
+        -:  581:}
+        -:  582:
+        1:  583:int rp_stream_pump_async(RikkaStreamSession *ss, int timeout_ms) {
+       1*:  584:    if (!ss || !ss->conn) return -1;
+        -:  585:    PipeIO io;
+        1:  586:    io.ss = ss;
+        1:  587:    io.timeout_ms = timeout_ms;
+        1:  588:    io.reader_rc = 0;
+        1:  589:    io.proc_rc = 0;
+        1:  590:    rk_spsc_init(&io.q, 1 << 20);
+        -:  591:    pthread_t rt, pt;
+        1:  592:    pthread_create(&rt, NULL, pipe_reader, &io);
+        1:  593:    pthread_create(&pt, NULL, pipe_processor, &io);
+        1:  594:    pthread_join(rt, NULL);
+        1:  595:    pthread_join(pt, NULL);
+        1:  596:    rk_spsc_destroy(&io.q);
+       1*:  597:    return io.reader_rc != 0 ? io.reader_rc : io.proc_rc;
+        -:  598:}
+        -:  599:
+        3:  600:const RikkaSessionStats *rp_session_stats(const RikkaStreamSession *ss) {
+       3*:  601:    return ss ? &ss->stats : NULL;
+        -:  602:}
+        -:  603:
+        -:  604:/* B3 重试中间件：仅对"连接失败/5xx"重试（start 阶段，未开始累积无重复风险）；
+        -:  605: * 4xx 与 pump 中途失败不重试（部分内容已累积）。 */
+        -:  606:#define RIKKA_MAX_RETRIES 3
+    #####:  607:int rp_chat_stream(const RikkaProviderCfg *cfg,
+        -:  608:                   const RikkaMessage *const *msgs, size_t n,
+        -:  609:                   RikkaStream *out, int timeout_ms,
+        -:  610:                   RikkaSessionStats *stats_out) {
+        -:  611:    Buf body;
+    #####:  612:    buf_init(&body);
+    #####:  613:    if (rp_build_request(cfg, msgs, n, 1, &body) != 0) { buf_free(&body); return -1; }
+    #####:  614:    int rc = -1;
+    #####:  615:    int status = 0;
+    #####:  616:    for (int attempt = 0; attempt < RIKKA_MAX_RETRIES; attempt++) {
+    #####:  617:        RikkaStreamSession *ss = rp_session_create(cfg);
+    #####:  618:        if (!ss) break;
+    #####:  619:        rc = rp_stream_start(ss, NULL, (const char *)body.data, body.len, out,
+        -:  620:                             timeout_ms, &status);
+    #####:  621:        if (rc == 0) {
+    #####:  622:            rc = rp_stream_pump_async(ss, timeout_ms);
+    #####:  623:            if (stats_out) *stats_out = *rp_session_stats(ss);
+    #####:  624:            rp_session_destroy(ss);
+    #####:  625:            break;
+        -:  626:        }
+    #####:  627:        rp_session_destroy(ss);
+    #####:  628:        if (status >= 400 && status < 500) break; /* 4xx 不重试 */
+    #####:  629:        if (attempt + 1 < RIKKA_MAX_RETRIES) pm_msleep(100L << attempt); /* 指数退避 */
+        -:  630:    }
+    #####:  631:    buf_free(&body);
+    #####:  632:    return rc;
+        -:  633:}

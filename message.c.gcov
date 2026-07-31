@@ -1,0 +1,228 @@
+        -:    0:Source:src/core/message.c
+        -:    0:Graph:src/core/message.gcno
+        -:    0:Data:src/core/message.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/core/message.h"
+        -:    2:#include <stdlib.h>
+        -:    3:#include <string.h>
+        -:    4:
+     2348:    5:RikkaMessage *rmsg_new(Arena *arena, RikkaRole role) {
+     2348:    6:    RikkaMessage *m = (RikkaMessage *)arena_alloc0(arena, 8, sizeof(RikkaMessage));
+    2348*:    7:    if (!m) return NULL;
+     2348:    8:    m->role = role;
+     2348:    9:    return m;
+        -:   10:}
+        -:   11:
+     2316:   12:RikkaPart *rmsg_add_part(Arena *arena, RikkaMessage *m, RikkaPartType type) {
+    2316*:   13:    if (!m || !arena) return NULL;
+     2316:   14:    if (m->part_count == m->part_cap) {
+    2311*:   15:        size_t nc = m->part_cap ? m->part_cap * 2 : 4;
+     2311:   16:        RikkaPart *np = (RikkaPart *)arena_alloc(arena, 8, nc * sizeof(RikkaPart));
+    2311*:   17:        if (!np) return NULL;
+    2311*:   18:        if (m->parts) memcpy(np, m->parts, m->part_count * sizeof(RikkaPart));
+     2311:   19:        m->parts = np;
+     2311:   20:        m->part_cap = nc;
+        -:   21:    }
+     2316:   22:    RikkaPart *p = &m->parts[m->part_count++];
+     2316:   23:    memset(p, 0, sizeof(RikkaPart));
+     2316:   24:    p->type = type;
+     2316:   25:    return p;
+        -:   26:}
+        -:   27:
+        -:   28:/* ---------- 流式累积 ---------- */
+        -:   29:
+       11:   30:void rstream_init(RikkaStream *s, Arena *arena, RikkaRole role) {
+       11:   31:    memset(s, 0, sizeof(RikkaStream));
+       11:   32:    s->arena = arena;
+       11:   33:    s->msg = rmsg_new(arena, role);
+       11:   34:    buf_init(&s->text_buf);
+       11:   35:    buf_init(&s->reasoning_buf);
+       11:   36:    s->active = 1;
+       11:   37:}
+        -:   38:
+   100512:   39:static void ensure_text_part(RikkaStream *s) {
+   100512:   40:    if (s->msg->part_count == 0 || s->msg->parts[s->msg->part_count - 1].type != RIKKA_PART_TEXT) {
+        9:   41:        RikkaPart *p = rmsg_add_part(s->arena, s->msg, RIKKA_PART_TEXT);
+        9:   42:        p->data = (const char *)s->text_buf.data;
+        9:   43:        p->len = s->text_buf.len;
+        9:   44:        s->text_part_idx = s->msg->part_count - 1;
+        -:   45:    } else {
+   100503:   46:        s->text_part_idx = s->msg->part_count - 1;
+        -:   47:    }
+   100512:   48:}
+        -:   49:
+   100513:   50:void rstream_append_text(RikkaStream *s, const char *data, size_t len) {
+   100513:   51:    if (!s->active || len == 0) return;
+   100512:   52:    ensure_text_part(s);
+        -:   53:    /* O(1) 摊销 append；part 指针同步更新（零拷贝：不重建字符串） */
+   100512:   54:    buf_append(&s->text_buf, data, len);
+   100512:   55:    RikkaPart *p = &s->msg->parts[s->text_part_idx];
+   100512:   56:    p->data = (const char *)s->text_buf.data;
+   100512:   57:    p->len = s->text_buf.len;
+        -:   58:}
+        -:   59:
+        5:   60:static void ensure_reasoning_part(RikkaStream *s) {
+        5:   61:    if (s->msg->part_count == 0 || s->msg->parts[s->msg->part_count - 1].type != RIKKA_PART_REASONING) {
+        5:   62:        RikkaPart *p = rmsg_add_part(s->arena, s->msg, RIKKA_PART_REASONING);
+        5:   63:        p->data = (const char *)s->reasoning_buf.data;
+        5:   64:        p->len = s->reasoning_buf.len;
+        5:   65:        s->reasoning_part_idx = s->msg->part_count - 1;
+        -:   66:    } else {
+    #####:   67:        s->reasoning_part_idx = s->msg->part_count - 1;
+        -:   68:    }
+        5:   69:}
+        -:   70:
+        5:   71:void rstream_append_reasoning(RikkaStream *s, const char *data, size_t len) {
+       5*:   72:    if (!s->active || len == 0) return;
+        5:   73:    ensure_reasoning_part(s);
+        5:   74:    buf_append(&s->reasoning_buf, data, len);
+        5:   75:    RikkaPart *p = &s->msg->parts[s->reasoning_part_idx];
+        5:   76:    p->data = (const char *)s->reasoning_buf.data;
+        5:   77:    p->len = s->reasoning_buf.len;
+        -:   78:}
+        -:   79:
+        9:   80:void rstream_freeze(RikkaStream *s) {
+       9*:   81:    if (!s->active) return;
+        -:   82:    /* 空文本/reasoning 不需要 part：清理所有空 part（可能 text/reasoning 交替） */
+        9:   83:    size_t w = 0;
+       22:   84:    for (size_t i = 0; i < s->msg->part_count; i++) {
+       13:   85:        RikkaPart *p = &s->msg->parts[i];
+      13*:   86:        if ((p->type == RIKKA_PART_TEXT || p->type == RIKKA_PART_REASONING) && p->len == 0)
+    #####:   87:            continue;
+      13*:   88:        if (w != i) s->msg->parts[w] = *p;
+       13:   89:        w++;
+        -:   90:    }
+        9:   91:    s->msg->part_count = w;
+        -:   92:    /* 转移缓冲所有权给消息（冻结后消息持有 buf，数据指针保持有效） */
+        9:   93:    if (s->text_buf.cap > 0 && s->msg->part_count > 0)
+        8:   94:        s->msg->owned_buf = &s->text_buf;
+        9:   95:    if (s->reasoning_buf.cap > 0 && s->msg->part_count > 0)
+        4:   96:        s->msg->reasoning_owned = &s->reasoning_buf;
+        9:   97:    s->msg->frozen = 1;
+        9:   98:    s->active = 0;
+        -:   99:}
+        -:  100:
+       11:  101:void rstream_destroy(RikkaStream *s) {
+      11*:  102:    if (!s) return;
+        -:  103:    /* 释放未转移给消息的缓冲（freeze 后由消息持有，不在此释放） */
+       11:  104:    if (s->msg->owned_buf != &s->text_buf) buf_free(&s->text_buf);
+       11:  105:    if (s->msg->reasoning_owned != &s->reasoning_buf) buf_free(&s->reasoning_buf);
+        -:  106:}
+        -:  107:
+        -:  108:/* ---------- 会话节点树 + COW ---------- */
+        -:  109:
+      131:  110:static void node_add_child(RNode *parent, RNode *child) {
+      131:  111:    if (parent->child_count == parent->child_cap) {
+     130*:  112:        size_t nc = parent->child_cap ? parent->child_cap * 2 : 2;
+      130:  113:        RNode **nc2 = (RNode **)realloc(parent->children, nc * sizeof(RNode *));
+     130*:  114:        if (!nc2) return;
+      130:  115:        parent->children = nc2;
+      130:  116:        parent->child_cap = nc;
+        -:  117:    }
+      131:  118:    parent->children[parent->child_count++] = child;
+        -:  119:}
+        -:  120:
+      136:  121:RNode *rnode_new(RNode *parent) {
+      136:  122:    RNode *n = (RNode *)calloc(1, sizeof(RNode));
+     136*:  123:    if (!n) return NULL;
+      136:  124:    n->parent = parent;
+      136:  125:    if (parent) node_add_child(parent, n);
+      136:  126:    return n;
+        -:  127:}
+        -:  128:
+        1:  129:RNode *rnode_fork(RNode *at) {
+        -:  130:    /* COW fork：新节点共享 at 的祖先链，零复制 */
+        1:  131:    return rnode_new(at);
+        -:  132:}
+        -:  133:
+      130:  134:void rnode_attach(RNode *n, RikkaMessage *frozen) {
+     130*:  135:    if (!n || !frozen) return;
+      130:  136:    n->msg = frozen;
+      130:  137:    if (n->stream) {
+    #####:  138:        rstream_destroy(n->stream);
+    #####:  139:        free(n->stream);
+    #####:  140:        n->stream = NULL;
+        -:  141:    }
+        -:  142:}
+        -:  143:
+        1:  144:const RikkaMessage *rnode_message(const RNode *n) {
+       1*:  145:    return n ? n->msg : NULL;
+        -:  146:}
+        -:  147:
+        -:  148:/* ---------- 会话 ---------- */
+        -:  149:
+        5:  150:void rconv_init(RConversation *c, Arena *arena) {
+        5:  151:    memset(c, 0, sizeof(RConversation));
+        5:  152:    c->arena = arena;
+        5:  153:    c->root = rnode_new(NULL);
+        5:  154:    c->active = c->root;
+        5:  155:    c->node_count = 1;
+        5:  156:}
+        -:  157:
+      130:  158:RNode *rconv_append(RConversation *c, RikkaMessage *frozen) {
+      130:  159:    RNode *n = rnode_new(c->active);
+     130*:  160:    if (!n) return NULL;
+      130:  161:    rnode_attach(n, frozen);
+        -:  162:    /* 停用旧激活标记，激活新节点 */
+      130:  163:    c->active->active = 0;
+      130:  164:    n->active = 1;
+      130:  165:    c->active = n;
+      130:  166:    c->node_count++;
+      130:  167:    return n;
+        -:  168:}
+        -:  169:
+        1:  170:RNode *rconv_regenerate(RConversation *c, RNode *at) {
+        1:  171:    RNode *n = rnode_fork(at);
+       1*:  172:    if (!n) return NULL;
+        1:  173:    c->active->active = 0;
+        1:  174:    n->active = 1;
+        1:  175:    c->active = n;
+        1:  176:    c->node_count++;
+        1:  177:    return n;
+        -:  178:}
+        -:  179:
+      136:  180:static void rnode_free_tree(RNode *n) {
+     136*:  181:    if (!n) return;
+      267:  182:    for (size_t i = 0; i < n->child_count; i++) rnode_free_tree(n->children[i]);
+      136:  183:    if (n->stream) {
+    #####:  184:        rstream_destroy(n->stream);
+    #####:  185:        free(n->stream);
+        -:  186:    }
+      136:  187:    free(n->children);
+      136:  188:    free(n);
+        -:  189:}
+        -:  190:
+        5:  191:void rconv_destroy(RConversation *c) {
+       5*:  192:    if (!c) return;
+        5:  193:    if (c->root) rnode_free_tree(c->root);
+        5:  194:    c->root = NULL;
+        5:  195:    c->active = NULL;
+        5:  196:    c->node_count = 0;
+        -:  197:}
+        -:  198:
+        1:  199:void rconv_set_active(RConversation *c, RNode *n) {
+       1*:  200:    if (!n) return;
+        1:  201:    c->active->active = 0;
+        1:  202:    n->active = 1;
+        1:  203:    c->active = n;
+        -:  204:}
+        -:  205:
+        4:  206:size_t rconv_active_messages(const RConversation *c, const RikkaMessage **out, size_t cap) {
+        -:  207:    /* 收集从根到 active 的冻结消息（逆序收集再反转），path 动态分配 */
+        4:  208:    size_t depth = 0;
+      132:  209:    for (RNode *cur = c->active; cur && cur->parent; cur = cur->parent) depth++;
+       4*:  210:    if (depth > cap) depth = cap;
+       4*:  211:    if (depth == 0) return 0;
+        4:  212:    RNode **path = (RNode **)malloc(depth * sizeof(RNode *));
+       4*:  213:    if (!path) return 0;
+        4:  214:    size_t d2 = 0;
+      132:  215:    for (RNode *cur = c->active; cur && cur->parent && d2 < depth; cur = cur->parent)
+      128:  216:        path[d2++] = cur;
+        4:  217:    size_t n = 0;
+      132:  218:    for (size_t i = d2; i > 0 && n < cap; i--) {
+      128:  219:        RNode *node = path[i - 1];
+      128:  220:        if (node->msg) out[n++] = node->msg;
+        -:  221:    }
+        4:  222:    free(path);
+        4:  223:    return n;
+        -:  224:}

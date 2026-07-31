@@ -1,0 +1,622 @@
+        -:    0:Source:src/http/http.c
+        -:    0:Graph:src/http/http.gcno
+        -:    0:Data:src/http/http.gcda
+        -:    0:Runs:1
+        -:    1:#define _POSIX_C_SOURCE 200809L
+        -:    2:#include "rikka/http/http.h"
+        -:    3:#include "rikka/core/buffer.h"
+        -:    4:#include <errno.h>
+        -:    5:#include <fcntl.h>
+        -:    6:#include <netdb.h>
+        -:    7:#include <netinet/in.h>
+        -:    8:#include <strings.h>
+        -:    9:#include <poll.h>
+        -:   10:#include <pthread.h>
+        -:   11:#include <stdio.h>
+        -:   12:#include <stdlib.h>
+        -:   13:#include <string.h>
+        -:   14:#include <sys/socket.h>
+        -:   15:#include <sys/types.h>
+        -:   16:#include <unistd.h>
+        -:   17:
+        -:   18:#include <openssl/ssl.h>
+        -:   19:#include <openssl/err.h>
+        -:   20:
+        -:   21:/* ---------- 全局 TLS 上下文 ---------- */
+        -:   22:
+        -:   23:static pthread_once_t g_ssl_once = PTHREAD_ONCE_INIT;
+        -:   24:static SSL_CTX *g_ssl_ctx = NULL;
+        -:   25:
+    #####:   26:static void ssl_init_once(void) {
+    #####:   27:    SSL_library_init();
+    #####:   28:    SSL_load_error_strings();
+    #####:   29:    g_ssl_ctx = SSL_CTX_new(TLS_client_method());
+    #####:   30:    if (g_ssl_ctx) {
+    #####:   31:        SSL_CTX_set_default_verify_paths(g_ssl_ctx);
+    #####:   32:        SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
+    #####:   33:        SSL_CTX_set_min_proto_version(g_ssl_ctx, TLS1_2_VERSION);
+        -:   34:    }
+    #####:   35:}
+        -:   36:
+    #####:   37:static SSL_CTX *ssl_ctx(void) {
+    #####:   38:    pthread_once(&g_ssl_once, ssl_init_once);
+    #####:   39:    return g_ssl_ctx;
+        -:   40:}
+        -:   41:
+        -:   42:/* ---------- 连接 ---------- */
+        -:   43:
+        -:   44:struct RHttpConn {
+        -:   45:    int fd;
+        -:   46:    SSL *ssl;
+        -:   47:    int tls;
+        -:   48:    char host[256];
+        -:   49:    int eof;
+        -:   50:    RHttpResp resp;
+        -:   51:    /* 读缓冲：头/body 大块读，调用方小量取（避免逐字节 syscall） */
+        -:   52:    uint8_t rbuf[16384];
+        -:   53:    size_t rbuf_len, rbuf_off;
+        -:   54:    /* chunked 解码状态 */
+        -:   55:    int chunked;
+        -:   56:    int chunk_active;
+        -:   57:    long chunk_remain;
+        -:   58:    int chunk_done;
+        -:   59:    long body_read;    /* content-length 已读 */
+        -:   60:};
+        -:   61:
+       16:   62:static int set_nonblock(int fd, int on) {
+       16:   63:    int fl = fcntl(fd, F_GETFL, 0);
+      16*:   64:    if (fl < 0) return -1;
+       16:   65:    return fcntl(fd, F_SETFL, on ? (fl | O_NONBLOCK) : (fl & ~O_NONBLOCK));
+        -:   66:}
+        -:   67:
+       48:   68:static int wait_fd(int fd, short events, int timeout_ms) {
+        -:   69:    struct pollfd pfd;
+       48:   70:    pfd.fd = fd;
+       48:   71:    pfd.events = events;
+       48:   72:    pfd.revents = 0;
+        -:   73:    int r;
+        -:   74:    do {
+       48:   75:        r = poll(&pfd, 1, timeout_ms);
+      48*:   76:    } while (r < 0 && errno == EINTR);
+      48*:   77:    if (r <= 0) return -1;
+       48:   78:    return 0;
+        -:   79:}
+        -:   80:
+        8:   81:RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeout_ms) {
+        -:   82:    char portstr[16];
+        8:   83:    snprintf(portstr, sizeof(portstr), "%u", (unsigned)port);
+        -:   84:
+        8:   85:    struct addrinfo hints, *res = NULL;
+        8:   86:    memset(&hints, 0, sizeof(hints));
+        8:   87:    hints.ai_family = AF_UNSPEC;
+        8:   88:    hints.ai_socktype = SOCK_STREAM;
+       8*:   89:    if (getaddrinfo(host, portstr, &hints, &res) != 0 || !res) return NULL;
+        -:   90:
+        8:   91:    int fd = -1;
+       8*:   92:    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        8:   93:        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+       8*:   94:        if (fd < 0) continue;
+        8:   95:        set_nonblock(fd, 1);
+        8:   96:        int rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
+       8*:   97:        if (rc != 0 && errno != EINPROGRESS) { close(fd); fd = -1; continue; }
+        8:   98:        if (rc != 0) {
+       8*:   99:            if (wait_fd(fd, POLLOUT, timeout_ms) != 0) { close(fd); fd = -1; continue; }
+        8:  100:            int err = 0;
+        8:  101:            socklen_t el = sizeof(err);
+       8*:  102:            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) != 0 || err != 0) {
+    #####:  103:                close(fd); fd = -1; continue;
+        -:  104:            }
+        -:  105:        }
+        8:  106:        break;
+        -:  107:    }
+        8:  108:    freeaddrinfo(res);
+       8*:  109:    if (fd < 0) return NULL;
+        8:  110:    set_nonblock(fd, 0);
+        -:  111:
+        8:  112:    RHttpConn *c = (RHttpConn *)calloc(1, sizeof(RHttpConn));
+       8*:  113:    if (!c) { close(fd); return NULL; }
+        8:  114:    c->fd = fd;
+        8:  115:    c->tls = use_tls;
+        8:  116:    snprintf(c->host, sizeof(c->host), "%s", host);
+        8:  117:    c->resp.content_length = -1;
+        -:  118:
+        8:  119:    if (use_tls) {
+    #####:  120:        SSL_CTX *ctx = ssl_ctx();
+    #####:  121:        if (!ctx) { close(fd); free(c); return NULL; }
+    #####:  122:        c->ssl = SSL_new(ctx);
+    #####:  123:        if (!c->ssl) { close(fd); free(c); return NULL; }
+    #####:  124:        SSL_set_fd(c->ssl, fd);
+    #####:  125:        SSL_set_tlsext_host_name(c->ssl, host);
+    #####:  126:        SSL_set_connect_state(c->ssl);
+        -:  127:        /* TLS 握手（阻塞；SO_RCVTIMEO 由调用方默认 30s——此处直接依赖内核） */
+    #####:  128:        for (;;) {
+    #####:  129:            int rc = SSL_connect(c->ssl);
+    #####:  130:            if (rc == 1) break;
+    #####:  131:            int err = SSL_get_error(c->ssl, rc);
+    #####:  132:            if (err == SSL_ERROR_WANT_READ) {
+    #####:  133:                if (wait_fd(fd, POLLIN, timeout_ms) != 0) { rhttp_close(c); return NULL; }
+    #####:  134:                continue;
+        -:  135:            }
+    #####:  136:            if (err == SSL_ERROR_WANT_WRITE) {
+    #####:  137:                if (wait_fd(fd, POLLOUT, timeout_ms) != 0) { rhttp_close(c); return NULL; }
+    #####:  138:                continue;
+        -:  139:            }
+    #####:  140:            rhttp_close(c);
+    #####:  141:            return NULL;
+        -:  142:        }
+        -:  143:    }
+        8:  144:    return c;
+        -:  145:}
+        -:  146:
+        8:  147:void rhttp_close(RHttpConn *c) {
+       8*:  148:    if (!c) return;
+       8*:  149:    if (c->ssl) { SSL_shutdown(c->ssl); SSL_free(c->ssl); }
+        8:  150:    if (c->fd >= 0) close(c->fd);
+        8:  151:    free(c);
+        -:  152:}
+        -:  153:
+        -:  154:/* ---------- 连接池（B1：短请求 keep-alive 复用） ---------- */
+        -:  155:
+        -:  156:typedef struct RkPoolConn {
+        -:  157:    char host[256];
+        -:  158:    uint16_t port;
+        -:  159:    int tls;
+        -:  160:    RHttpConn *conn;
+        -:  161:    struct RkPoolConn *next;
+        -:  162:} RkPoolConn;
+        -:  163:
+        -:  164:static RkPoolConn *g_pool = NULL;
+        -:  165:static pthread_mutex_t g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+        -:  166:
+        2:  167:static RHttpConn *pool_take(const char *host, uint16_t port, int tls) {
+        2:  168:    pthread_mutex_lock(&g_pool_mutex);
+        2:  169:    RkPoolConn **pp = &g_pool;
+        2:  170:    while (*pp) {
+    #####:  171:        if ((*pp)->port == port && (*pp)->tls == tls &&
+    #####:  172:            strcmp((*pp)->host, host) == 0) {
+    #####:  173:            RkPoolConn *e = *pp;
+    #####:  174:            *pp = e->next;
+    #####:  175:            RHttpConn *c = e->conn;
+    #####:  176:            free(e);
+    #####:  177:            pthread_mutex_unlock(&g_pool_mutex);
+    #####:  178:            return c;
+        -:  179:        }
+    #####:  180:        pp = &(*pp)->next;
+        -:  181:    }
+        2:  182:    pthread_mutex_unlock(&g_pool_mutex);
+        2:  183:    return NULL;
+        -:  184:}
+        -:  185:
+        2:  186:static void pool_put(RHttpConn *c, const char *host, uint16_t port, int tls) {
+       2*:  187:    if (!c) return;
+       2*:  188:    if (!c->resp.keep_alive || c->eof || c->rbuf_len > c->rbuf_off) {
+        2:  189:        rhttp_close(c);
+        2:  190:        return;
+        -:  191:    }
+    #####:  192:    RkPoolConn *e = (RkPoolConn *)malloc(sizeof(RkPoolConn));
+    #####:  193:    if (!e) { rhttp_close(c); return; }
+    #####:  194:    snprintf(e->host, sizeof(e->host), "%s", host);
+    #####:  195:    e->port = port;
+    #####:  196:    e->tls = tls;
+    #####:  197:    e->conn = c;
+    #####:  198:    pthread_mutex_lock(&g_pool_mutex);
+    #####:  199:    e->next = g_pool;
+    #####:  200:    g_pool = e;
+        -:  201:    /* 池上限：超过 32 条淘汰链尾（最旧） */
+        -:  202:    {
+    #####:  203:        int n = 0;
+    #####:  204:        RkPoolConn *prev = NULL, *last = g_pool;
+    #####:  205:        for (RkPoolConn *it = g_pool; it; it = it->next) {
+    #####:  206:            n++;
+    #####:  207:            if (!it->next) break;
+    #####:  208:            prev = it;
+    #####:  209:            last = it->next;
+        -:  210:        }
+    #####:  211:        if (n > 32 && prev) {
+    #####:  212:            prev->next = NULL;
+    #####:  213:            rhttp_close(last->conn);
+    #####:  214:            free(last);
+        -:  215:        }
+        -:  216:    }
+    #####:  217:    pthread_mutex_unlock(&g_pool_mutex);
+        -:  218:}
+        -:  219:
+        -:  220:/* ---------- 读写原语 ---------- */
+        -:  221:
+        -:  222:/* 底层填充：poll + 读满内部缓冲 */
+       32:  223:static ssize_t fill_rbuf(RHttpConn *c, int timeout_ms) {
+      32*:  224:    if (wait_fd(c->fd, POLLIN, timeout_ms) != 0) return -1;
+    #####:  225:    for (;;) {
+        -:  226:        ssize_t n;
+       32:  227:        if (c->ssl) {
+    #####:  228:            int rc = SSL_read(c->ssl, c->rbuf, sizeof(c->rbuf));
+    #####:  229:            if (rc <= 0) {
+    #####:  230:                int err = SSL_get_error(c->ssl, rc);
+    #####:  231:                if (err == SSL_ERROR_WANT_READ) {
+    #####:  232:                    if (wait_fd(c->fd, POLLIN, timeout_ms) != 0) return -1;
+    #####:  233:                    continue;
+        -:  234:                }
+    #####:  235:                return 0; /* EOF 或错误按 EOF */
+        -:  236:            }
+    #####:  237:            n = rc;
+        -:  238:        } else {
+       32:  239:            n = read(c->fd, c->rbuf, sizeof(c->rbuf));
+      32*:  240:            if (n < 0) return (errno == EAGAIN || errno == EWOULDBLOCK) ? -1 : 0;
+        -:  241:        }
+       32:  242:        c->rbuf_len = (size_t)n;
+       32:  243:        c->rbuf_off = 0;
+       32:  244:        return n;
+        -:  245:    }
+        -:  246:}
+        -:  247:
+        -:  248:/* 读 cap 字节（尽量）：先取内部缓冲，不足则填充 */
+     1283:  249:static ssize_t raw_read(RHttpConn *c, char *buf, size_t cap, int timeout_ms) {
+     1283:  250:    if (c->rbuf_len > c->rbuf_off) {
+     1251:  251:        size_t avail = c->rbuf_len - c->rbuf_off;
+     1251:  252:        size_t n = avail < cap ? avail : cap;
+     1251:  253:        memcpy(buf, c->rbuf + c->rbuf_off, n);
+     1251:  254:        c->rbuf_off += n;
+     1251:  255:        if (c->rbuf_off == c->rbuf_len) c->rbuf_len = c->rbuf_off = 0;
+     1251:  256:        return (ssize_t)n;
+        -:  257:    }
+       32:  258:    ssize_t n = fill_rbuf(c, timeout_ms);
+       32:  259:    if (n <= 0) return (ssize_t)n; /* -1 超时 / 0 EOF */
+       30:  260:    size_t take = (size_t)n < cap ? (size_t)n : cap;
+       30:  261:    memcpy(buf, c->rbuf, take);
+       30:  262:    c->rbuf_off = take;
+       30:  263:    return (ssize_t)take;
+        -:  264:}
+        -:  265:
+        8:  266:static int raw_write_all(RHttpConn *c, const char *buf, size_t len) {
+        8:  267:    size_t off = 0;
+       16:  268:    while (off < len) {
+       8*:  269:        if (wait_fd(c->fd, POLLOUT, 30000) != 0) return -1;
+        -:  270:        int n;
+        8:  271:        if (c->ssl) {
+    #####:  272:            n = SSL_write(c->ssl, buf + off, (int)(len - off));
+    #####:  273:            if (n <= 0) {
+    #####:  274:                int err = SSL_get_error(c->ssl, n);
+    #####:  275:                if (err == SSL_ERROR_WANT_WRITE) continue;
+    #####:  276:                return -1;
+        -:  277:            }
+        -:  278:        } else {
+        8:  279:            n = (int)write(c->fd, buf + off, len - off);
+        8:  280:            if (n < 0) {
+    #####:  281:                if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+    #####:  282:                return -1;
+        -:  283:            }
+        -:  284:        }
+        8:  285:        off += (size_t)n;
+        -:  286:    }
+        8:  287:    return 0;
+        -:  288:}
+        -:  289:
+        -:  290:/* 读单字节（chunk 行用）。返回 0 EOF / 1 有字节 / -1 超时 */
+     1253:  291:static int read_byte(RHttpConn *c, char *out, int timeout_ms) {
+     1253:  292:    ssize_t n = raw_read(c, out, 1, timeout_ms);
+    1253*:  293:    if (n < 0) return -1;
+    1253*:  294:    if (n == 0) return 0;
+     1253:  295:    return 1;
+        -:  296:}
+        -:  297:
+        -:  298:/* ---------- 请求/响应 ---------- */
+        -:  299:
+        8:  300:int rhttp_send(RHttpConn *c, const char *method, const char *path,
+        -:  301:               const char *const *headers, const char *body, size_t body_len) {
+        -:  302:    Buf req;
+        8:  303:    buf_init(&req);
+        8:  304:    buf_append_str(&req, method);
+        8:  305:    buf_append(&req, " ", 1);
+        8:  306:    buf_append_str(&req, path);
+        8:  307:    buf_append_str(&req, " HTTP/1.1\r\nHost: ");
+        8:  308:    buf_append_str(&req, c->host);
+        8:  309:    buf_append_str(&req, "\r\nUser-Agent: rikkahub-engine/0.1\r\nAccept: */*\r\n");
+        8:  310:    int has_cl = 0, has_conn = 0;
+        8:  311:    if (headers) {
+       18:  312:        for (const char *const *h = headers; h[0] && h[1]; h += 2) {
+       13:  313:            buf_append_str(&req, h[0]);
+       13:  314:            buf_append(&req, ": ", 2);
+       13:  315:            buf_append_str(&req, h[1]);
+       13:  316:            buf_append_str(&req, "\r\n");
+      13*:  317:            if (strcasecmp(h[0], "Content-Length") == 0) has_cl = 1;
+      13*:  318:            if (strcasecmp(h[0], "Connection") == 0) has_conn = 1;
+        -:  319:        }
+        -:  320:    }
+        8:  321:    if (!has_cl) {
+        -:  322:        char tmp[32];
+        8:  323:        int n = snprintf(tmp, sizeof(tmp), "Content-Length: %zu\r\n", body_len);
+        8:  324:        buf_append(&req, tmp, (size_t)n);
+        -:  325:    }
+        8:  326:    if (!has_conn) buf_append_str(&req, "Connection: keep-alive\r\n");
+        8:  327:    buf_append_str(&req, "\r\n");
+        8:  328:    if (body && body_len > 0) buf_append(&req, body, body_len);
+        -:  329:
+        8:  330:    int rc = raw_write_all(c, (const char *)req.data, req.len);
+        8:  331:    buf_free(&req);
+        8:  332:    return rc;
+        -:  333:}
+        -:  334:
+        -:  335:/* 逐字节读响应头直到空行 */
+        8:  336:static int read_headers_raw(RHttpConn *c, Buf *hdr, int timeout_ms) {
+        8:  337:    buf_reset(hdr);
+        8:  338:    int found = 0;
+     1125:  339:    for (;;) {
+        -:  340:        char ch;
+     1133:  341:        int r = read_byte(c, &ch, timeout_ms);
+    1133*:  342:        if (r <= 0) return -1;
+     1133:  343:        buf_append_byte(hdr, (uint8_t)ch);
+        -:  344:        /* 检测 \r\n\r\n 或 \n\n */
+     1133:  345:        size_t n = hdr->len;
+     1133:  346:        if (n >= 4 && hdr->data[n-1] == '\n' && hdr->data[n-2] == '\r' &&
+       45:  347:            hdr->data[n-3] == '\n' && hdr->data[n-4] == '\r') { found = 1; break; }
+    1125*:  348:        if (n >= 2 && hdr->data[n-1] == '\n' && hdr->data[n-2] == '\n') { found = 1; break; }
+    1125*:  349:        if (n > 65536) return -1;
+        -:  350:    }
+       8*:  351:    return found ? 0 : -1;
+        -:  352:}
+        -:  353:
+        1:  354:static long parse_content_length(const char *v) {
+        1:  355:    long n = 0;
+        3:  356:    for (; *v; v++) {
+       2*:  357:        if (*v < '0' || *v > '9') continue;
+        2:  358:        n = n * 10 + (*v - '0');
+        -:  359:    }
+        1:  360:    return n;
+        -:  361:}
+        -:  362:
+        8:  363:int rhttp_read_headers(RHttpConn *c, RHttpResp *resp, int timeout_ms) {
+        -:  364:    Buf hdr;
+        8:  365:    buf_init(&hdr);
+        8:  366:    if (read_headers_raw(c, &hdr, timeout_ms) != 0) {
+    #####:  367:        buf_free(&hdr);
+    #####:  368:        return -1;
+        -:  369:    }
+        -:  370:    /* 状态行 */
+        8:  371:    char *text = (char *)hdr.data;
+        8:  372:    size_t len = hdr.len;
+        8:  373:    int status = 0;
+        8:  374:    int http11 = 0; /* HTTP/1.1 默认持久连接（无 Connection 头时） */
+        8:  375:    char reason[128] = {0};
+        -:  376:    /* HTTP/1.1 200 OK\r\n... */
+        8:  377:    const char *p = text;
+        8:  378:    const char *end = text + len;
+        8:  379:    if (len >= 8 && memcmp(p, "HTTP/1.", 7) == 0) {
+        8:  380:        http11 = (p[7] == '1');
+        8:  381:        p += 8; /* 跳过 "HTTP/1.x" */
+       16:  382:        while (p < end && *p == ' ') p++;
+       32:  383:        while (p < end && *p >= '0' && *p <= '9') { status = status * 10 + (*p - '0'); p++; }
+        8:  384:        if (p < end && *p == ' ') p++;
+        8:  385:        size_t rn = 0;
+       31:  386:        while (p < end && *p != '\r' && *p != '\n' && rn < sizeof(reason) - 1) {
+       23:  387:            reason[rn++] = *p++;
+        -:  388:        }
+        8:  389:        reason[rn] = '\0';
+        -:  390:    }
+        -:  391:    /* 头字段 */
+        8:  392:    memset(resp, 0, sizeof(RHttpResp));
+        8:  393:    resp->status = status;
+        8:  394:    snprintf(resp->reason, sizeof(resp->reason), "%s", reason);
+        8:  395:    resp->content_length = -1;
+        8:  396:    resp->tls = c->tls;
+        8:  397:    resp->keep_alive = http11; /* HTTP/1.1 默认 keep-alive */
+        -:  398:    /* 逐行解析 */
+        8:  399:    const char *line = text;
+       53:  400:    while (line < end) {
+       45:  401:        const char *nl = memchr(line, '\n', (size_t)(end - line));
+      45*:  402:        if (!nl) break;
+       45:  403:        const char *line_end = nl;
+       45:  404:        if (line_end > line && line_end[-1] == '\r') line_end--;
+       45:  405:        const char *colon = memchr(line, ':', (size_t)(line_end - line));
+       45:  406:        if (colon) {
+       29:  407:            const char *name = line;
+       29:  408:            size_t name_len = (size_t)(colon - line);
+       29:  409:            const char *val = colon + 1;
+       58:  410:            while (val < line_end && *val == ' ') val++;
+       29:  411:            size_t val_len = (size_t)(line_end - val);
+       29:  412:            if (name_len == 14 && strncasecmp(name, "Content-Length", 14) == 0) {
+        -:  413:                char tmp[64];
+        1:  414:                size_t n = val_len < sizeof(tmp) - 1 ? val_len : sizeof(tmp) - 1;
+        1:  415:                memcpy(tmp, val, n);
+        1:  416:                tmp[n] = '\0';
+        1:  417:                resp->content_length = parse_content_length(tmp);
+       28:  418:            } else if (name_len == 17 && strncasecmp(name, "Transfer-Encoding", 17) == 0) {
+        5:  419:                if (val_len >= 7 && strncasecmp(val, "chunked", 7) == 0) resp->chunked = 1;
+      23*:  420:            } else if (name_len == 10 && strncasecmp(name, "Connection", 10) == 0) {
+    #####:  421:                if (val_len >= 5 && strncasecmp(val, "close", 5) == 0) resp->keep_alive = 0;
+    #####:  422:                else resp->keep_alive = 1;
+        -:  423:            }
+        -:  424:        }
+       45:  425:        line = nl + 1;
+        -:  426:    }
+        8:  427:    buf_free(&hdr);
+        -:  428:    /* 初始化解码状态 */
+        8:  429:    c->chunked = resp->chunked;
+        8:  430:    c->chunk_active = 0;
+        8:  431:    c->chunk_remain = 0;
+        8:  432:    c->chunk_done = 0;
+        8:  433:    c->body_read = 0;
+        8:  434:    c->resp = *resp;
+        8:  435:    return 0;
+        -:  436:}
+        -:  437:
+        -:  438:/* chunk 大小行读取（到 \n 结束） */
+       26:  439:static int read_chunk_line(RHttpConn *c, char *out, size_t cap, int timeout_ms) {
+       26:  440:    size_t n = 0;
+       62:  441:    for (;;) {
+        -:  442:        char ch;
+       88:  443:        int r = read_byte(c, &ch, timeout_ms);
+      88*:  444:        if (r <= 0) return -1;
+       88:  445:        if (ch == '\n') break;
+       62:  446:        if (n < cap - 1) out[n++] = ch;
+        -:  447:    }
+       26:  448:    out[n] = '\0';
+       26:  449:    return (int)n;
+        -:  450:}
+        -:  451:
+       36:  452:ssize_t rhttp_read_body(RHttpConn *c, char *buf, size_t cap, int timeout_ms) {
+      36*:  453:    if (c->eof) return 0;
+       36:  454:    if (c->chunked) {
+        -:  455:        for (;;) {
+      22*:  456:            if (c->chunk_done) { c->eof = 1; return 0; }
+       22:  457:            if (!c->chunk_active) {
+        -:  458:                char line[64];
+      26*:  459:                if (read_chunk_line(c, line, sizeof(line), timeout_ms) < 0) return -1;
+       21:  460:                long size = 0;
+       21:  461:                const char *p = line;
+       57:  462:                while (*p) {
+       57:  463:                    char hc = *p;
+        -:  464:                    int hv;
+       57:  465:                    if (hc >= '0' && hc <= '9') hv = hc - '0';
+       30:  466:                    else if (hc >= 'a' && hc <= 'f') hv = hc - 'a' + 10;
+      21*:  467:                    else if (hc >= 'A' && hc <= 'F') hv = hc - 'A' + 10;
+        -:  468:                    else break;
+       36:  469:                    size = size * 16 + hv;
+       36:  470:                    p++;
+        -:  471:                }
+       21:  472:                if (size == 0) {
+        -:  473:                    /* 尾头：读空行 */
+    #####:  474:                    for (;;) {
+        -:  475:                        char t[256];
+        5:  476:                        int n = read_chunk_line(c, t, sizeof(t), timeout_ms);
+       5*:  477:                        if (n < 0) return -1;
+        -:  478:                        /* 空行（可能含 \r）即尾头结束 */
+        5:  479:                        if (n == 0 || (n == 1 && t[0] == '\r')) break;
+        -:  480:                    }
+        5:  481:                    c->chunk_done = 1;
+        5:  482:                    c->eof = 1;
+        5:  483:                    return 0;
+        -:  484:                }
+       16:  485:                c->chunk_active = 1;
+       16:  486:                c->chunk_remain = size;
+        -:  487:            }
+       17:  488:            size_t want = cap;
+       17:  489:            if ((long)want > c->chunk_remain) want = (size_t)c->chunk_remain;
+       17:  490:            ssize_t n = raw_read(c, buf, want, timeout_ms);
+      17*:  491:            if (n < 0) return -1;
+      17*:  492:            if (n == 0) { c->eof = 1; return 0; } /* 服务器提前关闭 */
+       17:  493:            c->chunk_remain -= n;
+       17:  494:            if (c->chunk_remain == 0) {
+        -:  495:                /* 读 chunk 尾 CRLF */
+        -:  496:                char crlf[2];
+      16*:  497:                if (read_byte(c, &crlf[0], timeout_ms) < 0) return -1;
+      16*:  498:                if (read_byte(c, &crlf[1], timeout_ms) < 0) return -1;
+       16:  499:                c->chunk_active = 0;
+        -:  500:            }
+       17:  501:            return n;
+        -:  502:        }
+        -:  503:    }
+       14:  504:    if (c->resp.content_length >= 0) {
+        2:  505:        if (c->body_read >= c->resp.content_length) { c->eof = 1; return 0; }
+        1:  506:        size_t want = cap;
+        1:  507:        long remain = c->resp.content_length - c->body_read;
+        1:  508:        if ((long)want > remain) want = (size_t)remain;
+        1:  509:        ssize_t n = raw_read(c, buf, want, timeout_ms);
+       1*:  510:        if (n < 0) return -1;
+       1*:  511:        if (n == 0) { c->eof = 1; return 0; }
+        1:  512:        c->body_read += n;
+        1:  513:        return n;
+        -:  514:    }
+        -:  515:    /* 无长度：流式读到 EOF */
+       12:  516:    ssize_t n = raw_read(c, buf, cap, timeout_ms);
+      12*:  517:    if (n < 0) return -1;
+       12:  518:    if (n == 0) c->eof = 1;
+       12:  519:    return n;
+        -:  520:}
+        -:  521:
+    #####:  522:int rhttp_eof(RHttpConn *c) { return c->eof; }
+        -:  523:
+        -:  524:/* ---------- 同步请求 ---------- */
+        -:  525:
+        2:  526:static int parse_url(const char *url, char *host, size_t host_cap, uint16_t *port,
+        -:  527:                     int *tls, char *path, size_t path_cap) {
+        2:  528:    const char *p = url;
+        2:  529:    *tls = 0;
+       2*:  530:    if (strncmp(p, "https://", 8) == 0) { *tls = 1; p += 8; }
+        2:  531:    else if (strncmp(p, "http://", 7) == 0) { p += 7; }
+    #####:  532:    else return -1;
+        2:  533:    const char *host_end = p;
+       20:  534:    while (*host_end && *host_end != ':' && *host_end != '/') host_end++;
+        2:  535:    size_t hn = (size_t)(host_end - p);
+       2*:  536:    if (hn >= host_cap) return -1;
+        2:  537:    memcpy(host, p, hn);
+        2:  538:    host[hn] = '\0';
+       2*:  539:    *port = *tls ? 443 : 80;
+        2:  540:    if (*host_end == ':') {
+        2:  541:        const char *ps = host_end + 1;
+        2:  542:        long po = 0;
+       12:  543:        while (*ps >= '0' && *ps <= '9') po = po * 10 + (*ps - '0'), ps++;
+        2:  544:        if (po > 0 && po < 65536) *port = (uint16_t)po;
+        2:  545:        host_end = ps;
+        -:  546:    }
+        2:  547:    if (*host_end == '/') {
+        2:  548:        size_t pn = strlen(host_end);
+       2*:  549:        if (pn >= path_cap) return -1;
+        2:  550:        memcpy(path, host_end, pn + 1);
+        -:  551:    } else {
+    #####:  552:        snprintf(path, path_cap, "/");
+        -:  553:    }
+        2:  554:    return 0;
+        -:  555:}
+        -:  556:
+        -:  557:/* 单次同步请求（连接可复用/新建）；返回 0 成功 */
+        2:  558:static int sync_once(RHttpConn *c, const char *path, const char *const *headers,
+        -:  559:                     const char *body, size_t body_len, int timeout_ms,
+        -:  560:                     RHttpResp *resp, Buf *out) {
+       2*:  561:    if (rhttp_send(c, "POST", path, headers, body, body_len) != 0) return -1;
+       2*:  562:    if (rhttp_read_headers(c, resp, timeout_ms) != 0) return -1;
+        2:  563:    buf_reset(out);
+        -:  564:    char tmp[16384];
+        1:  565:    for (;;) {
+        3:  566:        ssize_t n = rhttp_read_body(c, tmp, sizeof(tmp), timeout_ms);
+       3*:  567:        if (n < 0) break;
+        3:  568:        if (n == 0) break;
+        1:  569:        buf_append(out, tmp, (size_t)n);
+        -:  570:    }
+        2:  571:    return 0;
+        -:  572:}
+        -:  573:
+        2:  574:char *rhttp_request_sync(const char *url, const char *const *headers,
+        -:  575:                         const char *body, size_t body_len,
+        -:  576:                         int timeout_ms, int *status, size_t *out_len) {
+        -:  577:    char host[256], path[2048];
+        -:  578:    uint16_t port;
+        -:  579:    int tls;
+       2*:  580:    if (parse_url(url, host, sizeof(host), &port, &tls, path, sizeof(path)) != 0) return NULL;
+        -:  581:
+        -:  582:    RHttpResp resp;
+        -:  583:    Buf out;
+        2:  584:    buf_init(&out);
+        2:  585:    int ok = 0;
+        -:  586:    /* 尝试池化连接；失败（失效/新连接失败）则重建重试一次 */
+        4:  587:    for (int attempt = 0; attempt < 2 && !ok; attempt++) {
+       2*:  588:        RHttpConn *c = attempt == 0 ? pool_take(host, port, tls) : NULL;
+        2:  589:        int fresh = 0;
+        2:  590:        if (!c) {
+        2:  591:            c = rhttp_connect(host, port, tls, timeout_ms);
+        2:  592:            fresh = 1;
+       2*:  593:            if (!c) break;
+        -:  594:        }
+        2:  595:        if (sync_once(c, path, headers, body, body_len, timeout_ms, &resp, &out) == 0) {
+        2:  596:            ok = 1;
+        2:  597:            pool_put(c, host, port, tls);
+        -:  598:        } else {
+    #####:  599:            rhttp_close(c);
+    #####:  600:            if (!fresh && attempt == 0) {
+        -:  601:                /* 池化连接失效：丢弃重试（下一轮新建） */
+    #####:  602:                continue;
+        -:  603:            }
+    #####:  604:            break;
+        -:  605:        }
+        -:  606:    }
+        2:  607:    if (!ok) {
+    #####:  608:        buf_free(&out);
+    #####:  609:        return NULL;
+        -:  610:    }
+        2:  611:    if (status) *status = resp.status;
+        2:  612:    if (out_len) *out_len = out.len;
+        2:  613:    if (!out.data) {
+        1:  614:        out.data = (uint8_t *)malloc(1);
+        1:  615:        if (out.data) out.data[0] = '\0';
+        -:  616:    }
+        2:  617:    return (char *)out.data;
+        -:  618:}

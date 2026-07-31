@@ -1,0 +1,411 @@
+        -:    0:Source:src/highlight/highlight.c
+        -:    0:Graph:src/highlight/highlight.gcno
+        -:    0:Data:src/highlight/highlight.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/highlight/highlight.h"
+        -:    2:#include <ctype.h>
+        -:    3:#include <string.h>
+        -:    4:
+        -:    5:/* ---------- 关键字表 ---------- */
+        -:    6:
+        -:    7:static const char *KW_C[] = {
+        -:    8:    "auto","break","case","const","continue","default","do","else",
+        -:    9:    "enum","extern","for","goto","if","inline","register",
+        -:   10:    "restrict","return","sizeof","static","struct","switch","typedef",
+        -:   11:    "union","volatile","while","_Complex", NULL};
+        -:   12:static const char *TY_C[] = {
+        -:   13:    "int","char","void","float","double","long","short","unsigned","signed","_Bool",
+        -:   14:    "bool","int8_t","int16_t","int32_t","int64_t","uint8_t","uint16_t","uint32_t",
+        -:   15:    "uint64_t","size_t","ssize_t","intptr_t","uintptr_t","FILE","errno_t", NULL};
+        -:   16:static const char *BU_C[] = {
+        -:   17:    "printf","scanf","fprintf","sprintf","snprintf","malloc","calloc","realloc","free",
+        -:   18:    "memcpy","memset","memmove","strlen","strcmp","strncmp","strcpy","strncpy","strcat",
+        -:   19:    "strstr","strchr","exit","abort","assert","perror","NULL","true","false", NULL};
+        -:   20:
+        -:   21:static const char *KW_CPP[] = {
+        -:   22:    "alignas","alignof","and","asm","bitand","bitor","catch","class","compl","concept",
+        -:   23:    "constexpr","consteval","constinit","co_await","co_return","co_yield","decltype",
+        -:   24:    "delete","explicit","export","friend","mutable","namespace","new","noexcept","not",
+        -:   25:    "operator","or","private","protected","public","reinterpret_cast","requires",
+        -:   26:    "static_assert","static_cast","template","this","thread_local","throw","try",
+        -:   27:    "typeid","typename","using","virtual","xor","xor_eq", NULL};
+        -:   28:static const char *TY_CPP[] = {
+        -:   29:    "int","char","void","float","double","long","short","unsigned","signed","bool",
+        -:   30:    "string","vector","map","set","unordered_map","unique_ptr","shared_ptr","weak_ptr",
+        -:   31:    "optional","variant","any","pair","tuple","array","deque","list","stack","queue",
+        -:   32:    "iostream","ostream","istream","fstream","string_view","nullptr_t", NULL};
+        -:   33:
+        -:   34:static const char *KW_PY[] = {
+        -:   35:    "False","None","True","and","as","assert","async","await","break","class","continue",
+        -:   36:    "def","del","elif","else","except","finally","for","from","global","if","import",
+        -:   37:    "in","is","lambda","nonlocal","not","or","pass","raise","return","try","while",
+        -:   38:    "with","yield", NULL};
+        -:   39:static const char *BU_PY[] = {
+        -:   40:    "print","len","range","str","int","float","list","dict","set","tuple","map","filter",
+        -:   41:    "zip","sorted","enumerate","open","input","type","isinstance","abs","min","max","sum",
+        -:   42:    "any","all","reversed","format","repr","bytes","bool", NULL};
+        -:   43:
+        -:   44:static const char *KW_JS[] = {
+        -:   45:    "async","await","break","case","catch","class","const","continue","debugger","default",
+        -:   46:    "delete","do","else","export","extends","finally","for","function","if","import","in",
+        -:   47:    "instanceof","let","new","of","return","static","super","switch","this","throw","try",
+        -:   48:    "typeof","var","void","while","with","yield","null","undefined", NULL};
+        -:   49:static const char *BU_JS[] = {
+        -:   50:    "console","document","window","JSON","Math","Date","Promise","Array","Object",
+        -:   51:    "String","Number","Boolean","parseInt","parseFloat","setTimeout","setInterval",
+        -:   52:    "fetch","Symbol","RegExp","Map","Set","WeakMap", NULL};
+        -:   53:static const char *TY_TS[] = {"string","number","boolean","any","unknown","never","void",
+        -:   54:    "object","Record","Partial","Required","Readonly","Pick","Omit", NULL};
+        -:   55:
+        -:   56:static const char *KW_JAVA[] = {
+        -:   57:    "abstract","assert","break","case","catch","class","const",
+        -:   58:    "continue","default","do","else","enum","extends","final","finally",
+        -:   59:    "for","goto","if","implements","import","instanceof","interface",
+        -:   60:    "native","new","package","private","protected","public","return","static",
+        -:   61:    "strictfp","super","switch","synchronized","this","throw","throws","transient","try",
+        -:   62:    "volatile","while","true","false","null", NULL};
+        -:   63:static const char *TY_JAVA[] = {
+        -:   64:    "int","char","void","float","double","long","short","byte","boolean",
+        -:   65:    "String","Integer","Long","Double","Float","Boolean","Character","Object","List",
+        -:   66:    "ArrayList","Map","HashMap","Set","HashSet","Optional","Stream","Exception",
+        -:   67:    "RuntimeException", NULL};
+        -:   68:
+        -:   69:static const char *KW_KT[] = {
+        -:   70:    "as","break","class","continue","do","else","false","for","fun","if","in","interface",
+        -:   71:    "is","null","object","package","return","super","this","throw","true","try","typealias",
+        -:   72:    "typeof","val","var","when","while","by","catch","finally","dynamic","field","file",
+        -:   73:    "finally","get","import","init","param","property","receiver","set","setparam",
+        -:   74:    "where", NULL};
+        -:   75:static const char *TY_KT[] = {
+        -:   76:    "String","Int","Long","Double","Float","Boolean","Char","Byte","Short","Unit",
+        -:   77:    "Any","Nothing","List","MutableList","Map","Set","Array","Pair","Triple", NULL};
+        -:   78:static const char *BU_KT[] = {"println","print","listOf","mapOf","setOf","arrayOf",
+        -:   79:    "require","check","error","TODO", NULL};
+        -:   80:
+        -:   81:static const char *KW_GO[] = {
+        -:   82:    "break","case","chan","const","continue","default","defer","else","fallthrough",
+        -:   83:    "for","func","go","goto","if","import","interface","map","package","range","return",
+        -:   84:    "select","struct","switch","type","var", NULL};
+        -:   85:static const char *TY_GO[] = {
+        -:   86:    "string","int","int8","int16","int32","int64","uint","uint8","uint16","uint32",
+        -:   87:    "uint64","uintptr","byte","rune","float32","float64","complex64","complex128",
+        -:   88:    "bool","error","any", NULL};
+        -:   89:static const char *BU_GO[] = {
+        -:   90:    "make","new","len","cap","append","copy","delete","close","panic","recover","print",
+        -:   91:    "println","fmt","nil","true","false", NULL};
+        -:   92:
+        -:   93:static const char *KW_RS[] = {
+        -:   94:    "as","async","await","break","const","continue","crate","dyn","else","enum","extern",
+        -:   95:    "false","fn","for","if","impl","in","let","loop","match","mod","move","mut","pub",
+        -:   96:    "ref","return","self","Self","static","struct","super","trait","true","type","unsafe",
+        -:   97:    "use","where","while", NULL};
+        -:   98:static const char *TY_RS[] = {
+        -:   99:    "i8","i16","i32","i64","i128","isize","u8","u16","u32","u64","u128","usize",
+        -:  100:    "f32","f64","bool","char","str","String","Vec","Option","Result","Box","HashMap",
+        -:  101:    "HashSet","Rc","Arc","Mutex", NULL};
+        -:  102:static const char *BU_RS[] = {"println","print","eprintln","format","vec","Some","None",
+        -:  103:    "Ok","Err","panic","assert","assert_eq", NULL};
+        -:  104:
+        -:  105:static const char *KW_SQL[] = {
+        -:  106:    "SELECT","FROM","WHERE","INSERT","INTO","UPDATE","DELETE","CREATE","TABLE","DROP",
+        -:  107:    "ALTER","JOIN","LEFT","RIGHT","INNER","OUTER","FULL","CROSS","ON","GROUP","BY",
+        -:  108:    "ORDER","HAVING","LIMIT","OFFSET","AS","AND","OR","NOT","NULL","PRIMARY","KEY",
+        -:  109:    "FOREIGN","INDEX","VIEW","BEGIN","COMMIT","ROLLBACK","UNION","ALL","DISTINCT",
+        -:  110:    "VALUES","SET","CASE","WHEN","THEN","ELSE","END","EXISTS","BETWEEN","LIKE","IN",
+        -:  111:    "IS","ASC","DESC","COUNT","SUM","AVG","MIN","MAX", NULL};
+        -:  112:
+        -:  113:static const char *KW_BASH[] = {
+        -:  114:    "if","then","else","elif","fi","for","while","do","done","case","esac","function",
+        -:  115:    "in","select","until","return","break","continue","local","export","readonly",
+        -:  116:    "declare","echo","cd","exit","source","trap","set","unset","shift", NULL};
+        -:  117:static const char *BU_BASH[] = {"true","false", NULL};
+        -:  118:
+        -:  119:static const char *KW_JSON[] = {"true","false","null", NULL};
+        -:  120:
+        -:  121:typedef struct {
+        -:  122:    const char *name;
+        -:  123:    const char *const *keywords;
+        -:  124:    const char *const *types;
+        -:  125:    const char *const *builtins;
+        -:  126:    int hash_comment;    /* # 行注释 */
+        -:  127:    int dash_comment;    /* -- 行注释 */
+        -:  128:    int preproc;         /* #include/#define（C 系） */
+        -:  129:    int backtick_string; /* `...` */
+        -:  130:    int html;            /* HTML 模式 */
+        -:  131:    int is_css;          /* CSS 模式（专用 lexer） */
+        -:  132:    const char *line_comment; /* "//" 或 NULL */
+        -:  133:    int block_comment;   /* C 块注释 */
+        -:  134:} HlLangCfg;
+        -:  135:
+        -:  136:static const HlLangCfg LANGS[] = {
+        -:  137:    {"c",      KW_C, TY_C, BU_C, 0, 0, 1, 0, 0, 0, "//", 1},
+        -:  138:    {"cpp",    KW_CPP, TY_CPP, BU_C, 0, 0, 1, 0, 0, 0, "//", 1},
+        -:  139:    {"c++",    KW_CPP, TY_CPP, BU_C, 0, 0, 1, 0, 0, 0, "//", 1},
+        -:  140:    {"python", KW_PY, NULL, BU_PY, 1, 0, 0, 0, 0, 0, NULL, 0},
+        -:  141:    {"py",     KW_PY, NULL, BU_PY, 1, 0, 0, 0, 0, 0, NULL, 0},
+        -:  142:    {"js",     KW_JS, NULL, BU_JS, 0, 0, 0, 1, 0, 0, "//", 1},
+        -:  143:    {"javascript", KW_JS, NULL, BU_JS, 0, 0, 0, 1, 0, 0, "//", 1},
+        -:  144:    {"ts",     KW_JS, TY_TS, BU_JS, 0, 0, 0, 1, 0, 0, "//", 1},
+        -:  145:    {"typescript", KW_JS, TY_TS, BU_JS, 0, 0, 0, 1, 0, 0, "//", 1},
+        -:  146:    {"java",   KW_JAVA, TY_JAVA, NULL, 0, 0, 0, 0, 0, 0, "//", 1},
+        -:  147:    {"kotlin", KW_KT, TY_KT, BU_KT, 0, 0, 0, 0, 0, 0, "//", 1},
+        -:  148:    {"go",     KW_GO, TY_GO, BU_GO, 0, 0, 0, 1, 0, 0, "//", 1},
+        -:  149:    {"rust",   KW_RS, TY_RS, BU_RS, 0, 0, 0, 0, 0, 0, "//", 1},
+        -:  150:    {"sql",    KW_SQL, NULL, NULL, 0, 1, 0, 0, 0, 0, NULL, 0},
+        -:  151:    {"bash",   KW_BASH, NULL, BU_BASH, 1, 0, 0, 0, 0, 0, NULL, 0},
+        -:  152:    {"sh",     KW_BASH, NULL, BU_BASH, 1, 0, 0, 0, 0, 0, NULL, 0},
+        -:  153:    {"json",   KW_JSON, NULL, NULL, 0, 0, 0, 0, 0, 0, NULL, 0},
+        -:  154:    {"html",   NULL, NULL, NULL, 0, 0, 0, 0, 1, 0, NULL, 0},
+        -:  155:    {"xml",    NULL, NULL, NULL, 0, 0, 0, 0, 1, 0, NULL, 0},
+        -:  156:    {"css",    NULL, NULL, NULL, 0, 0, 0, 0, 0, 1, NULL, 1},
+        -:  157:};
+        -:  158:
+    #####:  159:size_t rikka_hl_lang_count(void) { return sizeof(LANGS) / sizeof(LANGS[0]); }
+    #####:  160:const char *rikka_hl_lang_name(size_t idx) {
+    #####:  161:    if (idx >= sizeof(LANGS) / sizeof(LANGS[0])) return NULL;
+    #####:  162:    return LANGS[idx].name;
+        -:  163:}
+        -:  164:
+        8:  165:static const HlLangCfg *find_lang(const char *lang) {
+       8*:  166:    if (!lang) return NULL;
+       75:  167:    for (size_t i = 0; i < sizeof(LANGS) / sizeof(LANGS[0]); i++) {
+       74:  168:        if (strcmp(LANGS[i].name, lang) == 0) return &LANGS[i];
+        -:  169:    }
+        1:  170:    return NULL;
+        -:  171:}
+        -:  172:
+       62:  173:static int in_table(const char *const *tbl, const char *word, size_t len) {
+       62:  174:    if (!tbl) return 0;
+     1207:  175:    for (; *tbl; tbl++) {
+     1167:  176:        if (strlen(*tbl) == len && memcmp(*tbl, word, len) == 0) return 1;
+        -:  177:    }
+       40:  178:    return 0;
+        -:  179:}
+        -:  180:
+       76:  181:static size_t push(RikkaHlToken *out, size_t cap, size_t *n,
+        -:  182:                   size_t start, size_t len, RikkaHlType type) {
+      76*:  183:    if (*n >= cap) return 0;
+       76:  184:    out[*n].start = start;
+       76:  185:    out[*n].len = len;
+       76:  186:    out[*n].type = type;
+       76:  187:    (*n)++;
+       76:  188:    return 1;
+        -:  189:}
+        -:  190:
+        8:  191:static size_t scan_string(const char *code, size_t len, size_t i, char quote) {
+        8:  192:    i++;
+       38:  193:    while (i < len) {
+       38:  194:        if (code[i] == '\\' && i + 1 < len) { i += 2; continue; }
+       37:  195:        if (code[i] == quote) { i++; break; }
+       29:  196:        i++;
+        -:  197:    }
+        8:  198:    return i;
+        -:  199:}
+        -:  200:
+        -:  201:/* 标识符扫描 + 分类 */
+       25:  202:static void lex_ident(const HlLangCfg *cfg, const char *code, size_t len,
+        -:  203:                      size_t *i, RikkaHlToken *out, size_t cap, size_t *n) {
+       25:  204:    size_t start = *i;
+      113:  205:    while (*i < len && (isalnum((unsigned char)code[*i]) || code[*i] == '_'))
+       88:  206:        (*i)++;
+       25:  207:    size_t wlen = *i - start;
+       25:  208:    const char *w = code + start;
+       25:  209:    RikkaHlType t = RIKKA_HL_PLAIN;
+       25:  210:    if (in_table(cfg->types, w, wlen)) t = RIKKA_HL_TYPE;          /* 类型优先 */
+       21:  211:    else if (in_table(cfg->keywords, w, wlen)) t = RIKKA_HL_KEYWORD;
+       16:  212:    else if (in_table(cfg->builtins, w, wlen)) t = RIKKA_HL_BUILTIN;
+        -:  213:    else {
+        -:  214:        /* 函数调用：后跟 ( 且前一个 token 是普通标识符 */
+       13:  215:        size_t j = *i;
+       20:  216:        while (j < len && (code[j] == ' ' || code[j] == '\t')) j++;
+       13:  217:        if (j < len && code[j] == '(') t = RIKKA_HL_FUNC;
+        -:  218:    }
+       25:  219:    push(out, cap, n, start, wlen, t);
+       25:  220:}
+        -:  221:
+        -:  222:/* HTML 模式 */
+        4:  223:static void lex_html(const char *code, size_t len, size_t *i,
+        -:  224:                     RikkaHlToken *out, size_t cap, size_t *n) {
+        4:  225:    if (code[*i] == '<') {
+        -:  226:        /* 注释 */
+        3:  227:        if (len - *i >= 4 && memcmp(code + *i, "<!--", 4) == 0) {
+        1:  228:            size_t start = *i;
+        1:  229:            const char *end = strstr(code + *i + 4, "-->");
+       1*:  230:            *i = end ? (size_t)(end - code) + 3 : len;
+        1:  231:            push(out, cap, n, start, *i - start, RIKKA_HL_COMMENT);
+        1:  232:            return;
+        -:  233:        }
+        2:  234:        size_t start = *i;
+        2:  235:        (*i)++; /* < */
+        2:  236:        int closing = 0;
+        2:  237:        if (*i < len && code[*i] == '/') { closing = 1; (*i)++; }
+        2:  238:        size_t tstart = *i;
+        8:  239:        while (*i < len && (isalnum((unsigned char)code[*i]) || code[*i] == '-')) (*i)++;
+        2:  240:        push(out, cap, n, start, *i - start, RIKKA_HL_TAG);
+        -:  241:        (void)closing; (void)tstart;
+        -:  242:        /* 属性与值 */
+        6:  243:        while (*i < len && code[*i] != '>') {
+        4:  244:            if (code[*i] == ' ' || code[*i] == '\t' || code[*i] == '\n' || code[*i] == '\r' ||
+        3:  245:                code[*i] == '/' || code[*i] == '=') {
+        2:  246:                (*i)++;
+        2:  247:                continue;
+        -:  248:            }
+        2:  249:            if (code[*i] == '"' || code[*i] == '\'') {
+        1:  250:                size_t s = *i;
+        1:  251:                *i = scan_string(code, len, *i, code[*i]);
+        1:  252:                push(out, cap, n, s, *i - s, RIKKA_HL_STRING);
+        1:  253:                continue;
+        -:  254:            }
+        1:  255:            size_t astart = *i;
+        6:  256:            while (*i < len && (isalnum((unsigned char)code[*i]) || code[*i] == '-' ||
+        1:  257:                                code[*i] == '_' || code[*i] == ':'))
+        5:  258:                (*i)++;
+        1:  259:            if (*i > astart)
+        1:  260:                push(out, cap, n, astart, *i - astart, RIKKA_HL_ATTR);
+        -:  261:            else
+    #####:  262:                (*i)++;
+        -:  263:        }
+        2:  264:        if (*i < len) (*i)++; /* > */
+        2:  265:        return;
+        -:  266:    }
+        -:  267:    /* 文本 */
+        1:  268:    size_t start = *i;
+        5:  269:    while (*i < len && code[*i] != '<') (*i)++;
+        1:  270:    push(out, cap, n, start, *i - start, RIKKA_HL_PLAIN);
+        -:  271:}
+        -:  272:
+        -:  273:/* CSS 模式 */
+    #####:  274:static void lex_css(const char *code, size_t len, size_t *i,
+        -:  275:                    RikkaHlToken *out, size_t cap, size_t *n) {
+    #####:  276:    size_t start = *i;
+    #####:  277:    char c = code[*i];
+    #####:  278:    if (c == '/' && *i + 1 < len && code[*i + 1] == '*') {
+    #####:  279:        const char *end = strstr(code + *i + 2, "*/");
+    #####:  280:        *i = end ? (size_t)(end - code) + 2 : len;
+    #####:  281:        push(out, cap, n, start, *i - start, RIKKA_HL_COMMENT);
+    #####:  282:        return;
+        -:  283:    }
+    #####:  284:    if (c == '"' || c == '\'') {
+    #####:  285:        *i = scan_string(code, len, *i, c);
+    #####:  286:        push(out, cap, n, start, *i - start, RIKKA_HL_STRING);
+    #####:  287:        return;
+        -:  288:    }
+    #####:  289:    if (isalpha((unsigned char)c) || c == '_' || c == '-') {
+    #####:  290:        size_t k = *i;
+    #####:  291:        while (k < len && (isalnum((unsigned char)code[k]) || code[k] == '-' || code[k] == '_')) k++;
+        -:  292:        /* 冒号前的属性名 → ATTR */
+    #####:  293:        size_t j = k;
+    #####:  294:        while (j < len && code[j] == ' ') j++;
+    #####:  295:        RikkaHlType t = (j < len && code[j] == ':') ? RIKKA_HL_ATTR : RIKKA_HL_PLAIN;
+    #####:  296:        *i = k;
+    #####:  297:        push(out, cap, n, start, k - start, t);
+    #####:  298:        return;
+        -:  299:    }
+    #####:  300:    if (isdigit((unsigned char)c) || (c == '.' && *i + 1 < len && isdigit((unsigned char)code[*i + 1]))) {
+    #####:  301:        while (*i < len && (isalnum((unsigned char)code[*i]) || code[*i] == '.' ||
+    #####:  302:                            code[*i] == '%' || code[*i] == '#' || code[*i] == '-'))
+    #####:  303:            (*i)++;
+    #####:  304:        push(out, cap, n, start, *i - start, RIKKA_HL_NUMBER);
+    #####:  305:        return;
+        -:  306:    }
+    #####:  307:    (*i)++;
+    #####:  308:    push(out, cap, n, start, 1, RIKKA_HL_OPERATOR);
+        -:  309:}
+        -:  310:
+        8:  311:size_t rikka_hl_tokenize(const char *lang, const char *code, size_t len,
+        -:  312:                         RikkaHlToken *out, size_t cap) {
+        8:  313:    const HlLangCfg *cfg = find_lang(lang);
+        8:  314:    if (!cfg || cap == 0) {
+        1:  315:        if (out && cap > 0 && code) { out[0].start = 0; out[0].len = len; out[0].type = RIKKA_HL_PLAIN; return 1; }
+    #####:  316:        return 0;
+        -:  317:    }
+        7:  318:    size_t n = 0, i = 0;
+      141:  319:    while (i < len && n < cap) {
+      134:  320:        char c = code[i];
+      134:  321:        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { i++; continue; }
+        -:  322:
+       74:  323:        if (cfg->html) { lex_html(code, len, &i, out, cap, &n); continue; }
+      70*:  324:        if (cfg->is_css) {
+    #####:  325:            lex_css(code, len, &i, out, cap, &n);
+    #####:  326:            continue;
+        -:  327:        }
+        -:  328:
+        -:  329:        /* 注释 */
+       70:  330:        if (cfg->line_comment && len - i >= 2 && code[i] == '/' && code[i + 1] == '/') {
+        2:  331:            size_t start = i;
+       18:  332:            while (i < len && code[i] != '\n') i++;
+        2:  333:            push(out, cap, &n, start, i - start, RIKKA_HL_COMMENT);
+        2:  334:            continue;
+        -:  335:        }
+      68*:  336:        if (cfg->block_comment && len - i >= 2 && code[i] == '/' && code[i + 1] == '*') {
+    #####:  337:            size_t start = i;
+    #####:  338:            const char *end = strstr(code + i + 2, "*/");
+    #####:  339:            i = end ? (size_t)(end - code) + 2 : len;
+    #####:  340:            push(out, cap, &n, start, i - start, RIKKA_HL_COMMENT);
+    #####:  341:            continue;
+        -:  342:        }
+       68:  343:        if (cfg->hash_comment && c == '#') {
+        1:  344:            size_t start = i;
+       10:  345:            while (i < len && code[i] != '\n') i++;
+        1:  346:            push(out, cap, &n, start, i - start, RIKKA_HL_COMMENT);
+        1:  347:            continue;
+        -:  348:        }
+      67*:  349:        if (cfg->dash_comment && len - i >= 2 && code[i] == '-' && code[i + 1] == '-') {
+    #####:  350:            size_t start = i;
+    #####:  351:            while (i < len && code[i] != '\n') i++;
+    #####:  352:            push(out, cap, &n, start, i - start, RIKKA_HL_COMMENT);
+    #####:  353:            continue;
+        -:  354:        }
+       67:  355:        if (cfg->preproc && c == '#') {
+        1:  356:            size_t start = i;
+       19:  357:            while (i < len && code[i] != '\n') i++;
+        1:  358:            push(out, cap, &n, start, i - start, RIKKA_HL_PREPROC);
+        1:  359:            continue;
+        -:  360:        }
+        -:  361:
+        -:  362:        /* 字符串 */
+       66:  363:        if (c == '"' || c == '\'') {
+        6:  364:            size_t start = i;
+        6:  365:            i = scan_string(code, len, i, c);
+        6:  366:            push(out, cap, &n, start, i - start, RIKKA_HL_STRING);
+        6:  367:            continue;
+        -:  368:        }
+       60:  369:        if (cfg->backtick_string && c == '`') {
+        1:  370:            size_t start = i;
+        1:  371:            i = scan_string(code, len, i, '`');
+        1:  372:            push(out, cap, &n, start, i - start, RIKKA_HL_STRING);
+        1:  373:            continue;
+        -:  374:        }
+        -:  375:
+        -:  376:        /* 数字 */
+       59:  377:        if (isdigit((unsigned char)c) ||
+    #####:  378:            (c == '.' && i + 1 < len && isdigit((unsigned char)code[i + 1]))) {
+        3:  379:            size_t start = i;
+       10:  380:            while (i < len) {
+       10:  381:                char d = code[i];
+       10:  382:                if (isalnum((unsigned char)d) || d == '.' || d == '_' ||
+        3:  383:                    d == '+' || d == '-' || d == 'x' || d == 'X') {
+        -:  384:                    /* 避免把 a-b 的 - 吞进数字 */
+       7*:  385:                    if ((d == '+' || d == '-') && !(i > start &&
+    #####:  386:                        (code[i-1] == 'e' || code[i-1] == 'E')))
+        -:  387:                        break;
+        7:  388:                    i++;
+        -:  389:                } else break;
+        -:  390:            }
+        3:  391:            push(out, cap, &n, start, i - start, RIKKA_HL_NUMBER);
+        3:  392:            continue;
+        -:  393:        }
+        -:  394:
+        -:  395:        /* 标识符 */
+       56:  396:        if (isalpha((unsigned char)c) || c == '_') {
+       25:  397:            lex_ident(cfg, code, len, &i, out, cap, &n);
+       25:  398:            continue;
+        -:  399:        }
+        -:  400:
+        -:  401:        /* 其他符号 */
+       31:  402:        size_t start = i;
+       31:  403:        i++;
+       31:  404:        push(out, cap, &n, start, 1, RIKKA_HL_OPERATOR);
+        -:  405:    }
+        7:  406:    return n;
+        -:  407:}

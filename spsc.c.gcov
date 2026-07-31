@@ -1,0 +1,105 @@
+        -:    0:Source:src/pipe/spsc.c
+        -:    0:Graph:src/pipe/spsc.gcno
+        -:    0:Data:src/pipe/spsc.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/pipe/spsc.h"
+        -:    2:#include <stdlib.h>
+        -:    3:#include <string.h>
+        -:    4:
+        -:    5:/*
+        -:    6: * head/tail 单调递增（不取模）；环形写位置 = head & mask（cap 为 2 的幂）。
+        -:    7: * 容量 = head - tail（无下溢）。数据块 = u32 长度前缀 + 内容。
+        -:    8: */
+        -:    9:
+        -:   10:#define HDR 4
+        -:   11:
+        8:   12:void rk_spsc_init(RkSpsc *q, size_t cap) {
+        8:   13:    size_t c = 1;
+       85:   14:    while (c < cap) c <<= 1;
+        8:   15:    if (c < 64) c = 64;
+        8:   16:    q->buf = (uint8_t *)malloc(c);
+        8:   17:    q->cap = c;
+        8:   18:    q->head = 0;
+        8:   19:    q->tail = 0;
+        8:   20:    q->closed = 0;
+        8:   21:}
+        -:   22:
+        8:   23:void rk_spsc_destroy(RkSpsc *q) {
+        8:   24:    free(q->buf);
+        8:   25:    q->buf = NULL;
+        8:   26:    q->cap = 0;
+        8:   27:}
+        -:   28:
+      523:   29:int rk_spsc_push(RkSpsc *q, const void *data, size_t len) {
+     523*:   30:    if (q->closed) return -1;
+      523:   31:    if (len == 0) return -1; /* 空块禁止：pop 返回 0 的语义是"关闭且空" */
+      522:   32:    size_t need = HDR + len;
+      522:   33:    if (need > q->cap) return -1;
+      521:   34:    size_t used = q->head - __atomic_load_n(&q->tail, __ATOMIC_ACQUIRE);
+      521:   35:    if (used + need > q->cap) return -1;
+      519:   36:    size_t mask = q->cap - 1;
+      519:   37:    size_t h = q->head & mask;
+      519:   38:    size_t hw = q->head; /* 单调写位 */
+      519:   39:    uint32_t L = (uint32_t)len;
+      519:   40:    if (h + need <= q->cap) {
+      519:   41:        memcpy(q->buf + h, &L, HDR);
+      519:   42:        if (len) memcpy(q->buf + h + HDR, data, len);
+        -:   43:    } else {
+    #####:   44:        size_t p1 = q->cap - h;
+    #####:   45:        memcpy(q->buf + h, &L, p1 < HDR ? p1 : HDR);
+    #####:   46:        if (p1 < HDR) memcpy(q->buf, (const uint8_t *)&L + p1, HDR - p1);
+    #####:   47:        size_t body = (h + HDR) & mask;
+    #####:   48:        size_t b1 = q->cap - body;
+    #####:   49:        if (b1 >= len) {
+    #####:   50:            if (len) memcpy(q->buf + body, data, len);
+        -:   51:        } else {
+    #####:   52:            if (len) {
+    #####:   53:                memcpy(q->buf + body, data, b1);
+    #####:   54:                memcpy(q->buf, (const uint8_t *)data + b1, len - b1);
+        -:   55:            }
+        -:   56:        }
+        -:   57:    }
+        -:   58:    /* release：数据写完再发布 head */
+      519:   59:    __atomic_store_n(&q->head, hw + need, __ATOMIC_RELEASE);
+      519:   60:    return 0;
+        -:   61:}
+        -:   62:
+      515:   63:ssize_t rk_spsc_pop(RkSpsc *q, void *out, size_t cap) {
+        -:   64:    /* 先读 closed 再读 head：closed 的 release 蕴含此前所有 push 的 release，
+        -:   65:     * 故 closed=1 时 head 必为最新（不会误判空丢数据） */
+      515:   66:    int closed = __atomic_load_n(&q->closed, __ATOMIC_ACQUIRE);
+      515:   67:    size_t head = __atomic_load_n(&q->head, __ATOMIC_ACQUIRE);
+      515:   68:    size_t used = head - q->tail;
+      515:   69:    if (used == 0) return closed ? 0 : -1;
+      510:   70:    size_t mask = q->cap - 1;
+      510:   71:    size_t t = q->tail & mask;
+        -:   72:    uint32_t len;
+      510:   73:    if (t + HDR <= q->cap) {
+      510:   74:        memcpy(&len, q->buf + t, HDR);
+        -:   75:    } else {
+    #####:   76:        size_t p1 = q->cap - t;
+    #####:   77:        memcpy(&len, q->buf + t, p1);
+    #####:   78:        memcpy((uint8_t *)&len + p1, q->buf, HDR - p1);
+        -:   79:    }
+     510*:   80:    if (len > cap) return -1;
+      510:   81:    size_t body = (t + HDR) & mask;
+      510:   82:    size_t b1 = q->cap - body;
+      510:   83:    if (b1 >= len) {
+      510:   84:        if (len) memcpy(out, q->buf + body, len);
+        -:   85:    } else {
+    #####:   86:        if (len) {
+    #####:   87:            memcpy(out, q->buf + body, b1);
+    #####:   88:            memcpy((uint8_t *)out + b1, q->buf, len - b1);
+        -:   89:        }
+        -:   90:    }
+      510:   91:    __atomic_store_n(&q->tail, q->tail + HDR + len, __ATOMIC_RELEASE);
+      510:   92:    return (ssize_t)len;
+        -:   93:}
+        -:   94:
+        3:   95:void rk_spsc_close(RkSpsc *q) {
+        3:   96:    __atomic_store_n(&q->closed, 1, __ATOMIC_RELEASE);
+        3:   97:}
+        -:   98:
+    #####:   99:size_t rk_spsc_used(const RkSpsc *q) {
+    #####:  100:    return q->head - q->tail;
+        -:  101:}

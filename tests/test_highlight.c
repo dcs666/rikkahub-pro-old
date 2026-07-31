@@ -147,6 +147,36 @@ TEST(go_backtick) {
     ASSERT_EQ_INT(RIKKA_HL_STRING, ts->type);
 }
 
+TEST(css_lang) {
+    const char *code = "body { color: red; /* comment */ }";
+    RikkaHlToken toks[64];
+    size_t n = rikka_hl_tokenize("css", code, strlen(code), toks, 64);
+    ASSERT(n > 0);
+    int found_comment = 0;
+    for (size_t i = 0; i < n; i++)
+        if (toks[i].type == RIKKA_HL_COMMENT) found_comment = 1;
+    ASSERT(found_comment);
+}
+
+TEST(lang_api) {
+    ASSERT(rikka_hl_lang_count() >= 19);
+    ASSERT(strcmp(rikka_hl_lang_name(0), "c") == 0);
+    ASSERT_NULL(rikka_hl_lang_name(10000));
+}
+
+TEST(more_languages) {
+    /* 覆盖更多语言的 lexer（go/rust/sql/bash） */
+    const char *go = "func main() { x := 1 }";
+    const char *rust = "fn main() { let x = 1; }";
+    const char *sql = "SELECT * FROM t WHERE x = 1";
+    const char *bash = "if [ -f x ]; then echo hi; fi";
+    RikkaHlToken toks[128];
+    ASSERT(rikka_hl_tokenize("go", go, strlen(go), toks, 128) > 0);
+    ASSERT(rikka_hl_tokenize("rust", rust, strlen(rust), toks, 128) > 0);
+    ASSERT(rikka_hl_tokenize("sql", sql, strlen(sql), toks, 128) > 0);
+    ASSERT(rikka_hl_tokenize("bash", bash, strlen(bash), toks, 128) > 0);
+}
+
 int run_highlight_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(highlight, c_lang),
@@ -157,6 +187,9 @@ int run_highlight_suite(void) {
         RIKKA_TEST_REGISTER(highlight, escape_in_string),
         RIKKA_TEST_REGISTER(highlight, cap_overflow),
         RIKKA_TEST_REGISTER(highlight, go_backtick),
+        RIKKA_TEST_REGISTER(highlight, css_lang),
+        RIKKA_TEST_REGISTER(highlight, lang_api),
+        RIKKA_TEST_REGISTER(highlight, more_languages),
     };
     return run_suite("highlight", tests, sizeof(tests) / sizeof(tests[0]));
 }

@@ -65,6 +65,10 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.close()
             except Exception:
                 pass
+        elif self.path == '/fail500':
+            self.send_response(500)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
         elif self.path == '/sse_bad':
             # 畸形 SSE：超长行（> 8KB）触发解析错误
             self.send_response(200)

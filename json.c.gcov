@@ -1,0 +1,933 @@
+        -:    0:Source:src/json/json.c
+        -:    0:Graph:src/json/json.gcno
+        -:    0:Data:src/json/json.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/json/json.h"
+        -:    2:#include "rikka/core/buffer.h"
+        -:    3:#include <stdlib.h>
+        -:    4:#include <string.h>
+        -:    5:#include <stdio.h>
+        -:    6:
+        -:    7:/* ================= 值解析 ================= */
+        -:    8:
+        -:    9:typedef struct {
+        -:   10:    Arena *arena;
+        -:   11:    const char *p, *end;
+        -:   12:    size_t err_pos;
+        -:   13:    int depth;
+        -:   14:} ParseCtx;
+        -:   15:
+        -:   16:#define RJSON_MAX_DEPTH 512
+        -:   17:
+     2017:   18:static void skip_ws(ParseCtx *c) {
+     2030:   19:    while (c->p < c->end && (*c->p == ' ' || *c->p == '\t' || *c->p == '\n' || *c->p == '\r'))
+       13:   20:        c->p++;
+     2017:   21:}
+        -:   22:
+      620:   23:static RJson *new_node(ParseCtx *c, RJsonType t) {
+      620:   24:    RJson *v = (RJson *)arena_alloc0(c->arena, 8, sizeof(RJson));
+     620*:   25:    if (!v) return NULL;
+      620:   26:    v->type = t;
+      620:   27:    return v;
+        -:   28:}
+        -:   29:
+       91:   30:static char *dup_str(ParseCtx *c, const char *s, size_t n) {
+       91:   31:    char *d = (char *)arena_alloc(c->arena, 1, n + 1);
+      91*:   32:    if (!d) return NULL;
+       91:   33:    memcpy(d, s, n);
+       91:   34:    d[n] = '\0';
+       91:   35:    return d;
+        -:   36:}
+        -:   37:
+        -:   38:/* 字符串字面量解析（含转义解码），返回解码后字节与长度（存 arena） */
+       91:   39:static const char *parse_string(ParseCtx *c, size_t *out_len) {
+       91:   40:    c->p++; /* 跳过 " */
+        -:   41:    Buf raw;
+       91:   42:    buf_init(&raw);
+       91:   43:    int ok = 0;
+      562:   44:    while (c->p < c->end) {
+      562:   45:        unsigned char ch = (unsigned char)*c->p;
+      562:   46:        if (ch == '"') { c->p++; ok = 1; break; }
+      471:   47:        if (ch == '\\') {
+       11:   48:            c->p++;
+      11*:   49:            if (c->p >= c->end) break;
+       11:   50:            switch (*c->p) {
+        5:   51:                case '"':  buf_append_byte(&raw, '"');  c->p++; break;
+        1:   52:                case '\\': buf_append_byte(&raw, '\\'); c->p++; break;
+    #####:   53:                case '/':  buf_append_byte(&raw, '/');  c->p++; break;
+    #####:   54:                case 'b':  buf_append_byte(&raw, '\b'); c->p++; break;
+    #####:   55:                case 'f':  buf_append_byte(&raw, '\f'); c->p++; break;
+        3:   56:                case 'n':  buf_append_byte(&raw, '\n'); c->p++; break;
+    #####:   57:                case 'r':  buf_append_byte(&raw, '\r'); c->p++; break;
+    #####:   58:                case 't':  buf_append_byte(&raw, '\t'); c->p++; break;
+        2:   59:                case 'u': {
+        2:   60:                    c->p++;
+       2*:   61:                    if (c->end - c->p < 4) goto done;
+        2:   62:                    uint32_t cp = 0;
+        2:   63:                    int valid = 1;
+       10:   64:                    for (int i = 0; i < 4; i++) {
+        8:   65:                        char h = c->p[i];
+        8:   66:                        cp <<= 4;
+        8:   67:                        if (h >= '0' && h <= '9') cp |= (uint32_t)(h - '0');
+        4:   68:                        else if (h >= 'a' && h <= 'f') cp |= (uint32_t)(h - 'a' + 10);
+        2:   69:                        else if (h >= 'A' && h <= 'F') cp |= (uint32_t)(h - 'A' + 10);
+    #####:   70:                        else { valid = 0; break; }
+        -:   71:                    }
+       2*:   72:                    if (!valid) goto done;
+        2:   73:                    c->p += 4;
+        2:   74:                    if (cp >= 0xD800 && cp <= 0xDBFF) {
+        -:   75:                        /* high surrogate：期待 \uDC00-\uDFFF */
+        1:   76:                        if (c->end - c->p >= 6 && c->p[0] == '\\' && c->p[1] == 'u') {
+        1:   77:                            uint32_t lo = 0;
+        1:   78:                            int lv = 1;
+        5:   79:                            for (int i = 0; i < 4; i++) {
+        4:   80:                                char h = c->p[2 + i];
+        4:   81:                                lo <<= 4;
+        4:   82:                                if (h >= '0' && h <= '9') lo |= (uint32_t)(h - '0');
+       2*:   83:                                else if (h >= 'a' && h <= 'f') lo |= (uint32_t)(h - 'a' + 10);
+        2:   84:                                else if (h >= 'A' && h <= 'F') lo |= (uint32_t)(h - 'A' + 10);
+    #####:   85:                                else { lv = 0; break; }
+        -:   86:                            }
+        1:   87:                            if (lv && lo >= 0xDC00 && lo <= 0xDFFF) {
+        1:   88:                                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+        1:   89:                                c->p += 6;
+        -:   90:                            }
+        -:   91:                        }
+        -:   92:                    }
+        2:   93:                    char utf8[4]; size_t n8 = 0;
+       2*:   94:                    if (cp < 0x80) { utf8[0] = (char)cp; n8 = 1; }
+       2*:   95:                    else if (cp < 0x800) { utf8[0] = (char)(0xC0 | (cp >> 6)); utf8[1] = (char)(0x80 | (cp & 0x3F)); n8 = 2; }
+        2:   96:                    else if (cp < 0x10000) { utf8[0] = (char)(0xE0 | (cp >> 12)); utf8[1] = (char)(0x80 | ((cp >> 6) & 0x3F)); utf8[2] = (char)(0x80 | (cp & 0x3F)); n8 = 3; }
+        1:   97:                    else { utf8[0] = (char)(0xF0 | (cp >> 18)); utf8[1] = (char)(0x80 | ((cp >> 12) & 0x3F)); utf8[2] = (char)(0x80 | ((cp >> 6) & 0x3F)); utf8[3] = (char)(0x80 | (cp & 0x3F)); n8 = 4; }
+        2:   98:                    buf_append(&raw, utf8, n8);
+        2:   99:                    break;
+        -:  100:                }
+    #####:  101:                default: goto done;
+        -:  102:            }
+        -:  103:        } else {
+      460:  104:            buf_append_byte(&raw, ch);
+      460:  105:            c->p++;
+        -:  106:        }
+        -:  107:    }
+    #####:  108:done:
+       91:  109:    if (!ok) {
+    #####:  110:        c->err_pos = (size_t)(c->p - c->p);
+    #####:  111:        buf_free(&raw);
+    #####:  112:        return NULL;
+        -:  113:    }
+       91:  114:    size_t n = raw.len;
+       91:  115:    char *d = dup_str(c, (const char *)raw.data, n);
+       91:  116:    buf_free(&raw);
+      91*:  117:    if (!d) return NULL;
+       91:  118:    if (out_len) *out_len = n;
+       91:  119:    return d;
+        -:  120:}
+        -:  121:
+        -:  122:static RJson *parse_value(ParseCtx *c);
+        -:  123:
+       27:  124:static RJson *parse_object(ParseCtx *c) {
+      27*:  125:    if (++c->depth > RJSON_MAX_DEPTH) { c->err_pos = (size_t)(c->p - c->p); return NULL; }
+       27:  126:    RJson *v = new_node(c, RJSON_OBJECT);
+      27*:  127:    if (!v) return NULL;
+       27:  128:    c->p++; /* { */
+       27:  129:    size_t cap = 8;
+       27:  130:    v->u.obj.keys = (const char **)arena_alloc0(c->arena, 8, cap * sizeof(char *));
+       27:  131:    v->u.obj.values = (RJson **)arena_alloc0(c->arena, 8, cap * sizeof(RJson *));
+      27*:  132:    if (!v->u.obj.keys || !v->u.obj.values) return NULL;
+       27:  133:    skip_ws(c);
+      27*:  134:    if (c->p < c->end && *c->p == '}') { c->p++; return v; }
+       33:  135:    for (;;) {
+       60:  136:        skip_ws(c);
+      87*:  137:        if (c->p >= c->end || *c->p != '"') { c->err_pos = (size_t)(c->p - c->p); return NULL; }
+       60:  138:        size_t klen = 0;
+       60:  139:        const char *key = parse_string(c, &klen);
+      60*:  140:        if (!key) return NULL;
+       60:  141:        skip_ws(c);
+      60*:  142:        if (c->p >= c->end || *c->p != ':') { c->err_pos = (size_t)(c->p - c->p); c->depth--; return NULL; }
+       60:  143:        c->p++;
+       60:  144:        skip_ws(c);
+       60:  145:        RJson *val = parse_value(c);
+       60:  146:        if (!val) { c->depth--; return NULL; }
+       59:  147:        if (v->u.obj.count == cap) {
+    #####:  148:            cap *= 2;
+    #####:  149:            const char **nk = (const char **)arena_alloc0(c->arena, 8, cap * sizeof(char *));
+    #####:  150:            RJson **nv = (RJson **)arena_alloc0(c->arena, 8, cap * sizeof(RJson *));
+    #####:  151:            if (!nk || !nv) return NULL;
+    #####:  152:            memcpy(nk, v->u.obj.keys, v->u.obj.count * sizeof(char *));
+    #####:  153:            memcpy(nv, v->u.obj.values, v->u.obj.count * sizeof(RJson *));
+    #####:  154:            v->u.obj.keys = nk; v->u.obj.values = nv;
+        -:  155:        }
+       59:  156:        v->u.obj.keys[v->u.obj.count] = key;
+       59:  157:        v->u.obj.values[v->u.obj.count] = val;
+       59:  158:        v->u.obj.count++;
+       59:  159:        skip_ws(c);
+      59*:  160:        if (c->p >= c->end) { c->err_pos = (size_t)(c->p - c->p); return NULL; }
+       59:  161:        if (*c->p == ',') { c->p++; continue; }
+       26:  162:        if (*c->p == '}') { c->p++; c->depth--; return v; }
+    #####:  163:        c->err_pos = (size_t)(c->p - c->p);
+    #####:  164:        c->depth--;
+    #####:  165:        return NULL;
+        -:  166:    }
+        -:  167:}
+        -:  168:
+      534:  169:static RJson *parse_array(ParseCtx *c) {
+      534:  170:    if (++c->depth > RJSON_MAX_DEPTH) { c->err_pos = (size_t)(c->p - c->p); return NULL; }
+      533:  171:    RJson *v = new_node(c, RJSON_ARRAY);
+     533*:  172:    if (!v) return NULL;
+      533:  173:    c->p++; /* [ */
+      533:  174:    size_t cap = 8;
+      533:  175:    v->u.arr.items = (RJson **)arena_alloc0(c->arena, 8, cap * sizeof(RJson *));
+     533*:  176:    if (!v->u.arr.items) return NULL;
+      533:  177:    skip_ws(c);
+      533:  178:    if (c->p < c->end && *c->p == ']') { c->p++; c->depth--; return v; }
+       16:  179:    for (;;) {
+      548:  180:        skip_ws(c);
+      548:  181:        RJson *val = parse_value(c);
+      548:  182:        if (!val) { c->depth--; return NULL; }
+       36:  183:        if (v->u.arr.count == cap) {
+    #####:  184:            cap *= 2;
+    #####:  185:            RJson **ni = (RJson **)arena_alloc0(c->arena, 8, cap * sizeof(RJson *));
+    #####:  186:            if (!ni) return NULL;
+    #####:  187:            memcpy(ni, v->u.arr.items, v->u.arr.count * sizeof(RJson *));
+    #####:  188:            v->u.arr.items = ni;
+        -:  189:        }
+       36:  190:        v->u.arr.items[v->u.arr.count++] = val;
+       36:  191:        skip_ws(c);
+       36:  192:        if (c->p >= c->end) { c->err_pos = (size_t)(c->p - c->p); c->depth--; return NULL; }
+       35:  193:        if (*c->p == ',') { c->p++; continue; }
+       19:  194:        if (*c->p == ']') { c->p++; c->depth--; return v; }
+    #####:  195:        c->err_pos = (size_t)(c->p - c->p);
+    #####:  196:        c->depth--;
+    #####:  197:        return NULL;
+        -:  198:    }
+        -:  199:}
+        -:  200:
+       18:  201:static RJson *parse_number(ParseCtx *c) {
+       18:  202:    const char *start = c->p;
+      18*:  203:    if (c->p < c->end && *c->p == '-') c->p++;
+       40:  204:    while (c->p < c->end && (*c->p >= '0' && *c->p <= '9')) c->p++;
+       18:  205:    if (c->p < c->end && *c->p == '.') {
+        3:  206:        c->p++;
+        6:  207:        while (c->p < c->end && (*c->p >= '0' && *c->p <= '9')) c->p++;
+        -:  208:    }
+       18:  209:    if (c->p < c->end && (*c->p == 'e' || *c->p == 'E')) {
+        1:  210:        c->p++;
+       1*:  211:        if (c->p < c->end && (*c->p == '+' || *c->p == '-')) c->p++;
+        2:  212:        while (c->p < c->end && (*c->p >= '0' && *c->p <= '9')) c->p++;
+        -:  213:    }
+       18:  214:    if (c->p == start) { c->err_pos = (size_t)(c->p - start); return NULL; }
+        -:  215:    char tmp[64];
+       17:  216:    size_t n = (size_t)(c->p - start);
+      17*:  217:    if (n >= sizeof(tmp)) { c->err_pos = (size_t)(c->p - start); return NULL; }
+       17:  218:    memcpy(tmp, start, n);
+       17:  219:    tmp[n] = '\0';
+       17:  220:    RJson *v = new_node(c, RJSON_NUMBER);
+      17*:  221:    if (!v) return NULL;
+       17:  222:    v->u.number = strtod(tmp, NULL);
+       17:  223:    return v;
+        -:  224:}
+        -:  225:
+       13:  226:static RJson *parse_literal(ParseCtx *c, const char *lit, RJsonType t, int bval) {
+       13:  227:    size_t n = strlen(lit);
+       13:  228:    if ((size_t)(c->end - c->p) < n || memcmp(c->p, lit, n) != 0) {
+        1:  229:        c->err_pos = (size_t)(c->p - c->p);
+        1:  230:        return NULL;
+        -:  231:    }
+       12:  232:    c->p += n;
+       12:  233:    RJson *v = new_node(c, t);
+      12*:  234:    if (!v) return NULL;
+       12:  235:    if (t == RJSON_BOOL) v->u.boolean = bval;
+       12:  236:    return v;
+        -:  237:}
+        -:  238:
+      623:  239:static RJson *parse_value(ParseCtx *c) {
+      623:  240:    skip_ws(c);
+     623*:  241:    if (c->p >= c->end) { c->err_pos = (size_t)(c->p - c->p); return NULL; }
+      623:  242:    switch (*c->p) {
+       27:  243:        case '{': return parse_object(c);
+      534:  244:        case '[': return parse_array(c);
+       31:  245:        case '"': {
+       31:  246:            size_t len = 0;
+       31:  247:            const char *s = parse_string(c, &len);
+      31*:  248:            if (!s) return NULL;
+       31:  249:            RJson *v = new_node(c, RJSON_STRING);
+      31*:  250:            if (!v) return NULL;
+       31:  251:            v->u.str.ptr = s;
+       31:  252:            v->u.str.len = len;
+       31:  253:            return v;
+        -:  254:        }
+        7:  255:        case 't': return parse_literal(c, "true", RJSON_BOOL, 1);
+        1:  256:        case 'f': return parse_literal(c, "false", RJSON_BOOL, 0);
+        5:  257:        case 'n': return parse_literal(c, "null", RJSON_NULL, 0);
+       18:  258:        default: return parse_number(c);
+        -:  259:    }
+        -:  260:}
+        -:  261:
+       15:  262:RJson *rjson_parse(Arena *arena, const char *text, size_t len, size_t *err_pos) {
+        -:  263:    ParseCtx c;
+       15:  264:    c.arena = arena;
+       15:  265:    c.p = text;
+       15:  266:    c.end = text + len;
+       15:  267:    c.err_pos = 0;
+       15:  268:    c.depth = 0;
+       15:  269:    RJson *v = parse_value(&c);
+       15:  270:    if (!v) {
+        4:  271:        if (err_pos) *err_pos = c.err_pos;
+        4:  272:        return NULL;
+        -:  273:    }
+       11:  274:    skip_ws(&c);
+       11:  275:    if (c.p != c.end) {
+        1:  276:        if (err_pos) *err_pos = (size_t)(c.p - text);
+        1:  277:        return NULL;
+        -:  278:    }
+       10:  279:    return v;
+        -:  280:}
+        -:  281:
+       25:  282:const RJson *rjson_obj_get(const RJson *obj, const char *key) {
+      25*:  283:    if (!obj || obj->type != RJSON_OBJECT) return NULL;
+       56:  284:    for (size_t i = 0; i < obj->u.obj.count; i++) {
+       56:  285:        if (strcmp(obj->u.obj.keys[i], key) == 0) return obj->u.obj.values[i];
+        -:  286:    }
+    #####:  287:    return NULL;
+        -:  288:}
+        -:  289:
+       16:  290:const RJson *rjson_arr_at(const RJson *arr, size_t idx) {
+      16*:  291:    if (!arr || arr->type != RJSON_ARRAY || idx >= arr->u.arr.count) return NULL;
+       16:  292:    return arr->u.arr.items[idx];
+        -:  293:}
+        -:  294:
+      14*:  295:int rjson_is(const RJson *v, RJsonType t) { return v && v->type == t; }
+        -:  296:
+        9:  297:const char *rjson_str(const RJson *v, size_t *len) {
+       9*:  298:    if (!v || v->type != RJSON_STRING) return NULL;
+        9:  299:    if (len) *len = v->u.str.len;
+        9:  300:    return v->u.str.ptr;
+        -:  301:}
+        -:  302:
+        -:  303:/* ================= 序列化 ================= */
+        -:  304:
+       35:  305:void rjson_out_init(RJsonOut *o) { o->buf = NULL; o->len = 0; o->cap = 0; }
+       35:  306:void rjson_out_free(RJsonOut *o) { free(o->buf); o->buf = NULL; o->len = o->cap = 0; }
+        -:  307:
+      310:  308:static void out_reserve(RJsonOut *o, size_t extra) {
+      310:  309:    size_t need = o->len + extra;
+      310:  310:    if (need <= o->cap) return;
+      35*:  311:    size_t nc = o->cap ? o->cap : 64;
+      35*:  312:    while (nc < need) nc *= 2;
+       35:  313:    char *nb = (char *)realloc(o->buf, nc);
+      35*:  314:    if (!nb) return;
+       35:  315:    o->buf = nb;
+       35:  316:    o->cap = nc;
+        -:  317:}
+        -:  318:
+      310:  319:static void out_append(RJsonOut *o, const char *s, size_t n) {
+      310:  320:    out_reserve(o, n);
+      310:  321:    memcpy(o->buf + o->len, s, n);
+      310:  322:    o->len += n;
+      310:  323:}
+        -:  324:
+    #####:  325:static void hex4(RJsonOut *o, uint32_t cp) {
+        -:  326:    static const char hex[] = "0123456789abcdef";
+    #####:  327:    char tmp[6] = { '\\', 'u', 0, 0, 0, 0 };
+    #####:  328:    tmp[2] = hex[(cp >> 12) & 0xF];
+    #####:  329:    tmp[3] = hex[(cp >> 8) & 0xF];
+    #####:  330:    tmp[4] = hex[(cp >> 4) & 0xF];
+    #####:  331:    tmp[5] = hex[cp & 0xF];
+    #####:  332:    out_append(o, tmp, 6);
+    #####:  333:}
+        -:  334:
+       38:  335:void rjson_write_escaped(RJsonOut *o, const char *s, size_t len) {
+      257:  336:    for (size_t i = 0; i < len; i++) {
+      219:  337:        unsigned char ch = (unsigned char)s[i];
+      219:  338:        switch (ch) {
+        4:  339:            case '"':  out_append(o, "\\\"", 2); break;
+    #####:  340:            case '\\': out_append(o, "\\\\", 2); break;
+    #####:  341:            case '\b': out_append(o, "\\b", 2); break;
+    #####:  342:            case '\f': out_append(o, "\\f", 2); break;
+        1:  343:            case '\n': out_append(o, "\\n", 2); break;
+    #####:  344:            case '\r': out_append(o, "\\r", 2); break;
+    #####:  345:            case '\t': out_append(o, "\\t", 2); break;
+      214:  346:            default:
+     214*:  347:                if (ch < 0x20) hex4(o, ch);
+      214:  348:                else out_append(o, (const char *)&ch, 1);
+        -:  349:        }
+        -:  350:    }
+       38:  351:}
+        -:  352:
+       38:  353:void rjson_write_string(RJsonOut *o, const char *s, size_t len) {
+       38:  354:    out_append(o, "\"", 1);
+       38:  355:    rjson_write_escaped(o, s, len);
+       38:  356:    out_append(o, "\"", 1);
+       38:  357:}
+        -:  358:
+        7:  359:void rjson_write_value(RJsonOut *o, const RJson *v) {
+       7*:  360:    if (!v) { out_append(o, "null", 4); return; }
+        7:  361:    switch (v->type) {
+        1:  362:        case RJSON_NULL:   out_append(o, "null", 4); break;
+       1*:  363:        case RJSON_BOOL:   out_append(o, v->u.boolean ? "true" : "false", v->u.boolean ? 4 : 5); break;
+        2:  364:        case RJSON_NUMBER: {
+        -:  365:            char tmp[64];
+        2:  366:            int n = snprintf(tmp, sizeof(tmp), "%.17g", v->u.number);
+       2*:  367:            if (n < 0) n = 0;
+        2:  368:            out_append(o, tmp, (size_t)n);
+        2:  369:            break;
+        -:  370:        }
+        1:  371:        case RJSON_STRING: rjson_write_string(o, v->u.str.ptr, v->u.str.len); break;
+        1:  372:        case RJSON_ARRAY: {
+        1:  373:            out_append(o, "[", 1);
+        4:  374:            for (size_t i = 0; i < v->u.arr.count; i++) {
+        3:  375:                if (i) out_append(o, ",", 1);
+        3:  376:                rjson_write_value(o, v->u.arr.items[i]);
+        -:  377:            }
+        1:  378:            out_append(o, "]", 1);
+        1:  379:            break;
+        -:  380:        }
+        1:  381:        case RJSON_OBJECT: {
+        1:  382:            out_append(o, "{", 1);
+        4:  383:            for (size_t i = 0; i < v->u.obj.count; i++) {
+        3:  384:                if (i) out_append(o, ",", 1);
+        3:  385:                rjson_write_string(o, v->u.obj.keys[i], strlen(v->u.obj.keys[i]));
+        3:  386:                out_append(o, ":", 1);
+        3:  387:                rjson_write_value(o, v->u.obj.values[i]);
+        -:  388:            }
+        1:  389:            out_append(o, "}", 1);
+        1:  390:            break;
+        -:  391:        }
+        -:  392:    }
+        -:  393:}
+        -:  394:
+        -:  395:/* ================= 增量流式提取 ================= */
+        -:  396:
+        -:  397:#define RJSON_STREAM_MAX_DEPTH 64
+        -:  398:#define RJSON_STREAM_KEY_MAX   255
+        -:  399:
+        -:  400:typedef struct {
+        -:  401:    int  kind;          /* 0 = object, 1 = array */
+        -:  402:    size_t index;       /* array: 下一个元素索引 */
+        -:  403:    char key[RJSON_STREAM_KEY_MAX + 1];
+        -:  404:    size_t key_len;
+        -:  405:    int  key_ready;
+        -:  406:    int  on_path_len;   /* -1 = 不在目标路径；否则=已匹配前缀长度（=该层深度） */
+        -:  407:} SFrame;
+        -:  408:
+        -:  409:struct RJsonStream {
+        -:  410:    const RJsonStreamPathElem *path;
+        -:  411:    size_t path_len;
+        -:  412:    RJsonStreamSink sink;
+        -:  413:    void *sink_ctx;
+        -:  414:
+        -:  415:    SFrame stack[RJSON_STREAM_MAX_DEPTH];
+        -:  416:    int depth;
+        -:  417:    int state;
+        -:  418:
+        -:  419:    int pending_match;   /* 值开始前计算的匹配：-1 未定；0 不匹配；>0 前缀长度 */
+        -:  420:    int hit;
+        -:  421:    int done;
+        -:  422:    int error;
+        -:  423:
+        -:  424:    /* 捕获模式 */
+        -:  425:    int cap_raw_depth;
+        -:  426:    uint32_t cap_hi;
+        -:  427:    int cap_u_need;      /* 还缺的 hex 位数 */
+        -:  428:    uint32_t cap_u_val;
+        -:  429:
+        -:  430:    /* 跳过模式辅助 */
+        -:  431:    int lit_pos;
+        -:  432:    const char *lit;
+        -:  433:    int skip_u_need;
+        -:  434:    int skip_key_mode;   /* 当前转义序列是否处于对象键中 */
+        -:  435:};
+        -:  436:
+        -:  437:/* 内部状态 */
+        -:  438:enum {
+        -:  439:    ST_ROOT = 0,        /* 期待根值 */
+        -:  440:    ST_VALUE,           /* 值即将开始（'[' 后或 ':' 后或 ',' 后） */
+        -:  441:    ST_OBJ_KEY_OR_END,  /* 对象：期待键或 '}' */
+        -:  442:    ST_OBJ_COLON,       /* 对象：键后期待 ':' */
+        -:  443:    ST_OBJ_COMMA_OR_END,/* 对象：值后期待 ',' 或 '}' */
+        -:  444:    ST_ARR_ELEM_OR_END, /* 数组：期待值或 ']' */
+        -:  445:    ST_ARR_COMMA_OR_END,/* 数组：值后期待 ',' 或 ']' */
+        -:  446:    ST_STR,             /* 字符串体（跳过模式，可能收集键） */
+        -:  447:    ST_STR_ESC,         /* 跳过模式：转义字符 */
+        -:  448:    ST_STR_ESC_U,       /* 跳过模式：\u 后数 hex（跳过） */
+        -:  449:    ST_CAP_STR,         /* 捕获：字符串体（解码输出） */
+        -:  450:    ST_CAP_STR_ESC,     /* 捕获：转义字符 */
+        -:  451:    ST_CAP_STR_U,       /* 捕获：\u 收集 hex */
+        -:  452:    ST_CAP_STR_U_HI,    /* 捕获：high surrogate 后期待 \u */
+        -:  453:    ST_CAP_STR_U_HI_BS, /* 捕获：期待 'u' */
+        -:  454:    ST_CAP_STR_U_LO,    /* 捕获：low surrogate hex */
+        -:  455:    ST_CAP_RAW,         /* 捕获：原始子树 */
+        -:  456:    ST_CAP_RAW_STR,     /* 捕获原始子树内的字符串 */
+        -:  457:    ST_CAP_RAW_STR_ESC, /* 捕获原始子树内字符串的转义 */
+        -:  458:    ST_NUM,             /* 数字 */
+        -:  459:    ST_LIT,             /* 字面量 */
+        -:  460:    ST_AFTER,           /* 根值结束 */
+        -:  461:};
+        -:  462:
+        -:  463:/* 值结束后进入的状态：容器内等待逗号/右括号，根则收尾 */
+    20791:  464:static SFrame *top(RJsonStream *s) { return &s->stack[s->depth - 1]; }
+        -:  465:
+     2673:  466:static int after_value_state(RJsonStream *s) {
+     2673:  467:    if (s->depth == 0) return ST_AFTER;
+     2146:  468:    return top(s)->kind == 0 ? ST_OBJ_COMMA_OR_END : ST_ARR_COMMA_OR_END;
+        -:  469:}
+        -:  470:
+      563:  471:static void sink_out(RJsonStream *s, const char *data, size_t len) {
+      563:  472:    if (len && s->sink) s->sink(s->sink_ctx, data, len);
+      563:  473:}
+        -:  474:
+        3:  475:static void utf8_out(RJsonStream *s, uint32_t cp) {
+        -:  476:    char tmp[4]; size_t n;
+       3*:  477:    if (cp < 0x80) { tmp[0] = (char)cp; n = 1; }
+       3*:  478:    else if (cp < 0x800) { tmp[0] = (char)(0xC0 | (cp >> 6)); tmp[1] = (char)(0x80 | (cp & 0x3F)); n = 2; }
+        3:  479:    else if (cp < 0x10000) { tmp[0] = (char)(0xE0 | (cp >> 12)); tmp[1] = (char)(0x80 | ((cp >> 6) & 0x3F)); tmp[2] = (char)(0x80 | (cp & 0x3F)); n = 3; }
+        1:  480:    else { tmp[0] = (char)(0xF0 | (cp >> 18)); tmp[1] = (char)(0x80 | ((cp >> 12) & 0x3F)); tmp[2] = (char)(0x80 | ((cp >> 6) & 0x3F)); tmp[3] = (char)(0x80 | (cp & 0x3F)); n = 4; }
+        3:  481:    sink_out(s, tmp, n);
+        3:  482:}
+        -:  483:
+       16:  484:static int hex_val(char c) {
+       16:  485:    if (c >= '0' && c <= '9') return c - '0';
+        8:  486:    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        6:  487:    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    #####:  488:    return -1;
+        -:  489:}
+        -:  490:
+     3318:  491:static int in_key(RJsonStream *s) {
+     3318:  492:    return s->depth > 0 && top(s)->kind == 0 && !top(s)->key_ready;
+        -:  493:}
+        -:  494:
+    #####:  495:static void key_append(RJsonStream *s, char ch) {
+    #####:  496:    if (in_key(s) && top(s)->key_len < RJSON_STREAM_KEY_MAX) {
+    #####:  497:        top(s)->key[top(s)->key_len++] = ch;
+        -:  498:    }
+    #####:  499:}
+        -:  500:
+        -:  501:/* 值开始前：根据父帧与 path[depth-1] 计算匹配前缀长度（0=不匹配） */
+     2742:  502:static void compute_match(RJsonStream *s) {
+     2742:  503:    int d = s->depth;
+     2742:  504:    s->pending_match = 0;
+     2742:  505:    if (d == 0) return; /* 根不匹配任何非空路径 */
+     2212:  506:    SFrame *f = top(s);
+     2212:  507:    if (f->on_path_len != d - 1) { s->pending_match = 0; return; } /* 父不在路径上 */
+    2145*:  508:    if (d > (int)s->path_len) { s->pending_match = 0; return; }
+     2145:  509:    const RJsonStreamPathElem *e = &s->path[d - 1];
+        -:  510:    int m;
+     2145:  511:    if (f->kind == 1) { /* array */
+      526:  512:        m = e->is_index && e->u.index == f->index;
+        -:  513:    } else {
+     1619:  514:        m = (!e->is_index) && f->key_ready && strcmp(f->key, e->u.key) == 0;
+        -:  515:    }
+     2145:  516:    s->pending_match = m ? d : 0;
+        -:  517:}
+        -:  518:
+        -:  519:/* 值开始：取匹配深度并复位。命中 = pending == path_len */
+     2742:  520:static int value_match(RJsonStream *s) {
+     2742:  521:    if (s->pending_match < 0) compute_match(s);
+     2742:  522:    int m = s->pending_match;
+     2742:  523:    s->pending_match = -1;
+     2742:  524:    return m;
+        -:  525:}
+        -:  526:
+     2167:  527:static int push_frame(RJsonStream *s, int kind, int match_len) {
+     2167:  528:    if (s->depth >= RJSON_STREAM_MAX_DEPTH) return 0;
+     2166:  529:    SFrame *f = &s->stack[s->depth++];
+     2166:  530:    memset(f, 0, sizeof(SFrame));
+     2166:  531:    f->kind = kind;
+     2166:  532:    f->on_path_len = match_len;
+     2166:  533:    return 1;
+        -:  534:}
+        -:  535:
+     2100:  536:static void pop_frame(RJsonStream *s) {
+     2100:  537:    if (s->depth > 0) s->depth--;
+     2100:  538:}
+        -:  539:
+      524:  540:RJsonStream *rjson_stream_create(const RJsonStreamPathElem *path,
+        -:  541:                                 RJsonStreamSink sink, void *sink_ctx) {
+      524:  542:    RJsonStream *s = (RJsonStream *)calloc(1, sizeof(RJsonStream));
+     524*:  543:    if (!s) return NULL;
+      524:  544:    s->path = path;
+      524:  545:    s->sink = sink;
+      524:  546:    s->sink_ctx = sink_ctx;
+      524:  547:    s->path_len = 0;
+     2611:  548:    if (path) while (path[s->path_len].is_index != -2) s->path_len++;
+      524:  549:    s->state = ST_ROOT;
+      524:  550:    s->pending_match = -1;
+      524:  551:    return s;
+        -:  552:}
+        -:  553:
+      525:  554:void rjson_stream_destroy(RJsonStream *s) {
+      525:  555:    if (s) free(s);
+      525:  556:}
+        -:  557:
+        8:  558:void rjson_stream_set_path(RJsonStream *s, const RJsonStreamPathElem *path) {
+        8:  559:    s->path = path;
+        8:  560:    s->path_len = 0;
+       36:  561:    if (path) while (path[s->path_len].is_index != -2) s->path_len++;
+        8:  562:}
+        -:  563:
+       18:  564:void rjson_stream_reset(RJsonStream *s) {
+       18:  565:    s->depth = 0;
+       18:  566:    s->state = ST_ROOT;
+       18:  567:    s->pending_match = -1;
+       18:  568:    s->hit = 0;
+       18:  569:    s->done = 0;
+       18:  570:    s->error = 0;
+       18:  571:    s->cap_raw_depth = 0;
+       18:  572:    s->cap_hi = 0;
+       18:  573:    s->cap_u_need = 0;
+       18:  574:    s->cap_u_val = 0;
+       18:  575:    s->lit_pos = 0;
+       18:  576:    s->skip_u_need = 0;
+       18:  577:    s->skip_key_mode = 0;
+       18:  578:}
+        -:  579:
+        9:  580:int rjson_stream_hit(const RJsonStream *s) { return s->hit; }
+        -:  581:
+      591:  582:RJsonStreamStatus rjson_stream_feed(RJsonStream *s, const char *data, size_t len) {
+     591*:  583:    if (s->error) return RJSON_STREAM_ERROR;
+     591*:  584:    if (s->done) return RJSON_STREAM_DONE;
+      591:  585:    size_t i = 0;
+    14309:  586:    while (i < len && !s->error && !s->done) {
+    13718:  587:        char ch = data[i++];
+    13718:  588:        switch (s->state) {
+      532:  589:        case ST_ROOT:
+      532:  590:            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
+      530:  591:            s->state = ST_VALUE;
+      530:  592:            i--; /* 交给 ST_VALUE */
+      530:  593:            break;
+        -:  594:
+     2742:  595:        case ST_VALUE: {
+     2742:  596:            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
+     2742:  597:            int m = value_match(s);
+     2742:  598:            if (ch == '{' || ch == '[') {
+     2168:  599:                if (m == (int)s->path_len && s->path_len > 0) {
+        -:  600:                    /* 目标是容器：捕获整棵子树原始字节 */
+        1:  601:                    s->cap_raw_depth = 1;
+        1:  602:                    s->hit = 1;
+        1:  603:                    sink_out(s, &ch, 1);
+        1:  604:                    s->state = ST_CAP_RAW;
+        -:  605:                } else {
+     2167:  606:                    if (!push_frame(s, ch == '{' ? 0 : 1, m)) { s->error = 1; break; }
+     2166:  607:                    s->state = ch == '{' ? ST_OBJ_KEY_OR_END : ST_ARR_ELEM_OR_END;
+        -:  608:                }
+      574:  609:            } else if (ch == '"') {
+      549:  610:                if (m == (int)s->path_len && s->path_len > 0) {
+      520:  611:                    s->hit = 1;
+      520:  612:                    s->state = ST_CAP_STR;
+        -:  613:                } else {
+       29:  614:                    s->state = ST_STR;
+        -:  615:                }
+       25:  616:            } else if (ch == 't' || ch == 'f' || ch == 'n') {
+       7*:  617:                s->lit = (ch == 't') ? "true" : (ch == 'f') ? "false" : "null";
+        7:  618:                s->lit_pos = 1;
+        7:  619:                s->state = ST_LIT;
+       18:  620:            } else if (ch == '-' || (ch >= '0' && ch <= '9')) {
+       16:  621:                s->state = ST_NUM;
+        -:  622:            } else {
+        2:  623:                s->error = 1;
+        -:  624:            }
+     2741:  625:            break;
+        -:  626:        }
+        -:  627:
+     1624:  628:        case ST_OBJ_KEY_OR_END:
+     1624:  629:            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
+     1624:  630:            if (ch == '}') { pop_frame(s); s->state = after_value_state(s); break; }
+     1622:  631:            if (ch == '"') {
+     1622:  632:                SFrame *f = top(s);
+     1622:  633:                f->key_len = 0;
+     1622:  634:                f->key_ready = 0;
+     1622:  635:                s->state = ST_STR;
+    #####:  636:            } else { s->error = 1; }
+     1622:  637:            break;
+        -:  638:
+     1622:  639:        case ST_OBJ_COLON:
+     1622:  640:            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
+     1622:  641:            if (ch == ':') s->state = ST_VALUE;
+    #####:  642:            else s->error = 1;
+     1622:  643:            break;
+        -:  644:
+     1622:  645:        case ST_OBJ_COMMA_OR_END:
+     1622:  646:            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
+     1622:  647:            if (ch == ',') s->state = ST_OBJ_KEY_OR_END;
+     1575:  648:            else if (ch == '}') { pop_frame(s); s->state = after_value_state(s); }
+    #####:  649:            else s->error = 1;
+     1622:  650:            break;
+        -:  651:
+      590:  652:        case ST_ARR_ELEM_OR_END:
+      590:  653:            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
+     590*:  654:            if (ch == ']') { pop_frame(s); s->state = after_value_state(s); break; }
+      590:  655:            s->state = ST_VALUE;
+      590:  656:            i--; /* 回退处理值 */
+      590:  657:            break;
+        -:  658:
+      524:  659:        case ST_ARR_COMMA_OR_END:
+      524:  660:            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
+      524:  661:            if (ch == ',') { top(s)->index++; s->state = ST_ARR_ELEM_OR_END; }
+      523:  662:            else if (ch == ']') { pop_frame(s); s->state = after_value_state(s); }
+    #####:  663:            else s->error = 1;
+      524:  664:            break;
+        -:  665:
+     3318:  666:        case ST_STR: {
+        -:  667:            /* 快速路径：批量跳过/收集（含 ch）到下一个 " 或 \（仅当 ch 为普通字符） */
+     3318:  668:            if (ch != '"' && ch != '\\') {
+     1667:  669:                const char *start = data + i - 1; /* 包含已消费的 ch */
+     1667:  670:                const char *rest = data + i;
+     1667:  671:                size_t rl = len - i;
+     1667:  672:                const char *q = memchr(rest, '"', rl);
+     1667:  673:                const char *bs = memchr(rest, '\\', rl);
+     1667:  674:                const char *stop = (q && bs) ? (q < bs ? q : bs) : (q ? q : bs);
+     1667:  675:                size_t total = stop ? (size_t)(stop - start) : (rl + 1);
+     1667:  676:                if (in_key(s)) {
+     1638:  677:                    size_t room = RJSON_STREAM_KEY_MAX - top(s)->key_len;
+     1638:  678:                    if (room == 0) {
+        -:  679:                        /* 键超长：不再收集，标记结束（匹配必然失败，正常跳过） */
+    #####:  680:                        top(s)->key_ready = 1;
+        -:  681:                    } else {
+    1638*:  682:                        if (total > room) total = room;
+     1638:  683:                        memcpy(top(s)->key + top(s)->key_len, start, total);
+     1638:  684:                        top(s)->key_len += total;
+        -:  685:                    }
+        -:  686:                }
+     1667:  687:                i += total - 1;
+     1667:  688:                if (stop && total == (size_t)(stop - start)) break; /* 下一轮处理 stop */
+       19:  689:                i = len; /* 剩余全部消费 */
+       19:  690:                break;
+        -:  691:            }
+     1651:  692:            if (ch == '"') {
+     1651:  693:                if (in_key(s)) {
+     1622:  694:                    top(s)->key_ready = 1;
+     1622:  695:                    s->state = ST_OBJ_COLON;
+        -:  696:                } else {
+       29:  697:                    s->state = after_value_state(s);
+        -:  698:                }
+    #####:  699:            } else if (ch == '\\') {
+    #####:  700:                s->skip_key_mode = in_key(s);
+    #####:  701:                s->state = ST_STR_ESC;
+        -:  702:            } else {
+    #####:  703:                key_append(s, ch);
+        -:  704:            }
+     1651:  705:            break;
+        -:  706:        }
+        -:  707:
+    #####:  708:        case ST_STR_ESC: {
+        -:  709:            char out;
+    #####:  710:            switch (ch) {
+    #####:  711:                case '"':  out = '"';  s->state = ST_STR; break;
+    #####:  712:                case '\\': out = '\\'; s->state = ST_STR; break;
+    #####:  713:                case '/':  out = '/';  s->state = ST_STR; break;
+    #####:  714:                case 'b':  out = '\b'; s->state = ST_STR; break;
+    #####:  715:                case 'f':  out = '\f'; s->state = ST_STR; break;
+    #####:  716:                case 'n':  out = '\n'; s->state = ST_STR; break;
+    #####:  717:                case 'r':  out = '\r'; s->state = ST_STR; break;
+    #####:  718:                case 't':  out = '\t'; s->state = ST_STR; break;
+    #####:  719:                case 'u':  s->skip_u_need = 4; s->state = ST_STR_ESC_U; continue;
+    #####:  720:                default: s->error = 1; continue;
+        -:  721:            }
+    #####:  722:            key_append(s, out);
+    #####:  723:            break;
+        -:  724:        }
+        -:  725:
+    #####:  726:        case ST_STR_ESC_U:
+        -:  727:            /* 跳过模式：数 4 个 hex 后回到 ST_STR。键中的 \u 转义不解码（限制，见 header） */
+    #####:  728:            if (hex_val(ch) < 0) { s->error = 1; break; }
+    #####:  729:            if (--s->skip_u_need == 0) s->state = ST_STR;
+    #####:  730:            break;
+        -:  731:
+     1048:  732:        case ST_CAP_STR: {
+        -:  733:            /* 快速路径：整段批量输出（含 ch）直到 " 或 \（仅当 ch 为普通字符） */
+     1048:  734:            if (ch != '"' && ch != '\\') {
+      523:  735:                const char *start = data + i - 1; /* 包含已消费的 ch */
+      523:  736:                const char *rest = data + i;
+      523:  737:                size_t rl = len - i;
+      523:  738:                const char *q = memchr(rest, '"', rl);
+      523:  739:                const char *bs = memchr(rest, '\\', rl);
+      523:  740:                const char *stop = (q && bs) ? (q < bs ? q : bs) : (q ? q : bs);
+      523:  741:                if (stop) {
+      521:  742:                    size_t n = (size_t)(stop - start); /* 至少 1（含 ch） */
+      521:  743:                    sink_out(s, start, n);
+      521:  744:                    i += n - 1; /* 下一轮 ch = data[i++] 取 stop */
+        -:  745:                } else {
+        2:  746:                    sink_out(s, start, rl + 1); /* 剩余全部 */
+        2:  747:                    i = len;
+        -:  748:                }
+      523:  749:                break;
+        -:  750:            }
+      525:  751:            if (ch == '"') {
+      520:  752:                s->state = after_value_state(s);
+        5:  753:            } else if (ch == '\\') {
+        5:  754:                s->state = ST_CAP_STR_ESC;
+        -:  755:            } else {
+    #####:  756:                sink_out(s, &ch, 1);
+        -:  757:            }
+      525:  758:            break;
+        -:  759:        }
+        -:  760:
+        5:  761:        case ST_CAP_STR_ESC:
+        5:  762:            switch (ch) {
+    #####:  763:                case '"':  sink_out(s, "\"", 1); s->state = ST_CAP_STR; break;
+    #####:  764:                case '\\': sink_out(s, "\\", 1); s->state = ST_CAP_STR; break;
+    #####:  765:                case '/':  sink_out(s, "/", 1);  s->state = ST_CAP_STR; break;
+    #####:  766:                case 'b':  sink_out(s, "\b", 1); s->state = ST_CAP_STR; break;
+    #####:  767:                case 'f':  sink_out(s, "\f", 1); s->state = ST_CAP_STR; break;
+        2:  768:                case 'n':  sink_out(s, "\n", 1); s->state = ST_CAP_STR; break;
+    #####:  769:                case 'r':  sink_out(s, "\r", 1); s->state = ST_CAP_STR; break;
+    #####:  770:                case 't':  sink_out(s, "\t", 1); s->state = ST_CAP_STR; break;
+        3:  771:                case 'u':  s->cap_u_val = 0; s->cap_u_need = 4; s->state = ST_CAP_STR_U; break;
+    #####:  772:                default: s->error = 1; break;
+        -:  773:            }
+        5:  774:            break;
+        -:  775:
+       12:  776:        case ST_CAP_STR_U: {
+       12:  777:            int hv = hex_val(ch);
+      12*:  778:            if (hv < 0) { s->error = 1; break; }
+       12:  779:            s->cap_u_val = (s->cap_u_val << 4) | (uint32_t)hv;
+       12:  780:            if (--s->cap_u_need == 0) {
+        3:  781:                uint32_t cp = s->cap_u_val;
+        3:  782:                if (cp >= 0xD800 && cp <= 0xDBFF) {
+        2:  783:                    s->cap_hi = cp;
+        2:  784:                    s->state = ST_CAP_STR_U_HI;
+        -:  785:                } else {
+        1:  786:                    utf8_out(s, cp);
+        1:  787:                    s->state = ST_CAP_STR;
+        -:  788:                }
+        -:  789:            }
+       12:  790:            break;
+        -:  791:        }
+        -:  792:
+        2:  793:        case ST_CAP_STR_U_HI:
+        2:  794:            if (ch == '\\') {
+        1:  795:                s->state = ST_CAP_STR_U_HI_BS;
+        -:  796:            } else {
+        -:  797:                /* 孤立 high surrogate（非法但对真实 API 输出宽容）：替换符 + 回退处理 ch */
+        1:  798:                utf8_out(s, 0xFFFD);
+        1:  799:                s->state = ST_CAP_STR;
+        1:  800:                i--;
+        -:  801:            }
+        2:  802:            break;
+        -:  803:
+        1:  804:        case ST_CAP_STR_U_HI_BS:
+        1:  805:            if (ch == 'u') { s->cap_u_val = 0; s->cap_u_need = 4; s->state = ST_CAP_STR_U_LO; }
+    #####:  806:            else s->error = 1;
+        1:  807:            break;
+        -:  808:
+        4:  809:        case ST_CAP_STR_U_LO: {
+        4:  810:            int hv = hex_val(ch);
+       4*:  811:            if (hv < 0) { s->error = 1; break; }
+        4:  812:            s->cap_u_val = (s->cap_u_val << 4) | (uint32_t)hv;
+        4:  813:            if (--s->cap_u_need == 0) {
+        1:  814:                uint32_t lo = s->cap_u_val;
+        2:  815:                if (lo >= 0xDC00 && lo <= 0xDFFF) {
+        1:  816:                    uint32_t cp = 0x10000 + ((s->cap_hi - 0xD800) << 10) + (lo - 0xDC00);
+        1:  817:                    utf8_out(s, cp);
+        -:  818:                } else {
+    #####:  819:                    utf8_out(s, 0xFFFD); /* 孤立 high surrogate */
+        -:  820:                }
+        1:  821:                s->state = ST_CAP_STR;
+        -:  822:            }
+        4:  823:            break;
+        -:  824:        }
+        -:  825:
+        8:  826:        case ST_CAP_RAW: {
+        -:  827:            /* 快速路径：批量输出（含 ch）到结构字符 { } [ ] " \（仅当 ch 为普通字符） */
+        8:  828:            if (ch != '{' && ch != '}' && ch != '[' && ch != ']' && ch != '"' && ch != '\\') {
+        3:  829:                const char *start = data + i - 1; /* 包含已消费的 ch */
+        3:  830:                const char *rest = data + i;
+        3:  831:                size_t rl = len - i;
+        3:  832:                const char *stop = NULL;
+       3*:  833:                for (size_t j = 0; j < rl; j++) {
+        3:  834:                    char c = rest[j];
+       3*:  835:                    if (c == '{' || c == '}' || c == '[' || c == ']' || c == '"' || c == '\\') {
+        3:  836:                        stop = rest + j;
+        3:  837:                        break;
+        -:  838:                    }
+        -:  839:                }
+        3:  840:                if (stop) {
+        3:  841:                    size_t n = (size_t)(stop - start);
+        3:  842:                    sink_out(s, start, n);
+        3:  843:                    i += n - 1; /* 下一轮 ch = data[i++] 取 stop */
+        -:  844:                } else {
+    #####:  845:                    sink_out(s, start, rl + 1);
+    #####:  846:                    i = len;
+        -:  847:                }
+        3:  848:                break;
+        -:  849:            }
+       5*:  850:            if (ch == '{' || ch == '[') { s->cap_raw_depth++; sink_out(s, &ch, 1); }
+        5:  851:            else if (ch == '}' || ch == ']') {
+        1:  852:                s->cap_raw_depth--;
+        1:  853:                sink_out(s, &ch, 1);
+        1:  854:                if (s->cap_raw_depth <= 0) s->state = after_value_state(s);
+        4:  855:            } else if (ch == '"') {
+        4:  856:                sink_out(s, &ch, 1);
+        4:  857:                s->state = ST_CAP_RAW_STR;
+        -:  858:            } else {
+    #####:  859:                sink_out(s, &ch, 1);
+        -:  860:            }
+        5:  861:            break;
+        -:  862:        }
+        -:  863:
+       26:  864:        case ST_CAP_RAW_STR:
+       26:  865:            sink_out(s, &ch, 1);
+      26*:  866:            if (ch == '\\') s->state = ST_CAP_RAW_STR_ESC;
+       26:  867:            else if (ch == '"') s->state = ST_CAP_RAW;
+       26:  868:            break;
+        -:  869:
+    #####:  870:        case ST_CAP_RAW_STR_ESC:
+    #####:  871:            sink_out(s, &ch, 1);
+    #####:  872:            s->state = ST_CAP_RAW_STR;
+    #####:  873:            break;
+        -:  874:
+       16:  875:        case ST_NUM: {
+        -:  876:            /* 快速路径：批量消费数字字符 */
+       16:  877:            const char *rest = data + i;
+       16:  878:            size_t rl = len - i;
+       16:  879:            size_t j = 0;
+       16:  880:            while (j < rl) {
+       16:  881:                char c = rest[j];
+       16:  882:                if ((c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E')
+    #####:  883:                    j++;
+        -:  884:                else
+        -:  885:                    break;
+        -:  886:            }
+      16*:  887:            if (j > 0) { i += j; break; } /* 剩余分隔符交给下一轮判定 */
+      16*:  888:            if ((ch >= '0' && ch <= '9') || ch == '-' || ch == '+' || ch == '.' || ch == 'e' || ch == 'E') {
+        -:  889:                /* 继续数字 */
+        -:  890:            } else {
+       16:  891:                s->state = after_value_state(s);
+       16:  892:                i--; /* 回退处理分隔符 */
+        -:  893:            }
+       16:  894:            break;
+        -:  895:        }
+        -:  896:
+       21:  897:        case ST_LIT:
+       21:  898:            if (s->lit && s->lit[s->lit_pos] == ch) {
+       21:  899:                s->lit_pos++;
+       21:  900:                if (s->lit[s->lit_pos] == '\0') s->state = after_value_state(s);
+        -:  901:            } else {
+    #####:  902:                s->error = 1;
+        -:  903:            }
+       21:  904:            break;
+        -:  905:
+        1:  906:        case ST_AFTER:
+        1:  907:            s->done = 1;
+        1:  908:            break;
+        -:  909:
+    #####:  910:        default:
+    #####:  911:            s->error = 1;
+    #####:  912:            break;
+        -:  913:        }
+        -:  914:    }
+      591:  915:    if (s->error) return RJSON_STREAM_ERROR;
+      588:  916:    if (s->done) return RJSON_STREAM_DONE;
+      587:  917:    return RJSON_STREAM_OK;
+        -:  918:}
+        -:  919:
+      527:  920:RJsonStreamStatus rjson_stream_finish(RJsonStream *s) {
+      527:  921:    if (s->error) return RJSON_STREAM_ERROR;
+      525:  922:    if (s->done) return RJSON_STREAM_DONE;
+     524*:  923:    if (s->state == ST_AFTER || s->state == ST_ROOT) {
+      524:  924:        s->done = 1;
+      524:  925:        return RJSON_STREAM_DONE;
+        -:  926:    }
+    #####:  927:    s->error = 1;
+    #####:  928:    return RJSON_STREAM_ERROR;
+        -:  929:}

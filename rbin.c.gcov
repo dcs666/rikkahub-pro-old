@@ -1,0 +1,222 @@
+        -:    0:Source:src/data/rbin.c
+        -:    0:Graph:src/data/rbin.gcno
+        -:    0:Data:src/data/rbin.gcda
+        -:    0:Runs:1
+        -:    1:#define _POSIX_C_SOURCE 200809L
+        -:    2:#include "rikka/data/rbin.h"
+        -:    3:#include "rikka/core/buffer.h"
+        -:    4:#include <fcntl.h>
+        -:    5:#include <stdio.h>
+        -:    6:#include <stdlib.h>
+        -:    7:#include <string.h>
+        -:    8:#include <sys/mman.h>
+        -:    9:#include <sys/stat.h>
+        -:   10:#include <unistd.h>
+        -:   11:
+        -:   12:#define RBIN_MAGIC "RIKKABIN"
+        -:   13:#define RBIN_VERSION 1
+        -:   14:
+        -:   15:/* ---------- 小端读写 ---------- */
+        -:   16:
+      738:   17:static void wr_u8(Buf *b, uint8_t v) { buf_append_byte(b, v); }
+      254:   18:static void wr_u32(Buf *b, uint32_t v) {
+      254:   19:    uint8_t t[4] = {(uint8_t)(v & 0xff), (uint8_t)((v >> 8) & 0xff),
+      254:   20:                    (uint8_t)((v >> 16) & 0xff), (uint8_t)((v >> 24) & 0xff)};
+      254:   21:    buf_append(b, t, 4);
+      254:   22:}
+    #####:   23:static void wr_u64(Buf *b, uint64_t v) {
+        -:   24:    uint8_t t[8];
+    #####:   25:    for (int i = 0; i < 8; i++) t[i] = (uint8_t)(v >> (8 * i));
+    #####:   26:    buf_append(b, t, 8);
+    #####:   27:}
+      125:   28:static void wr_bytes(Buf *b, const char *s, size_t n) {
+      125:   29:    wr_u32(b, (uint32_t)n);
+      125:   30:    if (n) buf_append(b, s, n);
+      125:   31:}
+        -:   32:
+        -:   33:typedef struct {
+        -:   34:    const uint8_t *p;
+        -:   35:    size_t len;
+        -:   36:    size_t off;
+        -:   37:    int err;
+        -:   38:} Rd;
+        -:   39:
+    12833:   40:static uint8_t rd_u8(Rd *r) {
+    12833:   41:    if (r->off + 1 > r->len) { r->err = 1; return 0; }
+    12657:   42:    return r->p[r->off++];
+        -:   43:}
+     4942:   44:static uint32_t rd_u32(Rd *r) {
+     4942:   45:    if (r->off + 4 > r->len) { r->err = 1; return 0; }
+     4788:   46:    uint32_t v = (uint32_t)r->p[r->off] | ((uint32_t)r->p[r->off + 1] << 8) |
+     4788:   47:                 ((uint32_t)r->p[r->off + 2] << 16) | ((uint32_t)r->p[r->off + 3] << 24);
+     4788:   48:    r->off += 4;
+     4788:   49:    return v;
+        -:   50:}
+    #####:   51:static uint64_t rd_u64(Rd *r) {
+    #####:   52:    if (r->off + 8 > r->len) { r->err = 1; return 0; }
+    #####:   53:    uint64_t v = 0;
+    #####:   54:    for (int i = 0; i < 8; i++) v |= ((uint64_t)r->p[r->off + i]) << (8 * i);
+    #####:   55:    r->off += 8;
+    #####:   56:    return v;
+        -:   57:}
+     2347:   58:static const char *rd_bytes(Rd *r, size_t *n) {
+     2347:   59:    uint32_t l = rd_u32(r);
+     2347:   60:    if (r->err || r->off + l > r->len) { r->err = 1; *n = 0; return NULL; }
+     2030:   61:    const char *s = (const char *)r->p + r->off;
+     2030:   62:    r->off += l;
+     2030:   63:    *n = l;
+     2030:   64:    return s;
+        -:   65:}
+        -:   66:
+        -:   67:/* ---------- 序列化 ---------- */
+        -:   68:
+      123:   69:static void wr_part(Buf *b, const RikkaPart *p) {
+      123:   70:    wr_u8(b, (uint8_t)p->type);
+     123*:   71:    if (p->len > 0xFFFFFFFFu) return; /* 超长截断防御（>4GB part 不合法） */
+      123:   72:    wr_bytes(b, p->data, p->len);
+      123:   73:    wr_u8(b, p->tool_name ? 1 : 0);
+      123:   74:    if (p->tool_name) wr_bytes(b, p->tool_name, strlen(p->tool_name));
+      123:   75:    wr_u8(b, p->tool_id ? 1 : 0);
+      123:   76:    if (p->tool_id) wr_bytes(b, p->tool_id, strlen(p->tool_id));
+      123:   77:    wr_u8(b, (uint8_t)p->is_error);
+        -:   78:}
+        -:   79:
+        3:   80:int rbin_save(const RConversation *c, Buf *out) {
+       3*:   81:    if (!c || !out) return -1;
+        3:   82:    size_t depth = 0;
+      126:   83:    for (RNode *cur = c->active; cur && cur->parent; cur = cur->parent) depth++;
+        -:   84:    /* 线程局部复用缓冲（高频保存避免每次 malloc） */
+        -:   85:    static _Thread_local const RikkaMessage **msgs = NULL;
+        -:   86:    static _Thread_local size_t msgs_cap = 0;
+        3:   87:    if (depth > msgs_cap) {
+        3:   88:        const RikkaMessage **nm = (const RikkaMessage **)realloc((void *)msgs,
+        -:   89:                                          depth * sizeof(RikkaMessage *));
+       3*:   90:        if (!nm) return -1;
+        3:   91:        msgs = nm;
+        3:   92:        msgs_cap = depth;
+        -:   93:    }
+        3:   94:    size_t n = rconv_active_messages(c, msgs, depth);
+        3:   95:    buf_reset(out);
+        3:   96:    buf_append(out, RBIN_MAGIC, 8);
+        3:   97:    wr_u32(out, RBIN_VERSION);
+        3:   98:    wr_u32(out, (uint32_t)n);
+      126:   99:    for (size_t i = 0; i < n; i++) {
+      123:  100:        const RikkaMessage *m = msgs[i];
+      123:  101:        wr_u8(out, (uint8_t)m->role);
+      123:  102:        wr_u32(out, (uint32_t)m->part_count);
+      246:  103:        for (size_t j = 0; j < m->part_count; j++) wr_part(out, &m->parts[j]);
+      123:  104:        wr_u8(out, (uint8_t)m->has_usage);
+      123:  105:        if (m->has_usage) {
+    #####:  106:            wr_u64(out, m->prompt_tokens);
+    #####:  107:            wr_u64(out, m->completion_tokens);
+    #####:  108:            wr_u64(out, m->total_tokens);
+        -:  109:        }
+        -:  110:    }
+        3:  111:    return 0;
+        -:  112:}
+        -:  113:
+        -:  114:/* ---------- 反序列化（零拷贝：parts 指向输入） ---------- */
+        -:  115:
+     2193:  116:static int parse_msg(Rd *r, Arena *a, RikkaMessage *m) {
+     2193:  117:    m->role = (RikkaRole)rd_u8(r);
+     2193:  118:    uint32_t pc = rd_u32(r);
+     2193:  119:    if (r->err) return -1;
+     4166:  120:    for (uint32_t i = 0; i < pc; i++) {
+     2158:  121:        RikkaPart *p = rmsg_add_part(a, m, RIKKA_PART_TEXT);
+    2158*:  122:        if (!p) return -1;
+     2158:  123:        p->type = (RikkaPartType)rd_u8(r);
+     2158:  124:        p->data = rd_bytes(r, &p->len);
+     2158:  125:        if (rd_u8(r)) {
+      112:  126:            size_t nl = 0;
+      112:  127:            const char *s = rd_bytes(r, &nl);
+      112:  128:            if (nl) { p->tool_name = s; }
+        -:  129:        }
+     2158:  130:        if (rd_u8(r)) {
+       77:  131:            size_t nl = 0;
+       77:  132:            const char *s = rd_bytes(r, &nl);
+       77:  133:            if (nl) { p->tool_id = s; }
+        -:  134:        }
+     2158:  135:        p->is_error = (int)rd_u8(r);
+     2158:  136:        if (r->err) return -1;
+        -:  137:    }
+     2008:  138:    if (rd_u8(r)) {
+    #####:  139:        m->has_usage = 1;
+    #####:  140:        m->prompt_tokens = rd_u64(r);
+    #####:  141:        m->completion_tokens = rd_u64(r);
+    #####:  142:        m->total_tokens = rd_u64(r);
+        -:  143:    }
+     2008:  144:    if (r->err) return -1;
+     2005:  145:    m->frozen = 1;
+     2005:  146:    return 0;
+        -:  147:}
+        -:  148:
+      206:  149:int rbin_parse(const uint8_t *data, size_t len, Arena *arena,
+        -:  150:               RikkaMessage ***msgs_out, size_t *count_out) {
+        -:  151:    Rd r;
+      206:  152:    r.p = data;
+      206:  153:    r.len = len;
+      206:  154:    r.off = 0;
+      206:  155:    r.err = 0;
+      206:  156:    if (len < 12 || memcmp(data, RBIN_MAGIC, 8) != 0) return -1;
+      201:  157:    r.off = 8;
+     201*:  158:    if (rd_u32(&r) != RBIN_VERSION) return -1;
+      201:  159:    uint32_t n = rd_u32(&r);
+      201:  160:    if (r.err) return -1;
+      199:  161:    if (n > len / 2) return -1; /* 每条消息至少 ~2 字节：防恶意 count 超大分配 */
+      191:  162:    RikkaMessage **msgs = (RikkaMessage **)arena_alloc0(arena, 8, n * sizeof(RikkaMessage *));
+     191*:  163:    if (!msgs) return -1;
+     2196:  164:    for (uint32_t i = 0; i < n; i++) {
+     2193:  165:        RikkaMessage *m = rmsg_new(arena, RIKKA_ROLE_USER);
+    2193*:  166:        if (!m) return -1;
+     2193:  167:        if (parse_msg(&r, arena, m) != 0) return -1;
+     2005:  168:        msgs[i] = m;
+        -:  169:    }
+        3:  170:    if (msgs_out) *msgs_out = msgs;
+        3:  171:    if (count_out) *count_out = n;
+        3:  172:    return 0;
+        -:  173:}
+        -:  174:
+      205:  175:int rbin_load(const uint8_t *data, size_t len, Arena *arena,
+        -:  176:              RikkaMessage ***msgs_out, size_t *count_out) {
+      205:  177:    return rbin_parse(data, len, arena, msgs_out, count_out);
+        -:  178:}
+        -:  179:
+        -:  180:/* ---------- 文件快照 ---------- */
+        -:  181:
+        1:  182:int rbin_save_file(const RConversation *c, const char *path) {
+        -:  183:    Buf out;
+        1:  184:    buf_init(&out);
+       1*:  185:    if (rbin_save(c, &out) != 0) { buf_free(&out); return -1; }
+        -:  186:    char tmp[1024];
+        1:  187:    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+        1:  188:    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+       1*:  189:    if (fd < 0) { buf_free(&out); return -1; }
+        1:  190:    size_t off = 0;
+        2:  191:    while (off < out.len) {
+        1:  192:        ssize_t w = write(fd, (const char *)out.data + off, out.len - off);
+       1*:  193:        if (w <= 0) { close(fd); unlink(tmp); buf_free(&out); return -1; }
+        1:  194:        off += (size_t)w;
+        -:  195:    }
+       1*:  196:    if (fsync(fd) != 0) { close(fd); unlink(tmp); buf_free(&out); return -1; }
+        1:  197:    close(fd);
+       1*:  198:    if (rename(tmp, path) != 0) { unlink(tmp); buf_free(&out); return -1; }
+        1:  199:    buf_free(&out);
+        1:  200:    return 0;
+        -:  201:}
+        -:  202:
+        1:  203:int rbin_mmap_file(const char *path, const uint8_t **data_out, size_t *len_out) {
+        1:  204:    int fd = open(path, O_RDONLY);
+       1*:  205:    if (fd < 0) return -1;
+        -:  206:    struct stat st;
+       1*:  207:    if (fstat(fd, &st) != 0 || st.st_size <= 0) { close(fd); return -1; }
+        1:  208:    void *p = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        1:  209:    close(fd);
+       1*:  210:    if (p == MAP_FAILED) return -1;
+        1:  211:    if (data_out) *data_out = (const uint8_t *)p;
+        1:  212:    if (len_out) *len_out = (size_t)st.st_size;
+        1:  213:    return 0;
+        -:  214:}
+        -:  215:
+        1:  216:void rbin_munmap(const uint8_t *data, size_t len) {
+        1:  217:    if (data && len) munmap((void *)data, len);
+        1:  218:}

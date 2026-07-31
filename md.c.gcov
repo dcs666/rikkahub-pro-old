@@ -1,0 +1,605 @@
+        -:    0:Source:src/markdown/md.c
+        -:    0:Graph:src/markdown/md.gcno
+        -:    0:Data:src/markdown/md.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/markdown/md.h"
+        -:    2:#include "rikka/core/buffer.h"
+        -:    3:#include <stdio.h>
+        -:    4:#include <stdlib.h>
+        -:    5:#include <string.h>
+        -:    6:
+        -:    7:/* ================= 行内解析 ================= */
+        -:    8:
+       26:    9:static void inline_append(RikkaMdBlock *b, const char *text, size_t start, size_t len,
+        -:   10:                          RikkaInlineType t, const char *href, size_t href_len,
+        -:   11:                          const char *alt, size_t alt_len) {
+        -:   12:    (void)text;
+      26*:   13:    if (len == 0 && t == RIKKA_INLINE_TEXT) return;
+       26:   14:    if (b->inline_count == b->inline_cap) {
+      18*:   15:        size_t nc = b->inline_cap ? b->inline_cap * 2 : 8;
+       18:   16:        RikkaInline *ni = (RikkaInline *)realloc(b->inlines, nc * sizeof(RikkaInline));
+      18*:   17:        if (!ni) return;
+       18:   18:        b->inlines = ni;
+       18:   19:        b->inline_cap = nc;
+        -:   20:    }
+       26:   21:    RikkaInline *in = &b->inlines[b->inline_count++];
+       26:   22:    in->type = t;
+       26:   23:    in->start = start;
+       26:   24:    in->len = len;
+       26:   25:    in->href = href;
+       26:   26:    in->href_len = href_len;
+       26:   27:    in->alt = alt;
+       26:   28:    in->alt_len = alt_len;
+        -:   29:}
+        -:   30:
+        -:   31:/* 链接目标提取：[..](..) 中 ) 前的内容 */
+        2:   32:static void parse_link_dest(const char *s, size_t len, const char **dest, size_t *dest_len) {
+        -:   33:    /* s 指向 '(' 后 */
+        2:   34:    size_t i = 0;
+       2*:   35:    while (i < len && s[i] == ' ') i++;
+        2:   36:    size_t start = i;
+       30:   37:    while (i < len && s[i] != ')') i++;
+        2:   38:    *dest = s + start;
+        2:   39:    *dest_len = i - start;
+        2:   40:}
+        -:   41:
+        -:   42:/* 行内扫描：文本 [start, end) 生成 inline 节点 */
+       18:   43:static void inline_scan(RikkaMdBlock *b, const char *text, size_t start, size_t end) {
+       18:   44:    size_t i = start;
+       18:   45:    size_t plain_start = start;
+   102594:   46:    while (i < end) {
+   102576:   47:        char c = text[i];
+  102576*:   48:        if (c == '`') {
+        -:   49:            /* 行内代码：`...` */
+        1:   50:            size_t close = end;
+        5:   51:            for (size_t j = i + 1; j < end; j++) {
+        5:   52:                if (text[j] == '`') { close = j; break; }
+        -:   53:            }
+        1:   54:            if (close < end) {
+        1:   55:                if (i > plain_start)
+        1:   56:                    inline_append(b, text, plain_start, i - plain_start, RIKKA_INLINE_TEXT, NULL, 0, NULL, 0);
+        1:   57:                inline_append(b, text, i + 1, close - i - 1, RIKKA_INLINE_CODE, NULL, 0, NULL, 0);
+        1:   58:                i = close + 1;
+        1:   59:                plain_start = i;
+        1:   60:                continue;
+        -:   61:            }
+    #####:   62:            i++;
+    #####:   63:            continue;
+        -:   64:        }
+  102575*:   65:        if (c == '*' || c == '_') {
+        -:   66:            /* 判断 ** 或 *；也处理 _（简单版） */
+        3:   67:            int bold = (i + 1 < end && text[i + 1] == c);
+        3:   68:            size_t mark = bold ? 2 : 1;
+       3*:   69:            if (bold && i + 1 < end && text[i + 1] == c) {
+        -:   70:                /* **bold** */
+        2:   71:                size_t close = end;
+       10:   72:                for (size_t j = i + 2; j + 1 < end; j++) {
+       10:   73:                    if (text[j] == c && text[j + 1] == c) { close = j; break; }
+        -:   74:                }
+        2:   75:                if (close < end) {
+        2:   76:                    if (i > plain_start)
+        2:   77:                        inline_append(b, text, plain_start, i - plain_start, RIKKA_INLINE_TEXT, NULL, 0, NULL, 0);
+        2:   78:                    inline_append(b, text, i + 2, close - i - 2, RIKKA_INLINE_BOLD, NULL, 0, NULL, 0);
+        2:   79:                    i = close + 2;
+        2:   80:                    plain_start = i;
+        2:   81:                    continue;
+        -:   82:                }
+    #####:   83:                i += 2;
+    #####:   84:                continue;
+        -:   85:            }
+        -:   86:            /* *italic* */
+        1:   87:            size_t close = end;
+        7:   88:            for (size_t j = i + 1; j < end; j++) {
+        7:   89:                if (text[j] == c) { close = j; break; }
+        -:   90:            }
+        1:   91:            if (close < end && close > i + 1) {
+        1:   92:                if (i > plain_start)
+        1:   93:                    inline_append(b, text, plain_start, i - plain_start, RIKKA_INLINE_TEXT, NULL, 0, NULL, 0);
+        1:   94:                inline_append(b, text, i + 1, close - i - 1, RIKKA_INLINE_ITALIC, NULL, 0, NULL, 0);
+        1:   95:                i = close + 1;
+        1:   96:                plain_start = i;
+        1:   97:                continue;
+        -:   98:            }
+    #####:   99:            i += mark;
+    #####:  100:            continue;
+        -:  101:        }
+  102572*:  102:        if (c == '!' && i + 1 < end && text[i + 1] == '[') {
+        -:  103:            /* ![alt](href) */
+        1:  104:            size_t close_bracket = end;
+        9:  105:            for (size_t j = i + 2; j < end; j++) {
+        9:  106:                if (text[j] == ']') { close_bracket = j; break; }
+        -:  107:            }
+        1:  108:            if (close_bracket < end && close_bracket + 1 < end && text[close_bracket + 1] == '(') {
+        1:  109:                size_t close_paren = end;
+       16:  110:                for (size_t j = close_bracket + 2; j < end; j++) {
+       16:  111:                    if (text[j] == ')') { close_paren = j; break; }
+        -:  112:                }
+        1:  113:                if (close_paren < end) {
+        1:  114:                    if (i > plain_start)
+    #####:  115:                        inline_append(b, text, plain_start, i - plain_start, RIKKA_INLINE_TEXT, NULL, 0, NULL, 0);
+        -:  116:                    const char *dest; size_t dest_len;
+        1:  117:                    parse_link_dest(text + close_bracket + 2, close_paren - close_bracket - 2, &dest, &dest_len);
+        1:  118:                    inline_append(b, text, i + 2, close_bracket - i - 2, RIKKA_INLINE_IMAGE,
+        1:  119:                                  dest, dest_len, text + i + 2, close_bracket - i - 2);
+        1:  120:                    i = close_paren + 1;
+        1:  121:                    plain_start = i;
+        1:  122:                    continue;
+        -:  123:                }
+        -:  124:            }
+    #####:  125:            i++;
+    #####:  126:            continue;
+        -:  127:        }
+  102571*:  128:        if (c == '[') {
+        -:  129:            /* [text](href) */
+        1:  130:            size_t close_bracket = end;
+        5:  131:            for (size_t j = i + 1; j < end; j++) {
+        5:  132:                if (text[j] == ']') { close_bracket = j; break; }
+        -:  133:            }
+        1:  134:            if (close_bracket < end && close_bracket + 1 < end && text[close_bracket + 1] == '(') {
+        1:  135:                size_t close_paren = end;
+       14:  136:                for (size_t j = close_bracket + 2; j < end; j++) {
+       14:  137:                    if (text[j] == ')') { close_paren = j; break; }
+        -:  138:                }
+        1:  139:                if (close_paren < end) {
+        1:  140:                    if (i > plain_start)
+        1:  141:                        inline_append(b, text, plain_start, i - plain_start, RIKKA_INLINE_TEXT, NULL, 0, NULL, 0);
+        -:  142:                    const char *dest; size_t dest_len;
+        1:  143:                    parse_link_dest(text + close_bracket + 2, close_paren - close_bracket - 2, &dest, &dest_len);
+        1:  144:                    inline_append(b, text, i + 1, close_bracket - i - 1, RIKKA_INLINE_LINK,
+        -:  145:                                  dest, dest_len, NULL, 0);
+        1:  146:                    i = close_paren + 1;
+        1:  147:                    plain_start = i;
+        1:  148:                    continue;
+        -:  149:                }
+        -:  150:            }
+    #####:  151:            i++;
+    #####:  152:            continue;
+        -:  153:        }
+   102570:  154:        i++;
+        -:  155:    }
+       18:  156:    if (plain_start < end)
+       15:  157:        inline_append(b, text, plain_start, end - plain_start, RIKKA_INLINE_TEXT, NULL, 0, NULL, 0);
+       18:  158:}
+        -:  159:
+        -:  160:/* ================= 块级解析 ================= */
+        -:  161:
+        -:  162:typedef struct {
+        -:  163:    const char *text;   /* 源文本 */
+        -:  164:    size_t len;
+        -:  165:    RikkaMdBlock *blocks;
+        -:  166:    size_t count, cap;
+        -:  167:} MdCtx;
+        -:  168:
+       28:  169:static RikkaMdBlock *md_add_block(MdCtx *c, RikkaMdBlockType t, size_t start, size_t end) {
+       28:  170:    if (c->count == c->cap) {
+      21*:  171:        size_t nc = c->cap ? c->cap * 2 : 8;
+       21:  172:        RikkaMdBlock *nb = (RikkaMdBlock *)realloc(c->blocks, nc * sizeof(RikkaMdBlock));
+      21*:  173:        if (!nb) return NULL;
+       21:  174:        c->blocks = nb;
+       21:  175:        c->cap = nc;
+        -:  176:    }
+       28:  177:    RikkaMdBlock *b = &c->blocks[c->count++];
+       28:  178:    memset(b, 0, sizeof(RikkaMdBlock));
+       28:  179:    b->type = t;
+       28:  180:    b->text = c->text + start;
+       28:  181:    b->len = end - start;
+        -:  182:    /* 行起点（增量重解析从行起点开始，含标记如 # ） */
+        -:  183:    {
+       28:  184:        size_t lo = start;
+       41:  185:        while (lo > 0 && c->text[lo - 1] != '\n') lo--;
+       28:  186:        b->line_off = lo;
+        -:  187:    }
+       28:  188:    return b;
+        -:  189:}
+        -:  190:
+        -:  191:/* 行 trim 后是否以 prefix 开头（prefix 长度 plen），返回前缀后偏移 */
+      116:  192:static const char *line_has_prefix(const char *line, size_t len, const char *prefix, size_t plen) {
+      116:  193:    size_t i = 0;
+     116*:  194:    while (i < len && (line[i] == ' ' || line[i] == '\t')) i++;
+      116:  195:    if (len - i >= plen && memcmp(line + i, prefix, plen) == 0) return line + i + plen;
+      100:  196:    return NULL;
+        -:  197:}
+        -:  198:
+        -:  199:/* 块解析：从偏移 start 到 end（多行） */
+       21:  200:static void md_parse_blocks(MdCtx *c, size_t start, size_t end) {
+       21:  201:    size_t i = start;
+       56:  202:    while (i < end) {
+        -:  203:        /* 找行 [i, line_end)（不含 \n） */
+       35:  204:        size_t line_end = i;
+   102729:  205:        while (line_end < end && c->text[line_end] != '\n') line_end++;
+       35:  206:        size_t line_len = line_end - i;
+      35*:  207:        if (line_len > 0 && c->text[line_end - 1] == '\r') line_len--;
+       35:  208:        const char *line = c->text + i;
+        -:  209:
+        -:  210:        /* 空行 → 跳过（段落间分隔） */
+       35:  211:        size_t j = 0;
+      35*:  212:        while (j < line_len && (line[j] == ' ' || line[j] == '\t')) j++;
+       35:  213:        if (j == line_len) { i = line_end + 1; continue; }
+        -:  214:
+        -:  215:        /* # heading */
+       28:  216:        if (line[j] == '#') {
+        5:  217:            int level = 0;
+       13:  218:            while (j + level < line_len && line[j + level] == '#') level++;
+        5:  219:            size_t hstart = j + level;
+       10:  220:            while (hstart < line_len && line[hstart] == ' ') hstart++;
+        5:  221:            RikkaMdBlock *b = md_add_block(c, RIKKA_MD_HEADING, i + hstart, i + line_len);
+        5:  222:            if (b) b->level = level;
+        5:  223:            inline_scan(b, c->text, i + hstart, i + line_len);
+        5:  224:            i = line_end + 1;
+        5:  225:            continue;
+        -:  226:        }
+        -:  227:
+        -:  228:        /* 代码 fence ``` 或 ~~~ */
+       23:  229:        const char *fence = line_has_prefix(line, line_len, "```", 3);
+       23:  230:        const char *fence2 = NULL;
+       23:  231:        if (!fence) fence2 = line_has_prefix(line, line_len, "~~~", 3);
+       23:  232:        if (fence || fence2) {
+       9*:  233:            const char *f = fence ? fence : fence2;
+        -:  234:            /* lang = fence 后到行尾 */
+        9:  235:            const char *lang = f;
+        9:  236:            size_t lang_len = (size_t)(line + line_len - f);
+        9:  237:            size_t block_start = i;
+        -:  238:            /* 找闭合 fence */
+        9:  239:            size_t k = line_end + 1;
+        9:  240:            size_t close = end;
+       16:  241:            while (k < end) {
+       11:  242:                size_t kend = k;
+       77:  243:                while (kend < end && c->text[kend] != '\n') kend++;
+       11:  244:                size_t klen = kend - k;
+       11:  245:                const char *cl = c->text + k;
+       11:  246:                            if (line_has_prefix(cl, klen, "```", 3) || line_has_prefix(cl, klen, "~~~", 3)) {
+        4:  247:                    close = k; /* 闭合 fence 行起点 */
+        4:  248:                    break;
+        -:  249:                }
+        7:  250:                k = kend + 1;
+        -:  251:            }
+        9:  252:            if (close < end) {
+        -:  253:                            /* 有闭合：块内容 [line_end+1, close) */
+        4:  254:                RikkaMdBlock *b = md_add_block(c, RIKKA_MD_CODE_BLOCK, block_start, close);
+        4:  255:                if (b) {
+        4:  256:                    b->lang = lang;
+        4:  257:                    b->lang_len = lang_len;
+        4:  258:                    b->text = c->text + line_end + 1;
+       4*:  259:                    b->len = close > line_end + 1 ? close - line_end - 1 : 0;
+        -:  260:                }
+        -:  261:                /* 跳到闭合 fence 行之后 */
+        4:  262:                i = close;
+       16:  263:                while (i < end && c->text[i] != '\n') i++;
+        4:  264:                i++;
+        -:  265:            } else {
+        -:  266:                /* 未闭合（增量中间态）：内容到末尾 */
+        5:  267:                RikkaMdBlock *b = md_add_block(c, RIKKA_MD_CODE_BLOCK, block_start, end);
+        5:  268:                if (b) {
+        5:  269:                    b->lang = lang;
+        5:  270:                    b->lang_len = lang_len;
+        5:  271:                    b->text = c->text + line_end + 1;
+        5:  272:                    b->len = end > line_end + 1 ? end - line_end - 1 : 0;
+        -:  273:                }
+        5:  274:                i = end;
+        -:  275:            }
+        9:  276:            continue;
+        -:  277:        }
+        -:  278:
+        -:  279:        /* 引用 > */
+       14:  280:        const char *qt = line_has_prefix(line, line_len, ">", 1);
+       14:  281:        if (qt) {
+        2:  282:            while (qt < line + line_len && (*qt == ' ' || *qt == '	')) qt++;
+        1:  283:            RikkaMdBlock *b = md_add_block(c, RIKKA_MD_QUOTE, i, i + line_len);
+        1:  284:            if (b) {
+        1:  285:                b->text = qt;
+        1:  286:                b->len = (size_t)(line + line_len - qt);
+        1:  287:                inline_scan(b, c->text, (size_t)(qt - c->text), i + line_len);
+        -:  288:            }
+        1:  289:            i = line_end + 1;
+        1:  290:            continue;
+        -:  291:        }
+        -:  292:
+        -:  293:        /* 列表项 - + * */
+       13:  294:        const char *li = line_has_prefix(line, line_len, "- ", 2);
+       13:  295:        if (!li) li = line_has_prefix(line, line_len, "* ", 2);
+       13:  296:        if (!li) li = line_has_prefix(line, line_len, "+ ", 2);
+       13:  297:        if (li) {
+        2:  298:            RikkaMdBlock *b = md_add_block(c, RIKKA_MD_LIST_ITEM, i, i + line_len);
+        2:  299:            if (b) {
+        2:  300:                b->text = li;
+        2:  301:                b->len = (size_t)(line + line_len - li);
+        2:  302:                inline_scan(b, c->text, (size_t)(li - c->text), i + line_len);
+        -:  303:            }
+        2:  304:            i = line_end + 1;
+        2:  305:            continue;
+        -:  306:        }
+        -:  307:
+        -:  308:        /* HR --- */
+       11:  309:        if (line_len >= 3 && line[j] == '-' && line[j+1] == '-' && line[j+2] == '-') {
+        1:  310:            int all_dash = 1;
+       4*:  311:            for (size_t k = j; k < line_len; k++) if (line[k] != '-' && line[k] != ' ') { all_dash = 0; break; }
+        1:  312:            if (all_dash) {
+        1:  313:                md_add_block(c, RIKKA_MD_HR, i, i + line_len);
+        1:  314:                i = line_end + 1;
+        1:  315:                continue;
+        -:  316:            }
+        -:  317:        }
+        -:  318:
+        -:  319:        /* 段落：合并连续非空行（含缩进续行） */
+       10:  320:        size_t pstart = i;
+       10:  321:        size_t pend = line_end < end ? line_end + 1 : end;
+       10:  322:        size_t k = line_end + 1;
+       12:  323:        while (k < end) {
+        4:  324:            size_t kend = k;
+       22:  325:            while (kend < end && c->text[kend] != '\n') kend++;
+        4:  326:            size_t klen = kend - k;
+        4:  327:            const char *kl = c->text + k;
+        4:  328:            size_t kj = 0;
+       4*:  329:            while (kj < klen && (kl[kj] == ' ' || kl[kj] == '\t')) kj++;
+        4:  330:            if (kj == klen) break; /* 空行结束段落 */
+        -:  331:            /* 结构行结束段落 */
+       2*:  332:            if (kl[kj] == '#') break;
+        2:  333:            if (line_has_prefix(kl, klen, "```", 3) || line_has_prefix(kl, klen, "~~~", 3)) break;
+       2*:  334:            if (line_has_prefix(kl, klen, ">", 1)) break;
+        4:  335:            if (line_has_prefix(kl, klen, "- ", 2) || line_has_prefix(kl, klen, "* ", 2) ||
+        2:  336:                line_has_prefix(kl, klen, "+ ", 2)) break;
+        2:  337:            pend = kend < end ? kend + 1 : end; /* 最后一行无换行 */
+        2:  338:            k = kend + 1;
+        -:  339:        }
+        -:  340:        /* 段落文本 [pstart, pend)，去掉末尾 \n 和尾部空白 */
+       10:  341:        size_t pend_trim = pend;
+       16:  342:        while (pend_trim > pstart && (c->text[pend_trim-1] == '\n' || c->text[pend_trim-1] == ' ' ||
+       10:  343:                                      c->text[pend_trim-1] == '\t' || c->text[pend_trim-1] == '\r'))
+        6:  344:            pend_trim--;
+       10:  345:        RikkaMdBlock *b = md_add_block(c, RIKKA_MD_PARAGRAPH, pstart, pend_trim);
+       10:  346:        inline_scan(b, c->text, pstart, pend_trim);
+       10:  347:        i = pend;
+        -:  348:    }
+       21:  349:}
+        -:  350:
+        -:  351:/* ================= 公共 API ================= */
+        -:  352:
+        6:  353:RikkaMdBlock *rmd_parse_all(const char *text, size_t len, size_t *count) {
+        -:  354:    MdCtx c;
+        6:  355:    memset(&c, 0, sizeof(c));
+        6:  356:    c.text = text;
+        6:  357:    c.len = len;
+        6:  358:    md_parse_blocks(&c, 0, len);
+        6:  359:    if (count) *count = c.count;
+        6:  360:    return c.blocks;
+        -:  361:}
+        -:  362:
+        6:  363:void rmd_blocks_free(RikkaMdBlock *blocks, size_t count) {
+       6*:  364:    if (!blocks) return;
+       17:  365:    for (size_t i = 0; i < count; i++) free(blocks[i].inlines);
+        6:  366:    free(blocks);
+        -:  367:}
+        -:  368:
+        -:  369:/* ================= 增量解析 ================= */
+        -:  370:
+        -:  371:struct RikkaMdParser {
+        -:  372:    Buf text;
+        -:  373:    RikkaMdBlock *blocks;   /* 已解析块 */
+        -:  374:    size_t count, cap;
+        -:  375:    size_t parse_from;      /* 重解析起点（文本偏移） */
+        -:  376:    size_t open_block_off;  /* 未以换行结束的开放块起点；SIZE_MAX = 无 */
+        -:  377:    int in_fence;           /* 文本末尾在未闭合代码块内 */
+        -:  378:    size_t fence_line_off;  /* 开 fence 行起点 */
+        -:  379:    size_t fence_content_off; /* 代码块内容起点（开 fence 行后） */
+        -:  380:};
+        -:  381:
+        -:  382:/* 找最后块边界（从后向前）。
+        -:  383: * - 未闭合 fence → 开 fence 行
+        -:  384: * - 闭合 fence 行 → 配对的开 fence（代码块整体重解析）
+        -:  385: * - 空行后 / 结构行（heading/quote/list/hr）起点
+        -:  386: * - 普通文本行 → 同一段落，继续向前
+        -:  387: */
+       15:  388:static size_t find_boundary(const char *t, size_t n) {
+        -:  389:    /* 预扫 fence 行 */
+        -:  390:    size_t fences[128];
+       15:  391:    int nf = 0;
+        -:  392:    {
+       15:  393:        size_t i = 0;
+       59:  394:        while (i < n) {
+       44:  395:            size_t le = i;
+   102774:  396:            while (le < n && t[le] != '\n') le++;
+       44:  397:            size_t ll = le - i;
+      44*:  398:            if (ll > 0 && t[le - 1] == '\r') ll--;
+       44:  399:            const char *l = t + i;
+       44:  400:            size_t j = 0;
+      44*:  401:            while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
+       44:  402:            if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
+       10:  403:                if (nf < 128) fences[nf] = i;
+       10:  404:                nf++;
+        -:  405:            }
+       44:  406:            i = le + 1;
+        -:  407:        }
+        -:  408:    }
+      15*:  409:    if (nf > 128) return 0; /* fence 行超多：回退全量重解析（配对信息不全） */
+       15:  410:    if (nf % 2 == 1) return fences[nf - 1]; /* 未闭合：从开 fence 重解析 */
+        -:  411:
+        -:  412:    /* 从后向前找块边界 */
+       11:  413:    size_t line_start = n;
+       15:  414:    while (line_start > 0) {
+       15:  415:        size_t prev_nl = line_start;
+        -:  416:        /* line_start 若已在行首（前一个字符是 \n），先跳过该行的 \n 找更早的 */
+       15:  417:        if (prev_nl > 0 && t[prev_nl - 1] == '\n') prev_nl--;
+   102483:  418:        while (prev_nl > 0 && t[prev_nl - 1] != '\n') prev_nl--;
+       15:  419:        if (prev_nl == 0) return 0;
+       11:  420:        size_t ls = prev_nl;
+       11:  421:        size_t le = line_start;
+       11:  422:        if (le > ls && t[le - 1] == '\n') le--;
+      11*:  423:        if (le > ls && t[le - 1] == '\r') le--;
+       11:  424:        size_t ll = le - ls;
+       11:  425:        const char *l = t + ls;
+       11:  426:        size_t j = 0;
+      11*:  427:        while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
+       11:  428:        if (j == ll) {
+       5*:  429:            return le < n && t[le] == '\n' ? le + 1 : le; /* 空行后 */
+        -:  430:        }
+       6*:  431:        if (l[j] == '#') return ls;
+       6*:  432:        if (l[j] == '>') return ls;
+       6*:  433:        if (ll - j >= 2 && (l[j] == '-' || l[j] == '*' || l[j] == '+') && l[j + 1] == ' ')
+    #####:  434:            return ls;
+       6*:  435:        if (ll - j >= 3 && l[j] == '-' && l[j + 1] == '-' && l[j + 2] == '-') {
+    #####:  436:            int all_dash = 1;
+    #####:  437:            for (size_t k = j; k < ll; k++)
+    #####:  438:                if (l[k] != '-' && l[k] != ' ') { all_dash = 0; break; }
+    #####:  439:            if (all_dash) return ls;
+        -:  440:        }
+        6:  441:        if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
+        -:  442:            /* 闭合 fence：返回配对的开 fence */
+        4:  443:            for (int k = 0; k < nf; k++)
+       4*:  444:                if (fences[k] == ls) return k > 0 ? fences[k - 1] : 0;
+    #####:  445:            return ls;
+        -:  446:        }
+        4:  447:        line_start = prev_nl; /* 普通文本：同一段落 */
+        -:  448:    }
+    #####:  449:    return 0;
+        -:  450:}
+        -:  451:
+       15:  452:static void rebuild_blocks(RikkaMdParser *p) {
+        -:  453:    /* 丢弃 parse_from 之后的旧块，重新解析 */
+       15:  454:    size_t keep = 0;
+       22:  455:    for (size_t i = 0; i < p->count; i++) {
+        -:  456:        /* 块 text 起点 >= parse_from 的丢弃 */
+       15:  457:        if ((size_t)(p->blocks[i].text - (const char *)p->text.data) >= p->parse_from) break;
+        7:  458:        keep++;
+        -:  459:    }
+       23:  460:    for (size_t i = keep; i < p->count; i++) {
+        8:  461:        free(p->blocks[i].inlines);
+        8:  462:        p->blocks[i].inlines = NULL;
+        8:  463:        p->blocks[i].inline_count = p->blocks[i].inline_cap = 0;
+        -:  464:    }
+       15:  465:    p->count = keep;
+        -:  466:
+        -:  467:    MdCtx c;
+       15:  468:    memset(&c, 0, sizeof(c));
+       15:  469:    c.text = (const char *)p->text.data;
+       15:  470:    c.len = p->text.len;
+       15:  471:    md_parse_blocks(&c, p->parse_from, p->text.len);
+        -:  472:    /* 合并新块 */
+       32:  473:    for (size_t i = 0; i < c.count; i++) {
+       17:  474:        if (p->count == p->cap) {
+       5*:  475:            size_t nc = p->cap ? p->cap * 2 : 8;
+        5:  476:            RikkaMdBlock *nb = (RikkaMdBlock *)realloc(p->blocks, nc * sizeof(RikkaMdBlock));
+       5*:  477:            if (!nb) break;
+        5:  478:            p->blocks = nb;
+        5:  479:            p->cap = nc;
+        -:  480:        }
+       17:  481:        p->blocks[p->count++] = c.blocks[i];
+        -:  482:    }
+       15:  483:    free(c.blocks);
+       15:  484:}
+        -:  485:
+        5:  486:RikkaMdParser *rmd_create(void) {
+        5:  487:    RikkaMdParser *p = (RikkaMdParser *)calloc(1, sizeof(RikkaMdParser));
+       5*:  488:    if (!p) return NULL;
+        5:  489:    buf_init(&p->text);
+        5:  490:    return p;
+        -:  491:}
+        -:  492:
+        5:  493:void rmd_destroy(RikkaMdParser *p) {
+       5*:  494:    if (!p) return;
+       14:  495:    for (size_t i = 0; i < p->count; i++) free(p->blocks[i].inlines);
+        5:  496:    free(p->blocks);
+        5:  497:    buf_free(&p->text);
+        5:  498:    free(p);
+        -:  499:}
+        -:  500:
+        -:  501:/* 统计文本 [start, end) 内的 fence 行数 */
+        6:  502:static int count_fence_lines(const char *t, size_t start, size_t end) {
+        6:  503:    int n = 0;
+        6:  504:    size_t i = start;
+       14:  505:    while (i < end) {
+        8:  506:        size_t le = i;
+       46:  507:        while (le < end && t[le] != '\n') le++;
+        8:  508:        size_t ll = le - i;
+       8*:  509:        if (ll > 0 && t[le - 1] == '\r') ll--;
+        8:  510:        const char *l = t + i;
+        8:  511:        size_t j = 0;
+       8*:  512:        while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
+        8:  513:        if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0))
+        4:  514:            n++;
+        8:  515:        i = le + 1;
+        -:  516:    }
+        6:  517:    return n;
+        -:  518:}
+        -:  519:
+       18:  520:void rmd_feed(RikkaMdParser *p, const char *text, size_t len) {
+       18:  521:    size_t old_len = p->text.len;
+       18:  522:    uint8_t *old_data = p->text.data;
+       18:  523:    buf_append(&p->text, text, len);
+        -:  524:    /* Buf realloc 会移动 data：平移保留块的所有指针（text/inline href/alt） */
+       18:  525:    ptrdiff_t delta = (const char *)p->text.data - (const char *)old_data;
+       18:  526:    if (delta != 0) {
+        9:  527:        for (size_t i = 0; i < p->count; i++) {
+        3:  528:            p->blocks[i].text += delta;
+        6:  529:            for (size_t j = 0; j < p->blocks[i].inline_count; j++) {
+       3*:  530:                if (p->blocks[i].inlines[j].href) p->blocks[i].inlines[j].href += delta;
+       3*:  531:                if (p->blocks[i].inlines[j].alt) p->blocks[i].inlines[j].alt += delta;
+        -:  532:            }
+        -:  533:        }
+        -:  534:    }
+        -:  535:    /* fence 快速路径：仍在代码块内时只追加尾部（不重解析整个块） */
+       18:  536:    if (p->in_fence && p->count > 0) {
+        6:  537:        int new_fences = count_fence_lines((const char *)p->text.data, old_len, p->text.len);
+        6:  538:        RikkaMdBlock *last = &p->blocks[p->count - 1];
+        -:  539:        /* 快速路径仅当新段无任何 fence 行（闭合或重开都必须走 rebuild 处理） */
+        6:  540:        if (new_fences == 0 && last->type == RIKKA_MD_CODE_BLOCK) {
+        -:  541:            /* 无闭合 fence：只更新内容区（text 指向新缓冲 + 内容偏移） */
+        3:  542:            last->text = (const char *)p->text.data + p->fence_content_off;
+        3:  543:            last->len = p->text.len - p->fence_content_off;
+        3:  544:            p->open_block_off = SIZE_MAX;
+        3:  545:            return;
+        -:  546:        }
+        -:  547:    }
+       15:  548:    size_t b = find_boundary((const char *)p->text.data, p->text.len);
+       15:  549:    if (p->open_block_off != SIZE_MAX && p->open_block_off < b) b = p->open_block_off;
+      15*:  550:    if (b < p->parse_from) b = p->parse_from;
+       15:  551:    p->parse_from = b;
+       15:  552:    rebuild_blocks(p);
+        -:  553:    /* 更新开放块状态：最后块未以换行结束时记录起点 */
+       15:  554:    p->open_block_off = SIZE_MAX;
+       15:  555:    if (p->count > 0) {
+       15:  556:        RikkaMdBlock *last = &p->blocks[p->count - 1];
+        -:  557:        {
+       15:  558:            size_t text_off = (size_t)(last->text - (const char *)p->text.data);
+       15:  559:            size_t end = text_off + last->len;
+       15:  560:            if (end >= p->text.len || p->text.data[end] != '\n')
+       12:  561:                p->open_block_off = last->line_off;
+        -:  562:        }
+        -:  563:    }
+        -:  564:    /* 更新 fence 状态：末尾是否在未闭合代码块内 */
+       15:  565:    p->in_fence = 0;
+        -:  566:    {
+       15:  567:        const char *t = (const char *)p->text.data;
+       15:  568:        size_t i = 0, total = p->text.len;
+       15:  569:        int parity = 0;
+       15:  570:        size_t last_open_line = 0, last_open_content = 0;
+       59:  571:        while (i < total) {
+       44:  572:            size_t le = i;
+   102774:  573:            while (le < total && t[le] != '\n') le++;
+       44:  574:            size_t ll = le - i;
+      44*:  575:            if (ll > 0 && t[le - 1] == '\r') ll--;
+       44:  576:            const char *l = t + i;
+       44:  577:            size_t j = 0;
+      44*:  578:            while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
+       44:  579:            if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
+       10:  580:                parity = !parity;
+       10:  581:                if (parity) {
+        7:  582:                    last_open_line = i;
+        7:  583:                    last_open_content = le + 1;
+        -:  584:                }
+        -:  585:            }
+       44:  586:            i = le + 1;
+        -:  587:        }
+       15:  588:        if (parity) {
+        4:  589:            p->in_fence = 1;
+        4:  590:            p->fence_line_off = last_open_line;
+        4:  591:            p->fence_content_off = last_open_content;
+        -:  592:        }
+        -:  593:    }
+        -:  594:}
+        -:  595:
+        7:  596:const RikkaMdBlock *rmd_blocks(RikkaMdParser *p, size_t *count) {
+        7:  597:    if (count) *count = p->count;
+        7:  598:    return p->blocks;
+        -:  599:}
+        -:  600:
+    #####:  601:size_t rmd_total(const RikkaMdParser *p) { return p->text.len; }

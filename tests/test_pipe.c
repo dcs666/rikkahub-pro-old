@@ -138,6 +138,22 @@ static void *consumer(void *v) {
     return NULL;
 }
 
+TEST(spsc_wraparound_stress) {
+    /* 小块反复 push/pop 触发环形回绕，验证数据完整性 */
+    RkSpsc q;
+    rk_spsc_init(&q, 256); /* 小容量强制回绕 */
+    char out[64];
+    for (int round = 0; round < 1000; round++) {
+        char item[20];
+        snprintf(item, sizeof(item), "msg-%d", round);
+        ASSERT_EQ_INT(0, rk_spsc_push(&q, item, strlen(item)));
+        ssize_t n = rk_spsc_pop(&q, out, sizeof(out));
+        ASSERT_EQ_SIZE(strlen(item), n);
+        ASSERT(memcmp(out, item, n) == 0);
+    }
+    rk_spsc_destroy(&q);
+}
+
 TEST(spsc_empty_block_rejected) {
     RkSpsc q;
     rk_spsc_init(&q, 64);
@@ -216,6 +232,7 @@ int run_pipe_suite(void) {
         RIKKA_TEST_REGISTER(pipe, spsc_full),
         RIKKA_TEST_REGISTER(pipe, spsc_single_byte),
         RIKKA_TEST_REGISTER(pipe, spsc_empty_block_rejected),
+        RIKKA_TEST_REGISTER(pipe, spsc_wraparound_stress),
         RIKKA_TEST_REGISTER(pipe, spsc_max_block_boundary),
         RIKKA_TEST_REGISTER(pipe, pipeline_sse_to_stream),
     };

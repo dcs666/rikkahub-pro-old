@@ -120,6 +120,18 @@ TEST(http_404) {
     stop_mock_server();
 }
 
+TEST(tls_smoke) {
+    /* 真实 HTTPS 冒烟（需外网，RIKKA_TEST_TLS=1 时启用，CI 开启） */
+    if (!getenv("RIKKA_TEST_TLS")) { printf("  [skip: set RIKKA_TEST_TLS=1]\n"); return; }
+    RHttpConn *c = rhttp_connect("example.com", 443, 1, 15000);
+    ASSERT_NOT_NULL(c);
+    ASSERT_EQ_INT(0, rhttp_send(c, "GET", "/", NULL, NULL, 0));
+    RHttpResp resp;
+    ASSERT_EQ_INT(0, rhttp_read_headers(c, &resp, 15000));
+    ASSERT_EQ_INT(200, resp.status);
+    rhttp_close(c);
+}
+
 int run_http_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(http, http_sse_stream),

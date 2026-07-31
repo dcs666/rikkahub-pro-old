@@ -1,0 +1,91 @@
+        -:    0:Source:src/util/log.c
+        -:    0:Graph:src/util/log.gcno
+        -:    0:Data:src/util/log.gcda
+        -:    0:Runs:1
+        -:    1:#define _POSIX_C_SOURCE 200809L
+        -:    2:#include "rikka/util/log.h"
+        -:    3:#include <pthread.h>
+        -:    4:#include <stdarg.h>
+        -:    5:#include <stdio.h>
+        -:    6:#include <stdlib.h>
+        -:    7:#include <string.h>
+        -:    8:#include <time.h>
+        -:    9:
+        -:   10:#define RIKKA_LOG_CAPACITY 100   /* 最近 100 条，对标 app 端 MAX_RECENT_LOGS */
+        -:   11:#define RIKKA_LOG_MSG_MAX  511
+        -:   12:
+        -:   13:static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+        -:   14:static RikkaLogLevel   g_level = RIKKA_LOG_INFO;
+        -:   15:static int             g_quiet = 0;
+        -:   16:static RikkaLogEntry   g_ring[RIKKA_LOG_CAPACITY];
+        -:   17:static size_t          g_count = 0;   /* 已写入条数 */
+        -:   18:static size_t          g_head  = 0;   /* 下一条写入位置 */
+        -:   19:
+    #####:   20:static const char *level_name(RikkaLogLevel l) {
+    #####:   21:    switch (l) {
+    #####:   22:        case RIKKA_LOG_TRACE: return "TRACE";
+    #####:   23:        case RIKKA_LOG_DEBUG: return "DEBUG";
+    #####:   24:        case RIKKA_LOG_INFO:  return "INFO";
+    #####:   25:        case RIKKA_LOG_WARN:  return "WARN";
+    #####:   26:        case RIKKA_LOG_ERROR: return "ERROR";
+        -:   27:    }
+    #####:   28:    return "?";
+        -:   29:}
+        -:   30:
+      252:   31:static uint64_t now_ms(void) {
+        -:   32:    struct timespec ts;
+      252:   33:    clock_gettime(CLOCK_REALTIME, &ts);
+      252:   34:    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+        -:   35:}
+        -:   36:
+        4:   37:void rikka_log_set_level(RikkaLogLevel level) {
+        4:   38:    __atomic_store_n(&g_level, level, __ATOMIC_RELAXED);
+        4:   39:}
+        -:   40:
+        1:   41:void rikka_log_set_quiet(int quiet) {
+        1:   42:    __atomic_store_n(&g_quiet, quiet, __ATOMIC_RELAXED);
+        1:   43:}
+        -:   44:
+      253:   45:void rikka_log_write(RikkaLogLevel level, const char *fmt, ...) {
+      253:   46:    if (level < __atomic_load_n(&g_level, __ATOMIC_RELAXED)) return;
+        -:   47:    char msg[RIKKA_LOG_MSG_MAX + 1];
+        -:   48:    va_list ap;
+      252:   49:    va_start(ap, fmt);
+      252:   50:    vsnprintf(msg, sizeof(msg), fmt, ap);
+      252:   51:    va_end(ap);
+      252:   52:    msg[RIKKA_LOG_MSG_MAX] = '\0';
+        -:   53:
+      252:   54:    pthread_mutex_lock(&g_lock);
+      252:   55:    RikkaLogEntry *e = &g_ring[g_head % RIKKA_LOG_CAPACITY];
+      252:   56:    e->ts_ms = now_ms();
+      252:   57:    e->level = level;
+      252:   58:    snprintf(e->msg, sizeof(e->msg), "%s", msg);
+      252:   59:    g_head++;
+      252:   60:    g_count++;
+      252:   61:    pthread_mutex_unlock(&g_lock);
+        -:   62:
+      252:   63:    if (!__atomic_load_n(&g_quiet, __ATOMIC_RELAXED)) {
+    #####:   64:        fprintf(stderr, "[%s] %s\n", level_name(level), msg);
+        -:   65:    }
+        -:   66:}
+        -:   67:
+        4:   68:size_t rikka_log_recent(RikkaLogEntry *entries, size_t count) {
+       4*:   69:    if (!entries || count == 0) return 0;
+        4:   70:    pthread_mutex_lock(&g_lock);
+        4:   71:    size_t n = g_count < RIKKA_LOG_CAPACITY ? g_count : RIKKA_LOG_CAPACITY;
+        4:   72:    if (count > n) count = n;
+        4:   73:    size_t last = (g_head - 1 + RIKKA_LOG_CAPACITY) % RIKKA_LOG_CAPACITY; /* 最新位置 */
+      106:   74:    for (size_t i = 0; i < count; i++) {
+      102:   75:        entries[i] = g_ring[(last + RIKKA_LOG_CAPACITY - i) % RIKKA_LOG_CAPACITY];
+        -:   76:    }
+        4:   77:    pthread_mutex_unlock(&g_lock);
+        4:   78:    return count;
+        -:   79:}
+        -:   80:
+        4:   81:void rikka_log_clear(void) {
+        4:   82:    pthread_mutex_lock(&g_lock);
+        4:   83:    g_head = 0;
+        4:   84:    g_count = 0;
+        4:   85:    memset(g_ring, 0, sizeof(g_ring));
+        4:   86:    pthread_mutex_unlock(&g_lock);
+        4:   87:}

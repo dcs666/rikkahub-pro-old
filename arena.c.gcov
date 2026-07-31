@@ -1,0 +1,127 @@
+        -:    0:Source:src/util/arena.c
+        -:    0:Graph:src/util/arena.gcno
+        -:    0:Data:src/util/arena.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/util/arena.h"
+        -:    2:#include <stdlib.h>
+        -:    3:#include <string.h>
+        -:    4:
+        -:    5:#define ARENA_DEFAULT_BLOCK 65536
+        -:    6:
+        -:    7:typedef struct Block {
+        -:    8:    struct Block *next;
+        -:    9:    size_t        used;
+        -:   10:    size_t        cap;
+        -:   11:    /* 数据紧随块头 */
+        -:   12:} Block;
+        -:   13:
+        -:   14:struct Arena {
+        -:   15:    Block *head;       /* 当前分配块 */
+        -:   16:    Block *first;      /* 首块（reset 时从此复用） */
+        -:   17:    size_t block_size;
+        -:   18:};
+        -:   19:
+      241:   20:Arena *arena_create(size_t block_size) {
+      241:   21:    if (block_size == 0) block_size = ARENA_DEFAULT_BLOCK;
+      241:   22:    Arena *a = (Arena *)calloc(1, sizeof(Arena));
+     241*:   23:    if (!a) return NULL;
+      241:   24:    a->block_size = block_size;
+      241:   25:    return a;
+        -:   26:}
+        -:   27:
+      351:   28:static Block *alloc_block(Arena *a) {
+      351:   29:    size_t blk = sizeof(Block) + a->block_size;
+      351:   30:    Block *b = (Block *)malloc(blk);
+     351*:   31:    if (!b) return NULL;
+      351:   32:    b->next = NULL;
+      351:   33:    b->used = sizeof(Block);
+      351:   34:    b->cap  = blk;
+      351:   35:    return b;
+        -:   36:}
+        -:   37:
+     8153:   38:void *arena_alloc(Arena *a, size_t align, size_t size) {
+    8153*:   39:    if (!a) return NULL;
+     8153:   40:    if (align < 8) align = 8;
+    8153*:   41:    if (size == 0) size = 1;
+     8153:   42:    if (!a->head) {
+      226:   43:        a->head = alloc_block(a);
+     226*:   44:        if (!a->head) return NULL;
+      226:   45:        a->first = a->head;
+        -:   46:    }
+     8153:   47:    Block *b = a->head;
+        -:   48:    /* 对齐当前指针 */
+     8153:   49:    uintptr_t p = (uintptr_t)b + b->used;
+     8153:   50:    uintptr_t aligned = (p + align - 1) & ~((uintptr_t)align - 1);
+     8153:   51:    size_t off = (size_t)(aligned - (uintptr_t)b);
+        -:   52:    /* 减法比较防 off+size 溢出（size 接近 SIZE_MAX 时） */
+     8153:   53:    if (off > b->cap || size > b->cap - off) {
+        -:   54:        /* 新块；若首块之后已有更大块，优先复用（reset 后） */
+      134:   55:        Block *nb = NULL;
+     134*:   56:        for (Block *it = b->next; it; it = it->next) {
+        9:   57:            uintptr_t ip = (uintptr_t)it + it->used;
+        9:   58:            uintptr_t ia = (ip + align - 1) & ~((uintptr_t)align - 1);
+        9:   59:            if ((size_t)(ia - (uintptr_t)it) + size <= it->cap) {
+        9:   60:                nb = it;
+        9:   61:                break;
+        -:   62:            }
+        -:   63:        }
+      134:   64:        if (!nb) {
+      125:   65:            if (sizeof(Block) + size > a->block_size) {
+        -:   66:                /* 大分配（> 块容量）：创建专用块，块尾追加保持顺序 */
+    #####:   67:                nb = (Block *)malloc(sizeof(Block) + size);
+    #####:   68:                if (!nb) return NULL;
+    #####:   69:                nb->next = NULL;
+    #####:   70:                nb->used = sizeof(Block);
+    #####:   71:                nb->cap = sizeof(Block) + size;
+        -:   72:                /* 追加到链尾 */
+    #####:   73:                Block *tail = a->first ? a->first : a->head;
+    #####:   74:                while (tail && tail->next) tail = tail->next;
+    #####:   75:                if (tail) tail->next = nb;
+    #####:   76:                else a->head = nb;
+        -:   77:            } else {
+      125:   78:                nb = alloc_block(a);
+     125*:   79:                if (!nb) return NULL;
+      125:   80:                nb->next = a->head->next; /* 插入为 head，保持首块顺序 */
+      125:   81:                a->head->next = nb;
+        -:   82:            }
+        -:   83:        }
+      134:   84:        b = nb;
+      134:   85:        a->head = b;
+        -:   86:    }
+     8153:   87:    uintptr_t base = (uintptr_t)b + b->used;
+     8153:   88:    uintptr_t out  = (base + align - 1) & ~((uintptr_t)align - 1);
+     8153:   89:    b->used = (size_t)(out - (uintptr_t)b) + size;
+     8153:   90:    return (void *)out;
+        -:   91:}
+        -:   92:
+     4747:   93:void *arena_alloc0(Arena *a, size_t align, size_t size) {
+     4747:   94:    void *p = arena_alloc(a, align, size);
+     4747:   95:    if (p) memset(p, 0, size);
+     4747:   96:    return p;
+        -:   97:}
+        -:   98:
+       10:   99:void arena_reset(Arena *a) {
+      10*:  100:    if (!a) return;
+       10:  101:    a->head = a->first;
+       30:  102:    for (Block *b = a->first; b; b = b->next) b->used = sizeof(Block);
+        -:  103:}
+        -:  104:
+       20:  105:size_t arena_used(const Arena *a) {
+      20*:  106:    if (!a) return 0;
+       20:  107:    size_t total = 0;
+       60:  108:    for (const Block *b = a->first; b; b = b->next) {
+       40:  109:        total += b->used - sizeof(Block);
+        -:  110:    }
+       20:  111:    return total;
+        -:  112:}
+        -:  113:
+      241:  114:void arena_destroy(Arena *a) {
+     241*:  115:    if (!a) return;
+      241:  116:    Block *b = a->first;
+      592:  117:    while (b) {
+      351:  118:        Block *n = b->next;
+      351:  119:        free(b);
+      351:  120:        b = n;
+        -:  121:    }
+      241:  122:    free(a);
+        -:  123:}

@@ -1,0 +1,173 @@
+        -:    0:Source:src/data/lru.c
+        -:    0:Graph:src/data/lru.gcno
+        -:    0:Data:src/data/lru.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/data/lru.h"
+        -:    2:#include <stdlib.h>
+        -:    3:#include <string.h>
+        -:    4:
+        -:    5:typedef struct RkLruEntry RkLruEntry;
+        -:    6:struct RkLruEntry {
+        -:    7:    uint64_t hash;
+        -:    8:    uint32_t key_len, value_len;
+        -:    9:    char *key;
+        -:   10:    uint8_t *value;
+        -:   11:    RkLruEntry *prev, *next;    /* LRU 链表（head = 最新） */
+        -:   12:    RkLruEntry *hnext;          /* 哈希链 */
+        -:   13:};
+        -:   14:
+        -:   15:struct RkLru {
+        -:   16:    size_t max_entries, max_bytes;
+        -:   17:    size_t cur_bytes, count;
+        -:   18:    RkLruEntry **buckets;
+        -:   19:    size_t nbuckets;
+        -:   20:    RkLruEntry *head, *tail;
+        -:   21:};
+        -:   22:
+       23:   23:static uint64_t fnv1a(const void *key, size_t len) {
+       23:   24:    const uint8_t *p = (const uint8_t *)key;
+       23:   25:    uint64_t h = 1469598103934665603ULL;
+       68:   26:    for (size_t i = 0; i < len; i++) {
+       45:   27:        h ^= p[i];
+       45:   28:        h *= 1099511628211ULL;
+        -:   29:    }
+       23:   30:    return h;
+        -:   31:}
+        -:   32:
+        3:   33:RkLru *rk_lru_create(size_t max_entries, size_t max_bytes) {
+        3:   34:    RkLru *l = (RkLru *)calloc(1, sizeof(RkLru));
+       3*:   35:    if (!l) return NULL;
+       3*:   36:    l->max_entries = max_entries ? max_entries : 1024;
+       3*:   37:    l->max_bytes = max_bytes ? max_bytes : (64u << 20);
+        3:   38:    l->nbuckets = 256;
+        3:   39:    l->buckets = (RkLruEntry **)calloc(l->nbuckets, sizeof(RkLruEntry *));
+       3*:   40:    if (!l->buckets) { free(l); return NULL; }
+        3:   41:    return l;
+        -:   42:}
+        -:   43:
+       10:   44:static void entry_free(RkLruEntry *e) {
+       10:   45:    free(e->key);
+       10:   46:    free(e->value);
+       10:   47:    free(e);
+       10:   48:}
+        -:   49:
+        3:   50:void rk_lru_clear(RkLru *l) {
+        3:   51:    RkLruEntry *e = l->head;
+        9:   52:    while (e) {
+        6:   53:        RkLruEntry *n = e->next;
+        6:   54:        entry_free(e);
+        6:   55:        e = n;
+        -:   56:    }
+        3:   57:    l->head = l->tail = NULL;
+        3:   58:    l->count = l->cur_bytes = 0;
+        3:   59:    memset(l->buckets, 0, l->nbuckets * sizeof(RkLruEntry *));
+        3:   60:}
+        -:   61:
+        3:   62:void rk_lru_destroy(RkLru *l) {
+       3*:   63:    if (!l) return;
+        3:   64:    rk_lru_clear(l);
+        3:   65:    free(l->buckets);
+        3:   66:    free(l);
+        -:   67:}
+        -:   68:
+        9:   69:static void unlink(RkLru *l, RkLruEntry *e) {
+       9*:   70:    if (e->prev) e->prev->next = e->next; else l->head = e->next;
+        9:   71:    if (e->next) e->next->prev = e->prev; else l->tail = e->prev;
+        9:   72:}
+        -:   73:
+       15:   74:static void link_front(RkLru *l, RkLruEntry *e) {
+       15:   75:    e->prev = NULL;
+       15:   76:    e->next = l->head;
+       15:   77:    if (l->head) l->head->prev = e;
+       15:   78:    l->head = e;
+       15:   79:    if (!l->tail) l->tail = e;
+       15:   80:}
+        -:   81:
+        4:   82:static void evict_one(RkLru *l) {
+        4:   83:    RkLruEntry *e = l->tail;
+       4*:   84:    if (!e) return;
+        4:   85:    unlink(l, e);
+        -:   86:    /* 从哈希桶移除 */
+        4:   87:    size_t bi = e->hash & (l->nbuckets - 1);
+        4:   88:    RkLruEntry **pp = &l->buckets[bi];
+       4*:   89:    while (*pp && *pp != e) pp = &(*pp)->hnext;
+        4:   90:    if (*pp) *pp = e->hnext;
+        4:   91:    l->cur_bytes -= e->value_len + e->key_len + sizeof(RkLruEntry);
+        4:   92:    l->count--;
+        4:   93:    entry_free(e);
+        -:   94:}
+        -:   95:
+       11:   96:int rk_lru_put(RkLru *l, const void *key, size_t key_len,
+        -:   97:               const void *value, size_t value_len) {
+       11:   98:    uint64_t h = fnv1a(key, key_len);
+       11:   99:    size_t bi = h & (l->nbuckets - 1);
+        -:  100:    /* 已存在则替换 */
+      11*:  101:    for (RkLruEntry *e = l->buckets[bi]; e; e = e->hnext) {
+        1:  102:        if (e->hash == h && e->key_len == key_len &&
+        1:  103:            memcmp(e->key, key, key_len) == 0) {
+        -:  104:            /* 值替换 */
+        1:  105:            l->cur_bytes -= e->value_len;
+       1*:  106:            uint8_t *nv = (uint8_t *)malloc(value_len ? value_len : 1);
+       1*:  107:            if (!nv) return -1;
+        1:  108:            if (value_len) memcpy(nv, value, value_len);
+        1:  109:            free(e->value);
+        1:  110:            e->value = nv;
+        1:  111:            e->value_len = (uint32_t)value_len;
+        1:  112:            l->cur_bytes += value_len;
+        -:  113:            /* 提升到最新 */
+       1*:  114:            if (l->head != e) { unlink(l, e); link_front(l, e); }
+        1:  115:            return 0;
+        -:  116:        }
+        -:  117:    }
+      10*:  118:    if (value_len > l->max_bytes) return -1;
+       10:  119:    RkLruEntry *e = (RkLruEntry *)calloc(1, sizeof(RkLruEntry));
+      10*:  120:    if (!e) return -1;
+       10:  121:    e->hash = h;
+       10:  122:    e->key_len = (uint32_t)key_len;
+       10:  123:    e->value_len = (uint32_t)value_len;
+      10*:  124:    e->key = (char *)malloc(key_len ? key_len : 1);
+      10*:  125:    e->value = (uint8_t *)malloc(value_len ? value_len : 1);
+      10*:  126:    if (!e->key || !e->value) { entry_free(e); return -1; }
+       10:  127:    if (key_len) memcpy(e->key, key, key_len);
+       10:  128:    if (value_len) memcpy(e->value, value, value_len);
+       10:  129:    e->hnext = l->buckets[bi];
+       10:  130:    l->buckets[bi] = e;
+       10:  131:    link_front(l, e);
+       10:  132:    l->cur_bytes += value_len + key_len + sizeof(RkLruEntry);
+       10:  133:    l->count++;
+        -:  134:    /* 容量淘汰 */
+       14:  135:    while (l->count > l->max_entries || l->cur_bytes > l->max_bytes) evict_one(l);
+        -:  136:    /* 负载因子 > 4 时哈希表扩容 */
+       10:  137:    if (l->count > l->nbuckets * 4) {
+    #####:  138:        size_t nn = l->nbuckets * 2;
+    #####:  139:        RkLruEntry **nb = (RkLruEntry **)calloc(nn, sizeof(RkLruEntry *));
+    #####:  140:        if (nb) {
+    #####:  141:            for (RkLruEntry *re = l->head; re; re = re->next) {
+    #####:  142:                size_t rbi = re->hash & (nn - 1);
+    #####:  143:                re->hnext = nb[rbi];
+    #####:  144:                nb[rbi] = re;
+        -:  145:            }
+    #####:  146:            free(l->buckets);
+    #####:  147:            l->buckets = nb;
+    #####:  148:            l->nbuckets = nn;
+        -:  149:        }
+        -:  150:    }
+       10:  151:    return 0;
+        -:  152:}
+        -:  153:
+       12:  154:const void *rk_lru_get(RkLru *l, const void *key, size_t key_len, size_t *value_len) {
+       12:  155:    uint64_t h = fnv1a(key, key_len);
+       12:  156:    size_t bi = h & (l->nbuckets - 1);
+      12*:  157:    for (RkLruEntry *e = l->buckets[bi]; e; e = e->hnext) {
+        7:  158:        if (e->hash == h && e->key_len == key_len &&
+        7:  159:            memcmp(e->key, key, key_len) == 0) {
+        7:  160:            if (l->head != e) { unlink(l, e); link_front(l, e); }
+        7:  161:            if (value_len) *value_len = e->value_len;
+        7:  162:            return e->value;
+        -:  163:        }
+        -:  164:    }
+        5:  165:    return NULL;
+        -:  166:}
+        -:  167:
+        1:  168:size_t rk_lru_count(const RkLru *l) { return l->count; }
+    #####:  169:size_t rk_lru_bytes(const RkLru *l) { return l->cur_bytes; }

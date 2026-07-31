@@ -1,0 +1,141 @@
+        -:    0:Source:src/http/sse.c
+        -:    0:Graph:src/http/sse.gcno
+        -:    0:Data:src/http/sse.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/http/sse.h"
+        -:    2:#include <stdlib.h>
+        -:    3:#include <string.h>
+        -:    4:
+        -:    5:#define SSE_LINE_MAX 8192
+        -:    6:
+        -:    7:struct RsseParser {
+        -:    8:    RsseEventCb cb;
+        -:    9:    void *ctx;
+        -:   10:
+        -:   11:    /* 行缓冲 */
+        -:   12:    char *line;
+        -:   13:    size_t line_len, line_cap;
+        -:   14:
+        -:   15:    /* 当前事件累积 */
+        -:   16:    char event[64];
+        -:   17:    Buf data;
+        -:   18:    char id[128];
+        -:   19:    long long retry_ms;
+        -:   20:    int have_retry;
+        -:   21:};
+        -:   22:
+        7:   23:RsseParser *rsse_create(RsseEventCb cb, void *ctx) {
+        7:   24:    RsseParser *p = (RsseParser *)calloc(1, sizeof(RsseParser));
+       7*:   25:    if (!p) return NULL;
+        7:   26:    p->cb = cb;
+        7:   27:    p->ctx = ctx;
+        7:   28:    buf_init(&p->data);
+        7:   29:    return p;
+        -:   30:}
+        -:   31:
+        7:   32:void rsse_destroy(RsseParser *p) {
+       7*:   33:    if (!p) return;
+        7:   34:    free(p->line);
+        7:   35:    buf_free(&p->data);
+        7:   36:    free(p);
+        -:   37:}
+        -:   38:
+        6:   39:void rsse_reset(RsseParser *p) {
+        6:   40:    p->line_len = 0;
+        6:   41:    p->event[0] = '\0';
+        6:   42:    buf_reset(&p->data);
+        6:   43:    p->id[0] = '\0';
+        6:   44:    p->retry_ms = 0;
+        6:   45:    p->have_retry = 0;
+        6:   46:}
+        -:   47:
+      520:   48:static void dispatch(RsseParser *p) {
+      520:   49:    if (p->cb) {
+    1040*:   50:        p->cb(p->ctx, p->event[0] ? p->event : "message",
+      520:   51:              (const char *)p->data.data, p->data.len,
+      520:   52:              p->id, p->have_retry ? p->retry_ms : -1);
+        -:   53:    }
+        -:   54:    /* 复位事件累积（id 保留——SSE 规范：未设 id 沿用上一个） */
+      520:   55:    p->event[0] = '\0';
+      520:   56:    buf_reset(&p->data);
+      520:   57:    p->have_retry = 0;
+      520:   58:}
+        -:   59:
+     1046:   60:static void handle_line(RsseParser *p, const char *line, size_t len) {
+     1046:   61:    if (len == 0) { dispatch(p); return; }        /* 空行 = 事件结束 */
+     526*:   62:    if (line[0] == ':') return;                   /* 注释 */
+        -:   63:    /* 找冒号 */
+      526:   64:    const char *colon = memchr(line, ':', len);
+        -:   65:    const char *field;
+        -:   66:    size_t field_len;
+        -:   67:    const char *value;
+        -:   68:    size_t value_len;
+      526:   69:    if (colon) {
+      526:   70:        field = line;
+      526:   71:        field_len = (size_t)(colon - line);
+      526:   72:        value = colon + 1;
+      526:   73:        value_len = len - field_len - 1;
+      526:   74:        if (value_len > 0 && value[0] == ' ') { value++; value_len--; } /* 剥一个前导空格 */
+        -:   75:    } else {
+    #####:   76:        field = line;
+    #####:   77:        field_len = len;
+    #####:   78:        value = line + len;
+    #####:   79:        value_len = 0;
+        -:   80:    }
+      526:   81:    if (field_len == 4 && memcmp(field, "data", 4) == 0) {
+     520*:   82:        if (p->data.len > 0) buf_append_byte(&p->data, '\n'); /* 多行拼接 */
+      520:   83:        buf_append(&p->data, value, value_len);
+        6:   84:    } else if (field_len == 5 && memcmp(field, "event", 5) == 0) {
+        6:   85:        size_t n = value_len < sizeof(p->event) - 1 ? value_len : sizeof(p->event) - 1;
+        6:   86:        memcpy(p->event, value, n);
+        6:   87:        p->event[n] = '\0';
+    #####:   88:    } else if (field_len == 2 && memcmp(field, "id", 2) == 0) {
+    #####:   89:        size_t n = value_len < sizeof(p->id) - 1 ? value_len : sizeof(p->id) - 1;
+    #####:   90:        memcpy(p->id, value, n);
+    #####:   91:        p->id[n] = '\0';
+    #####:   92:    } else if (field_len == 5 && memcmp(field, "retry", 5) == 0) {
+    #####:   93:        p->retry_ms = 0;
+    #####:   94:        for (size_t i = 0; i < value_len; i++) {
+    #####:   95:            if (value[i] < '0' || value[i] > '9') break;
+    #####:   96:            p->retry_ms = p->retry_ms * 10 + (value[i] - '0');
+        -:   97:        }
+    #####:   98:        p->have_retry = 1;
+        -:   99:    }
+        -:  100:    /* 未知字段忽略 */
+        -:  101:}
+        -:  102:
+      526:  103:int rsse_feed(RsseParser *p, const char *data, size_t len) {
+    37283:  104:    for (size_t i = 0; i < len; i++) {
+    36758:  105:        char ch = data[i];
+    36758:  106:        if (p->line_len + 1 > SSE_LINE_MAX) return -1; /* 行超长 */
+    36757:  107:        if (ch == '\n') {
+        -:  108:            /* 行结束：剥离 \r */
+     1046:  109:            size_t n = p->line_len;
+    1046*:  110:            if (n > 0 && p->line[n - 1] == '\r') n--;
+     1046:  111:            handle_line(p, p->line, n);
+     1046:  112:            p->line_len = 0;
+        -:  113:        } else {
+    35711:  114:            if (p->line_len >= p->line_cap) {
+       12:  115:                size_t nc = p->line_cap ? p->line_cap * 2 : 256;
+       12:  116:                char *nl = (char *)realloc(p->line, nc);
+      12*:  117:                if (!nl) return -1;
+       12:  118:                p->line = nl;
+       12:  119:                p->line_cap = nc;
+        -:  120:            }
+    35711:  121:            p->line[p->line_len++] = ch;
+        -:  122:        }
+        -:  123:    }
+      525:  124:    return 0;
+        -:  125:}
+        -:  126:
+        6:  127:void rsse_finish(RsseParser *p) {
+        -:  128:    /* 无尾空行的最后一行：处理并 dispatch */
+        6:  129:    if (p->line_len > 0) {
+    #####:  130:        size_t n = p->line_len;
+    #####:  131:        if (n > 0 && p->line[n - 1] == '\r') n--;
+    #####:  132:        handle_line(p, p->line, n);
+    #####:  133:        p->line_len = 0;
+        -:  134:    }
+       6*:  135:    if (p->data.len > 0 || p->event[0]) dispatch(p);
+        6:  136:    rsse_reset(p);
+        6:  137:}

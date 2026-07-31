@@ -1,0 +1,260 @@
+        -:    0:Source:src/data/index.c
+        -:    0:Graph:src/data/index.gcno
+        -:    0:Data:src/data/index.gcda
+        -:    0:Runs:1
+        -:    1:#include "rikka/data/index.h"
+        -:    2:#include <ctype.h>
+        -:    3:#include <stdlib.h>
+        -:    4:#include <string.h>
+        -:    5:
+        -:    6:static size_t utf8_len(unsigned char b);
+        -:    7:
+        -:    8:/* ---------- 分词 ---------- */
+        -:    9:
+       12:   10:size_t rk_tokenize(const char *text, size_t len, RkTokenCb cb, void *ctx) {
+       12:   11:    size_t count = 0;
+       12:   12:    size_t i = 0;
+       46:   13:    while (i < len) {
+       34:   14:        unsigned char c = (unsigned char)text[i];
+      34*:   15:        if (c >= 0x80) {
+        -:   16:            /* 中文：字符级 bigram（按 UTF-8 字符边界，重叠滑动） */
+        4:   17:            size_t j = i;
+        4:   18:            size_t chars = 0;
+       16:   19:            while (j < len && (unsigned char)text[j] >= 0x80) {
+       12:   20:                unsigned char b = (unsigned char)text[j];
+      12*:   21:                size_t clen = (b >= 0xF0) ? 4 : (b >= 0xE0) ? 3 : (b >= 0xC0) ? 2 : 1;
+      12*:   22:                if (j + clen > len) break;
+       12:   23:                j += clen;
+       12:   24:                chars++;
+        -:   25:            }
+        4:   26:            if (chars >= 2) {
+        4:   27:                size_t k = i;
+       12:   28:                while (k + utf8_len(text[k]) < j) {
+        8:   29:                    size_t c1 = utf8_len(text[k]);
+        8:   30:                    size_t c2 = utf8_len(text[k + c1]);
+        8:   31:                    if (cb) cb(ctx, text + k, c1 + c2);
+        8:   32:                    count++;
+        8:   33:                    k += c1;
+        -:   34:                }
+        4:   35:                i = j;
+        4:   36:                continue;
+        -:   37:            }
+    #####:   38:            i = j > i ? j : i + 1;
+    #####:   39:            continue;
+        -:   40:        }
+       30:   41:        if (isalnum(c) || c == '_') {
+       20:   42:            size_t j = i;
+      119:   43:            while (j < len && (isalnum((unsigned char)text[j]) || text[j] == '_')) j++;
+       20:   44:            if (cb) cb(ctx, text + i, j - i);
+       20:   45:            count++;
+       20:   46:            i = j;
+       20:   47:            continue;
+        -:   48:        }
+       10:   49:        i++;
+        -:   50:    }
+       12:   51:    return count;
+        -:   52:}
+        -:   53:
+        -:   54:/* ---------- 倒排索引 ---------- */
+        -:   55:
+        -:   56:typedef struct Posting {
+        -:   57:    uint64_t *docs;
+        -:   58:    size_t count, cap;
+        -:   59:} Posting;
+        -:   60:
+        -:   61:typedef struct TokNode {
+        -:   62:    char *tok;
+        -:   63:    size_t tlen;
+        -:   64:    uint64_t hash;
+        -:   65:    Posting post;
+        -:   66:    struct TokNode *hnext;
+        -:   67:} TokNode;
+        -:   68:
+        -:   69:struct RkIndex {
+        -:   70:    TokNode **buckets;
+        -:   71:    size_t nbuckets;
+        -:   72:    size_t tok_count;
+        -:   73:    size_t doc_count;
+        -:   74:};
+        -:   75:
+       28:   76:static size_t utf8_len(unsigned char b) {
+      28*:   77:    if (b >= 0xF0) return 4;
+       28:   78:    if (b >= 0xE0) return 3;
+    #####:   79:    if (b >= 0xC0) return 2;
+    #####:   80:    return 1;
+        -:   81:}
+        -:   82:
+       25:   83:static uint64_t fnv1a(const void *key, size_t len) {
+       25:   84:    const uint8_t *p = (const uint8_t *)key;
+       25:   85:    uint64_t h = 1469598103934665603ULL;
+      156:   86:    for (size_t i = 0; i < len; i++) { h ^= p[i]; h *= 1099511628211ULL; }
+       25:   87:    return h;
+        -:   88:}
+        -:   89:
+        1:   90:RkIndex *rk_index_create(void) {
+        1:   91:    RkIndex *ix = (RkIndex *)calloc(1, sizeof(RkIndex));
+       1*:   92:    if (!ix) return NULL;
+        1:   93:    ix->nbuckets = 4096;
+        1:   94:    ix->buckets = (TokNode **)calloc(ix->nbuckets, sizeof(TokNode *));
+       1*:   95:    if (!ix->buckets) { free(ix); return NULL; }
+        1:   96:    return ix;
+        -:   97:}
+        -:   98:
+        1:   99:void rk_index_destroy(RkIndex *ix) {
+       1*:  100:    if (!ix) return;
+     4097:  101:    for (size_t i = 0; i < ix->nbuckets; i++) {
+     4096:  102:        TokNode *n = ix->buckets[i];
+     4105:  103:        while (n) {
+        9:  104:            TokNode *nx = n->hnext;
+        9:  105:            free(n->tok);
+        9:  106:            free(n->post.docs);
+        9:  107:            free(n);
+        9:  108:            n = nx;
+        -:  109:        }
+        -:  110:    }
+        1:  111:    free(ix->buckets);
+        1:  112:    free(ix);
+        -:  113:}
+        -:  114:
+       25:  115:static TokNode *find_node(RkIndex *ix, const char *tok, size_t tlen, uint64_t h) {
+       25:  116:    size_t bi = h & (ix->nbuckets - 1);
+      25*:  117:    for (TokNode *n = ix->buckets[bi]; n; n = n->hnext)
+        8:  118:        if (n->hash == h && n->tlen == tlen && memcmp(n->tok, tok, tlen) == 0)
+        8:  119:            return n;
+       17:  120:    return NULL;
+        -:  121:}
+        -:  122:
+       16:  123:static void posting_add(Posting *p, uint64_t doc) {
+      16*:  124:    if (p->count > 0 && p->docs[p->count - 1] == doc) return;
+       16:  125:    if (p->count == p->cap) {
+      13*:  126:        size_t nc = p->cap ? p->cap * 2 : 8;
+       13:  127:        uint64_t *nd = (uint64_t *)realloc(p->docs, nc * sizeof(uint64_t));
+      13*:  128:        if (!nd) return;
+       13:  129:        p->docs = nd;
+       13:  130:        p->cap = nc;
+        -:  131:    }
+       16:  132:    p->docs[p->count++] = doc;
+        -:  133:}
+        -:  134:
+        -:  135:/* 二分：doc 是否在 posting（docs 有序） */
+        2:  136:static int posting_contains(const Posting *p, uint64_t doc) {
+        2:  137:    size_t lo = 0, hi = p->count;
+        3:  138:    while (lo < hi) {
+        3:  139:        size_t mid = lo + (hi - lo) / 2;
+        3:  140:        if (p->docs[mid] == doc) return 1;
+       1*:  141:        if (p->docs[mid] < doc) lo = mid + 1;
+        1:  142:        else hi = mid;
+        -:  143:    }
+    #####:  144:    return 0;
+        -:  145:}
+        -:  146:
+        -:  147:typedef struct {
+        -:  148:    RkIndex *ix;
+        -:  149:    uint64_t doc;
+        -:  150:} AddCtx;
+        -:  151:
+       16:  152:static void tok_cb(void *vctx, const char *tok, size_t tlen) {
+       16:  153:    AddCtx *c = (AddCtx *)vctx;
+       16:  154:    RkIndex *ix = c->ix;
+       16:  155:    uint64_t h = fnv1a(tok, tlen);
+       16:  156:    TokNode *n = find_node(ix, tok, tlen, h);
+       16:  157:    if (!n) {
+       13:  158:        size_t bi = h & (ix->nbuckets - 1);
+       13:  159:        n = (TokNode *)calloc(1, sizeof(TokNode));
+      13*:  160:        if (!n) return;
+      13*:  161:        n->tok = (char *)malloc(tlen ? tlen : 1);
+      13*:  162:        if (!n->tok) { free(n); return; }
+       13:  163:        memcpy(n->tok, tok, tlen);
+       13:  164:        n->tlen = tlen;
+       13:  165:        n->hash = h;
+       13:  166:        n->hnext = ix->buckets[bi];
+       13:  167:        ix->buckets[bi] = n;
+       13:  168:        ix->tok_count++;
+        -:  169:    }
+       16:  170:    posting_add(&n->post, c->doc);
+        -:  171:}
+        -:  172:
+        4:  173:size_t rk_index_add(RkIndex *ix, uint64_t doc, const char *text, size_t len) {
+        4:  174:    size_t before = ix->tok_count;
+        4:  175:    AddCtx ctx = {ix, doc};
+        4:  176:    rk_tokenize(text, len, tok_cb, &ctx);
+        4:  177:    ix->doc_count++;
+        4:  178:    return ix->tok_count - before;
+        -:  179:}
+        -:  180:
+        -:  181:typedef struct {
+        -:  182:    RkIndex *ix;
+        -:  183:    const TokNode *nodes[64];
+        -:  184:    size_t ntok;
+        -:  185:    int missing; /* 存在未索引 token：AND 结果必空 */
+        -:  186:} QCtx;
+        -:  187:
+        9:  188:static void q_cb(void *vctx, const char *tok, size_t tlen) {
+        9:  189:    QCtx *q = (QCtx *)vctx;
+        9:  190:    uint64_t h = fnv1a(tok, tlen);
+        9:  191:    TokNode *n = find_node(q->ix, tok, tlen, h);
+        9:  192:    if (!n) { q->missing = 1; return; } /* 未索引 token：结果必空 */
+        5:  193:    if (q->ntok < 64) q->nodes[q->ntok] = n;
+        5:  194:    q->ntok++;
+        -:  195:}
+        -:  196:
+        2:  197:static int cmp_u64(const void *a, const void *b) {
+        2:  198:    uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+       2*:  199:    return x < y ? -1 : (x > y ? 1 : 0);
+        -:  200:}
+        -:  201:
+        7:  202:size_t rk_index_search(RkIndex *ix, const char *query, size_t len,
+        -:  203:                       uint64_t *out, size_t cap) {
+       7*:  204:    if (cap == 0) return 0;
+        -:  205:    QCtx q;
+        7:  206:    q.ix = ix;
+        7:  207:    q.ntok = 0;
+        7:  208:    q.missing = 0;
+        7:  209:    rk_tokenize(query, len, q_cb, &q);
+        7:  210:    if (q.missing) return 0; /* 有未索引 token：无文档可命中 */
+       4*:  211:    if (q.ntok == 0 || q.ntok > 64) return 0;
+        -:  212:    /* 选 posting 最短的做候选集 */
+        4:  213:    const TokNode *best = q.nodes[0];
+        5:  214:    for (size_t i = 1; i < q.ntok; i++)
+       1*:  215:        if (q.nodes[i]->post.count < best->post.count) best = q.nodes[i];
+        4:  216:    size_t n = 0;
+        4:  217:    const Posting *pb = &best->post;
+       10:  218:    for (size_t i = 0; i < pb->count && n < cap; i++) {
+        6:  219:        uint64_t doc = pb->docs[i];
+        6:  220:        int all = 1;
+       14:  221:        for (size_t j = 0; j < q.ntok; j++) {
+        8:  222:            if (q.nodes[j] == best) continue;
+       2*:  223:            if (!posting_contains(&q.nodes[j]->post, doc)) { all = 0; break; }
+        -:  224:        }
+        6:  225:        if (all) out[n++] = doc;
+        -:  226:    }
+        4:  227:    if (n > 1) qsort(out, n, sizeof(uint64_t), cmp_u64);
+        4:  228:    return n;
+        -:  229:}
+        -:  230:
+        2:  231:void rk_index_remove_doc(RkIndex *ix, uint64_t doc) {
+     8194:  232:    for (size_t bi = 0; bi < ix->nbuckets; bi++) {
+     8192:  233:        TokNode **pp = &ix->buckets[bi];
+     8217:  234:        while (*pp) {
+       25:  235:            TokNode *n = *pp;
+       25:  236:            Posting *p = &n->post;
+       25:  237:            size_t w = 0;
+       53:  238:            for (size_t i = 0; i < p->count; i++)
+       28:  239:                if (p->docs[i] != doc) p->docs[w++] = p->docs[i];
+       25:  240:            p->count = w;
+       25:  241:            if (p->count == 0) {
+        4:  242:                *pp = n->hnext;
+        4:  243:                free(n->tok);
+        4:  244:                free(n->post.docs);
+        4:  245:                free(n);
+        4:  246:                ix->tok_count--;
+        -:  247:            } else {
+       21:  248:                pp = &n->hnext;
+        -:  249:            }
+        -:  250:        }
+        -:  251:    }
+        2:  252:    if (ix->doc_count > 0) ix->doc_count--;
+        2:  253:}
+        -:  254:
+    #####:  255:size_t rk_index_token_count(const RkIndex *ix) { return ix->tok_count; }
+    #####:  256:size_t rk_index_doc_count(const RkIndex *ix) { return ix->doc_count; }
