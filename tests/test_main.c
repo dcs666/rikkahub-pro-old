@@ -13,6 +13,7 @@ int run_suite(const char *suite_name, const RikkaTest *tests, size_t count) {
     return passed == (int)count ? 0 : 1;
 }
 
+int run_provider_suite(void);
 int run_http_suite(void);
 int run_message_suite(void);
 int run_json_suite(void);
@@ -28,6 +29,7 @@ int main(void) {
     failed |= run_json_suite();
     failed |= run_message_suite();
     failed |= run_http_suite();
+    failed |= run_provider_suite();
     if (failed == 0) {
         printf("\nALL SUITES PASSED\n");
         return 0;

@@ -31,7 +31,7 @@ static int g_port = 18888;
 
 static void stop_mock_server(void) {
     if (g_server_pid > 0) {
-        kill(g_server_pid, SIGTERM);
+        kill(g_server_pid, SIGKILL); /* 立即释放端口，避免测试间竞态 */
         waitpid(g_server_pid, NULL, 0);
         g_server_pid = -1;
     }

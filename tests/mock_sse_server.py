@@ -53,10 +53,65 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 time.sleep(0.05)
             self.wfile.close()
+        elif self.path == '/openai':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            evs = [
+                'data: {"id":"1","choices":[{"index":0,"delta":{"content":"Hello "},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"content":"world"},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"reasoning_content":"think"},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+                'data: [DONE]\n\n',
+            ]
+            for e in evs:
+                b = e.encode()
+                self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                self.wfile.flush()
+            self.wfile.write(b'0\r\n\r\n')
+            self.wfile.flush()
+        elif self.path == '/claude':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            evs = [
+                'event: message_start\ndata: {"type":"message_start","message":{"id":"m1"}}\n\n',
+                'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi "}}\n\n',
+                'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"there"}}\n\n',
+                'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}\n\n',
+                'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+            ]
+            for e in evs:
+                b = e.encode()
+                self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                self.wfile.flush()
+            self.wfile.write(b'0\r\n\r\n')
+            self.wfile.flush()
+        elif self.path == '/google':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            evs = [
+                'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Google "}]}}]}\n\n',
+                'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"answer"}]}}]}\n\n',
+            ]
+            for e in evs:
+                b = e.encode()
+                self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                self.wfile.flush()
+            self.wfile.write(b'0\r\n\r\n')
+            self.wfile.flush()
         else:
             self.send_response(404)
             self.end_headers()
 
 
+class ReuseServer(HTTPServer):
+    allow_reuse_address = True
+
+
 if __name__ == '__main__':
-    HTTPServer(('127.0.0.1', PORT), H).serve_forever()
+    ReuseServer(('127.0.0.1', PORT), H).serve_forever()

@@ -379,7 +379,8 @@ ssize_t rhttp_read_body(RHttpConn *c, char *buf, size_t cap, int timeout_ms) {
                         char t[256];
                         int n = read_chunk_line(c, t, sizeof(t), timeout_ms);
                         if (n < 0) return -1;
-                        if (n == 0) break; /* 空行 */
+                        /* 空行（可能含 \r）即尾头结束 */
+                        if (n == 0 || (n == 1 && t[0] == '\r')) break;
                     }
                     c->chunk_done = 1;
                     c->eof = 1;

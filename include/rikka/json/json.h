@@ -101,6 +101,8 @@ void rjson_stream_destroy(RJsonStream *s);
 
 /* 复用同一 stream 处理下一个 JSON 事件（SSE 场景避免每事件 malloc） */
 void rjson_stream_reset(RJsonStream *s);
+/* 切换目标路径（事件类型不同时复用同一 stream） */
+void rjson_stream_set_path(RJsonStream *s, const RJsonStreamPathElem *path);
 
 /* 喂入一段字节；返回状态。EOF 时调用 rjson_stream_finish 强制收尾。 */
 RJsonStreamStatus rjson_stream_feed(RJsonStream *s, const char *data, size_t len);

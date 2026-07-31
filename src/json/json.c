@@ -550,6 +550,12 @@ void rjson_stream_destroy(RJsonStream *s) {
     if (s) free(s);
 }
 
+void rjson_stream_set_path(RJsonStream *s, const RJsonStreamPathElem *path) {
+    s->path = path;
+    s->path_len = 0;
+    if (path) while (path[s->path_len].is_index != -2) s->path_len++;
+}
+
 void rjson_stream_reset(RJsonStream *s) {
     s->depth = 0;
     s->state = ST_ROOT;
