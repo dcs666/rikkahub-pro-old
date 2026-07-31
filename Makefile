@@ -2,7 +2,7 @@
 CC      ?= cc
 CFLAGS  ?= -O2 -g -Wall -Wextra -Wpedantic -std=c11
 CPPFLAGS += -Iinclude -MMD -MP
-LDFLAGS += -lpthread -lssl -lcrypto
+LDFLAGS += -lpthread -lssl -lcrypto -lz
 
 SRC := $(wildcard src/*/*.c)
 OBJ := $(SRC:.c=.o)

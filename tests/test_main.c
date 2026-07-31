@@ -14,6 +14,14 @@ int run_suite(const char *suite_name, const RikkaTest *tests, size_t count) {
 }
 
 int run_pipe_suite(void);
+int run_gateway_suite(void);
+int run_render_suite(void);
+int run_audio_suite(void);
+int run_workspace_suite(void);
+int run_mcp_suite(void);
+int run_epub_suite(void);
+int run_docx_suite(void);
+int run_trace_suite(void);
 int run_data_suite(void);
 int run_md_suite(void);
 int run_highlight_suite(void);
@@ -38,6 +46,14 @@ int main(void) {
     failed |= run_highlight_suite();
     failed |= run_md_suite();
     failed |= run_data_suite();
+    failed |= run_trace_suite();
+    failed |= run_docx_suite();
+    failed |= run_epub_suite();
+    failed |= run_mcp_suite();
+    failed |= run_workspace_suite();
+    failed |= run_audio_suite();
+    failed |= run_render_suite();
+    failed |= run_gateway_suite();
     failed |= run_pipe_suite();
     if (failed == 0) {
         printf("\nALL SUITES PASSED\n");

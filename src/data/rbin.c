@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "rikka/trace/trace.h"
 
 #define RBIN_MAGIC "RIKKABIN"
 #define RBIN_VERSION 1
@@ -79,6 +80,8 @@ static void wr_part(Buf *b, const RikkaPart *p) {
 
 int rbin_save(const RConversation *c, Buf *out) {
     if (!c || !out) return -1;
+    RkTracer *_t = rk_trace_get_global();
+    size_t _sp = rk_trace_begin(_t, "rbin_save");
     size_t depth = 0;
     for (RNode *cur = c->active; cur && cur->parent; cur = cur->parent) depth++;
     /* 线程局部复用缓冲（高频保存避免每次 malloc） */
@@ -108,6 +111,7 @@ int rbin_save(const RConversation *c, Buf *out) {
             wr_u64(out, m->total_tokens);
         }
     }
+    rk_trace_end(_t, _sp);
     return 0;
 }
 
@@ -148,6 +152,8 @@ static int parse_msg(Rd *r, Arena *a, RikkaMessage *m) {
 
 int rbin_parse(const uint8_t *data, size_t len, Arena *arena,
                RikkaMessage ***msgs_out, size_t *count_out) {
+    RkTracer *_t = rk_trace_get_global();
+    size_t _sp = rk_trace_begin(_t, "rbin_load");
     Rd r;
     r.p = data;
     r.len = len;
@@ -169,6 +175,7 @@ int rbin_parse(const uint8_t *data, size_t len, Arena *arena,
     }
     if (msgs_out) *msgs_out = msgs;
     if (count_out) *count_out = n;
+    rk_trace_end(_t, _sp);
     return 0;
 }
 
