@@ -43,8 +43,8 @@ static uint8_t rd_u8(Rd *r) {
 }
 static uint32_t rd_u32(Rd *r) {
     if (r->off + 4 > r->len) { r->err = 1; return 0; }
-    uint32_t v = (uint32_t)(r->p[r->off] | (r->p[r->off + 1] << 8) |
-                            (r->p[r->off + 2] << 16) | (r->p[r->off + 3] << 24));
+    uint32_t v = (uint32_t)r->p[r->off] | ((uint32_t)r->p[r->off + 1] << 8) |
+                 ((uint32_t)r->p[r->off + 2] << 16) | ((uint32_t)r->p[r->off + 3] << 24);
     r->off += 4;
     return v;
 }

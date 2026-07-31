@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - name: Build & test (zero warnings)
+        run: |
+          make clean
+          make test 2>&1 | tee /tmp/test.log
+          if grep -E 'warning' /tmp/test.log; then echo "WARNINGS PRESENT" && exit 1; fi
+          grep -q "ALL SUITES PASSED" /tmp/test.log
+      - name: Benchmarks
+        run: make bench
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - name: UBSan + fuzz parsers
+        run: |
+          make clean
+          make test CFLAGS="-O1 -g -fsanitize=undefined -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -std=c11"
+          make build/fuzz_parsers CFLAGS="-O1 -g -fsanitize=undefined -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -std=c11"
+          ./build/fuzz_parsers 20000
+      - name: TSan (SPSC/pipeline)
+        run: |
+          make clean
+          make test CFLAGS="-O1 -g -fsanitize=thread -Wall -Wextra -Wpedantic -std=c11" LDFLAGS="-lpthread -lssl -lcrypto -fsanitize=thread"
