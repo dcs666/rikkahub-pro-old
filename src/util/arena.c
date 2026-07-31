@@ -49,7 +49,8 @@ void *arena_alloc(Arena *a, size_t align, size_t size) {
     uintptr_t p = (uintptr_t)b + b->used;
     uintptr_t aligned = (p + align - 1) & ~((uintptr_t)align - 1);
     size_t off = (size_t)(aligned - (uintptr_t)b);
-    if (off + size > b->cap) {
+    /* 减法比较防 off+size 溢出（size 接近 SIZE_MAX 时） */
+    if (off > b->cap || size > b->cap - off) {
         /* 新块；若首块之后已有更大块，优先复用（reset 后） */
         Block *nb = NULL;
         for (Block *it = b->next; it; it = it->next) {

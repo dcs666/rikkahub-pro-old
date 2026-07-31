@@ -468,9 +468,10 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
     if (!path) {
         if (ss->cfg.id == RIKKA_PROVIDER_GOOGLE) {
             snprintf(full, sizeof(full), "%s%s", prefix, default_chat_path(ss->cfg.id));
-            /* 替换 %s 为 model */
+            /* 字面量格式串：model 作为 %s 参数（防 model 含 % 被当格式符） */
             char model_path[1024];
-            snprintf(model_path, sizeof(model_path), default_chat_path(ss->cfg.id),
+            snprintf(model_path, sizeof(model_path),
+                     "/v1beta/models/%.240s:streamGenerateContent?alt=sse",
                      ss->cfg.model ? ss->cfg.model : "");
             snprintf(full, sizeof(full), "%s%s", prefix, model_path);
         } else {

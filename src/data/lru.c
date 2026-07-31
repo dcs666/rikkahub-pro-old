@@ -138,10 +138,10 @@ int rk_lru_put(RkLru *l, const void *key, size_t key_len,
         size_t nn = l->nbuckets * 2;
         RkLruEntry **nb = (RkLruEntry **)calloc(nn, sizeof(RkLruEntry *));
         if (nb) {
-            for (RkLruEntry *e = l->head; e; e = e->next) {
-                size_t bi = e->hash & (nn - 1);
-                e->hnext = nb[bi];
-                nb[bi] = e;
+            for (RkLruEntry *re = l->head; re; re = re->next) {
+                size_t rbi = re->hash & (nn - 1);
+                re->hnext = nb[rbi];
+                nb[rbi] = re;
             }
             free(l->buckets);
             l->buckets = nb;

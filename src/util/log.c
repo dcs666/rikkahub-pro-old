@@ -35,19 +35,15 @@ static uint64_t now_ms(void) {
 }
 
 void rikka_log_set_level(RikkaLogLevel level) {
-    pthread_mutex_lock(&g_lock);
-    g_level = level;
-    pthread_mutex_unlock(&g_lock);
+    __atomic_store_n(&g_level, level, __ATOMIC_RELAXED);
 }
 
 void rikka_log_set_quiet(int quiet) {
-    pthread_mutex_lock(&g_lock);
-    g_quiet = quiet;
-    pthread_mutex_unlock(&g_lock);
+    __atomic_store_n(&g_quiet, quiet, __ATOMIC_RELAXED);
 }
 
 void rikka_log_write(RikkaLogLevel level, const char *fmt, ...) {
-    if (level < g_level) return; /* 非精确读取可接受 */
+    if (level < __atomic_load_n(&g_level, __ATOMIC_RELAXED)) return;
     char msg[RIKKA_LOG_MSG_MAX + 1];
     va_list ap;
     va_start(ap, fmt);
@@ -64,7 +60,7 @@ void rikka_log_write(RikkaLogLevel level, const char *fmt, ...) {
     g_count++;
     pthread_mutex_unlock(&g_lock);
 
-    if (!g_quiet) {
+    if (!__atomic_load_n(&g_quiet, __ATOMIC_RELAXED)) {
         fprintf(stderr, "[%s] %s\n", level_name(level), msg);
     }
 }
