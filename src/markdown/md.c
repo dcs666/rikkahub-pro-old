@@ -391,7 +391,7 @@ static size_t find_boundary(const char *t, size_t n) {
     int nf = 0;
     {
         size_t i = 0;
-        while (i < n && nf < 128) {
+        while (i < n) {
             size_t le = i;
             while (le < n && t[le] != '\n') le++;
             size_t ll = le - i;
@@ -399,11 +399,14 @@ static size_t find_boundary(const char *t, size_t n) {
             const char *l = t + i;
             size_t j = 0;
             while (j < ll && (l[j] == ' ' || l[j] == '\t')) j++;
-            if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0))
-                fences[nf++] = i;
+            if (ll - j >= 3 && (memcmp(l + j, "```", 3) == 0 || memcmp(l + j, "~~~", 3) == 0)) {
+                if (nf < 128) fences[nf] = i;
+                nf++;
+            }
             i = le + 1;
         }
     }
+    if (nf > 128) return 0; /* fence 行超多：回退全量重解析（配对信息不全） */
     if (nf % 2 == 1) return fences[nf - 1]; /* 未闭合：从开 fence 重解析 */
 
     /* 从后向前找块边界 */
@@ -533,7 +536,8 @@ void rmd_feed(RikkaMdParser *p, const char *text, size_t len) {
     if (p->in_fence && p->count > 0) {
         int new_fences = count_fence_lines((const char *)p->text.data, old_len, p->text.len);
         RikkaMdBlock *last = &p->blocks[p->count - 1];
-        if (new_fences % 2 == 0 && last->type == RIKKA_MD_CODE_BLOCK) {
+        /* 快速路径仅当新段无任何 fence 行（闭合或重开都必须走 rebuild 处理） */
+        if (new_fences == 0 && last->type == RIKKA_MD_CODE_BLOCK) {
             /* 无闭合 fence：只更新内容区（text 指向新缓冲 + 内容偏移） */
             last->text = (const char *)p->text.data + p->fence_content_off;
             last->len = p->text.len - p->fence_content_off;

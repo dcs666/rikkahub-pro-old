@@ -158,6 +158,7 @@ int rbin_parse(const uint8_t *data, size_t len, Arena *arena,
     if (rd_u32(&r) != RBIN_VERSION) return -1;
     uint32_t n = rd_u32(&r);
     if (r.err) return -1;
+    if (n > len / 2) return -1; /* 每条消息至少 ~2 字节：防恶意 count 超大分配 */
     RikkaMessage **msgs = (RikkaMessage **)arena_alloc0(arena, 8, n * sizeof(RikkaMessage *));
     if (!msgs) return -1;
     for (uint32_t i = 0; i < n; i++) {

@@ -264,6 +264,23 @@ TEST(stream_whitespace_and_finish) {
     rjson_stream_destroy(st);
 }
 
+TEST(stream_lone_surrogate_tolerant) {
+    /* 孤立 high surrogate 后接普通字符：不 error，输出替换符继续 */
+    const char *ev = "{\"choices\":[{\"delta\":{\"content\":\"a\\uD83D!b\"}}]}";
+    SinkCtx ctx; buf_init(&ctx.b);
+    RJsonStream *st = rjson_stream_create(path_choices_content, sink_cb, &ctx);
+    RJsonStreamStatus sts = rjson_stream_feed(st, ev, strlen(ev));
+    ASSERT(sts != RJSON_STREAM_ERROR);
+    ASSERT(rjson_stream_hit(st));
+    rjson_stream_finish(st);
+    /* 期望: "a" + U+FFFD(3字节) + "!b" */
+    const char *expect = "a\xef\xbf\xbd!b";
+    ASSERT_EQ_SIZE(strlen(expect), ctx.b.len);
+    ASSERT(memcmp(ctx.b.data, expect, ctx.b.len) == 0);
+    buf_free(&ctx.b);
+    rjson_stream_destroy(st);
+}
+
 int run_json_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(json, parse_basic),
@@ -279,6 +296,7 @@ int run_json_suite(void) {
         RIKKA_TEST_REGISTER(json, stream_multi_events),
         RIKKA_TEST_REGISTER(json, stream_array_index_mismatch),
         RIKKA_TEST_REGISTER(json, stream_whitespace_and_finish),
+        RIKKA_TEST_REGISTER(json, stream_lone_surrogate_tolerant),
     };
     return run_suite("json", tests, sizeof(tests) / sizeof(tests[0]));
 }

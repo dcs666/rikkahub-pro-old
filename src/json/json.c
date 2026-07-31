@@ -783,8 +783,14 @@ RJsonStreamStatus rjson_stream_feed(RJsonStream *s, const char *data, size_t len
         }
 
         case ST_CAP_STR_U_HI:
-            if (ch == '\\') s->state = ST_CAP_STR_U_HI_BS;
-            else s->error = 1;
+            if (ch == '\\') {
+                s->state = ST_CAP_STR_U_HI_BS;
+            } else {
+                /* 孤立 high surrogate（非法但对真实 API 输出宽容）：替换符 + 回退处理 ch */
+                utf8_out(s, 0xFFFD);
+                s->state = ST_CAP_STR;
+                i--;
+            }
             break;
 
         case ST_CAP_STR_U_HI_BS:

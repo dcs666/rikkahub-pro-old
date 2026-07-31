@@ -140,6 +140,24 @@ TEST(incremental_feed) {
     rmd_destroy(p);
 }
 
+TEST(fence_close_reopen_single_feed) {
+    /* 回归: 一次 feed 闭合旧 fence + 重开新 fence（2 行）不得走快速路径 */
+    RikkaMdParser *p = rmd_create();
+    rmd_feed(p, "```c\nint x;\n", strlen("```c\nint x;\n"));
+    rmd_feed(p, "```\n```\n", strlen("```\n```\n")); /* 闭合+重开 */
+    rmd_feed(p, "int y;\n", strlen("int y;\n")); /* 应在新的未闭合 fence 内 */
+    size_t n = 0;
+    const RikkaMdBlock *b = rmd_blocks(p, &n);
+    ASSERT_EQ_SIZE(2, n);
+    ASSERT_EQ_INT(RIKKA_MD_CODE_BLOCK, b[0].type);
+    ASSERT_EQ_INT(RIKKA_MD_CODE_BLOCK, b[1].type);
+    ASSERT_EQ_SIZE(7, b[0].len); /* "int x;\n" */
+    ASSERT(memcmp(b[0].text, "int x;\n", 7) == 0);
+    ASSERT_EQ_SIZE(7, b[1].len); /* "int y;\n" */
+    ASSERT(memcmp(b[1].text, "int y;\n", 7) == 0);
+    rmd_destroy(p);
+}
+
 TEST(incremental_fence_cross_feed) {
     /* fence 跨 feed 边界 */
     RikkaMdParser *p = rmd_create();
@@ -184,6 +202,7 @@ int run_md_suite(void) {
         RIKKA_TEST_REGISTER(md, quote_list_hr),
         RIKKA_TEST_REGISTER(md, image),
         RIKKA_TEST_REGISTER(md, incremental_feed),
+        RIKKA_TEST_REGISTER(md, fence_close_reopen_single_feed),
         RIKKA_TEST_REGISTER(md, incremental_fence_cross_feed),
         RIKKA_TEST_REGISTER(md, incremental_boundary),
     };

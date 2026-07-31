@@ -355,11 +355,13 @@ int rhttp_read_headers(RHttpConn *c, RHttpResp *resp, int timeout_ms) {
     char *text = (char *)hdr.data;
     size_t len = hdr.len;
     int status = 0;
+    int http11 = 0; /* HTTP/1.1 默认持久连接（无 Connection 头时） */
     char reason[128] = {0};
     /* HTTP/1.1 200 OK\r\n... */
     const char *p = text;
     const char *end = text + len;
     if (len >= 8 && memcmp(p, "HTTP/1.", 7) == 0) {
+        http11 = (p[7] == '1');
         p += 8; /* 跳过 "HTTP/1.x" */
         while (p < end && *p == ' ') p++;
         while (p < end && *p >= '0' && *p <= '9') { status = status * 10 + (*p - '0'); p++; }
@@ -376,6 +378,7 @@ int rhttp_read_headers(RHttpConn *c, RHttpResp *resp, int timeout_ms) {
     snprintf(resp->reason, sizeof(resp->reason), "%s", reason);
     resp->content_length = -1;
     resp->tls = c->tls;
+    resp->keep_alive = http11; /* HTTP/1.1 默认 keep-alive */
     /* 逐行解析 */
     const char *line = text;
     while (line < end) {
