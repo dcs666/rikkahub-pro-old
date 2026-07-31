@@ -1,1 +1,1 @@
--O1 -g -fsanitize=undefined -fno-sanitize-recover=all -Iinclude -MMD -MP
+-O2 -g -Wall -Wextra -Wpedantic -std=c11 -Iinclude -MMD -MP

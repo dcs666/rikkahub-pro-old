@@ -509,6 +509,7 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
     ss->js_type = rjson_stream_create(P_CLAUDE_TYPE, sink_type, ss);
     ss->js_text = rjson_stream_create(P_OAI_CONTENT, sink_text, ss);
     ss->js_reason = rjson_stream_create(P_OAI_REASON, sink_reason, ss);
+    if (!ss->sse || !ss->js_type || !ss->js_text || !ss->js_reason) return -1; /* OOM 防御 */
     switch (ss->cfg.id) {
         case RIKKA_PROVIDER_OPENAI:
             rjson_stream_set_path(ss->js_text, P_OAI_CONTENT);
