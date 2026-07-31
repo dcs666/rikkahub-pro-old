@@ -595,6 +595,9 @@ const RikkaSessionStats *rp_session_stats(const RikkaStreamSession *ss) {
     return ss ? &ss->stats : NULL;
 }
 
+/* B3 重试中间件：仅对"连接失败/5xx"重试（start 阶段，未开始累积无重复风险）；
+ * 4xx 与 pump 中途失败不重试（部分内容已累积）。 */
+#define RIKKA_MAX_RETRIES 3
 int rp_chat_stream(const RikkaProviderCfg *cfg,
                    const RikkaMessage *const *msgs, size_t n,
                    RikkaStream *out, int timeout_ms,
@@ -602,13 +605,23 @@ int rp_chat_stream(const RikkaProviderCfg *cfg,
     Buf body;
     buf_init(&body);
     if (rp_build_request(cfg, msgs, n, 1, &body) != 0) { buf_free(&body); return -1; }
-    RikkaStreamSession *ss = rp_session_create(cfg);
-    if (!ss) { buf_free(&body); return -1; }
+    int rc = -1;
     int status = 0;
-    int rc = rp_stream_start(ss, NULL, (const char *)body.data, body.len, out, timeout_ms, &status);
-    if (rc == 0) rc = rp_stream_pump_async(ss, timeout_ms);
-    if (stats_out && ss) *stats_out = *rp_session_stats(ss);
+    for (int attempt = 0; attempt < RIKKA_MAX_RETRIES; attempt++) {
+        RikkaStreamSession *ss = rp_session_create(cfg);
+        if (!ss) break;
+        rc = rp_stream_start(ss, NULL, (const char *)body.data, body.len, out,
+                             timeout_ms, &status);
+        if (rc == 0) {
+            rc = rp_stream_pump_async(ss, timeout_ms);
+            if (stats_out) *stats_out = *rp_session_stats(ss);
+            rp_session_destroy(ss);
+            break;
+        }
+        rp_session_destroy(ss);
+        if (status >= 400 && status < 500) break; /* 4xx 不重试 */
+        if (attempt + 1 < RIKKA_MAX_RETRIES) pm_msleep(100L << attempt); /* 指数退避 */
+    }
     buf_free(&body);
-    rp_session_destroy(ss);
     return rc;
 }

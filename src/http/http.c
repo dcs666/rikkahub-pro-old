@@ -48,6 +48,9 @@ struct RHttpConn {
     char host[256];
     int eof;
     RHttpResp resp;
+    /* 读缓冲：头/body 大块读，调用方小量取（避免逐字节 syscall） */
+    uint8_t rbuf[16384];
+    size_t rbuf_len, rbuf_off;
     /* chunked 解码状态 */
     int chunked;
     int chunk_active;
@@ -148,27 +151,100 @@ void rhttp_close(RHttpConn *c) {
     free(c);
 }
 
+/* ---------- 连接池（B1：短请求 keep-alive 复用） ---------- */
+
+typedef struct RkPoolConn {
+    char host[256];
+    uint16_t port;
+    int tls;
+    RHttpConn *conn;
+    struct RkPoolConn *next;
+} RkPoolConn;
+
+static RkPoolConn *g_pool = NULL;
+static pthread_mutex_t g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static RHttpConn *pool_take(const char *host, uint16_t port, int tls) {
+    pthread_mutex_lock(&g_pool_mutex);
+    RkPoolConn **pp = &g_pool;
+    while (*pp) {
+        if ((*pp)->port == port && (*pp)->tls == tls &&
+            strcmp((*pp)->host, host) == 0) {
+            RkPoolConn *e = *pp;
+            *pp = e->next;
+            RHttpConn *c = e->conn;
+            free(e);
+            pthread_mutex_unlock(&g_pool_mutex);
+            return c;
+        }
+        pp = &(*pp)->next;
+    }
+    pthread_mutex_unlock(&g_pool_mutex);
+    return NULL;
+}
+
+static void pool_put(RHttpConn *c, const char *host, uint16_t port, int tls) {
+    if (!c) return;
+    if (!c->resp.keep_alive || c->eof || c->rbuf_len > c->rbuf_off) {
+        rhttp_close(c);
+        return;
+    }
+    RkPoolConn *e = (RkPoolConn *)malloc(sizeof(RkPoolConn));
+    if (!e) { rhttp_close(c); return; }
+    snprintf(e->host, sizeof(e->host), "%s", host);
+    e->port = port;
+    e->tls = tls;
+    e->conn = c;
+    pthread_mutex_lock(&g_pool_mutex);
+    e->next = g_pool;
+    g_pool = e;
+    pthread_mutex_unlock(&g_pool_mutex);
+}
+
 /* ---------- 读写原语 ---------- */
 
-static ssize_t raw_read(RHttpConn *c, char *buf, size_t cap, int timeout_ms) {
+/* 底层填充：poll + 读满内部缓冲 */
+static ssize_t fill_rbuf(RHttpConn *c, int timeout_ms) {
     if (wait_fd(c->fd, POLLIN, timeout_ms) != 0) return -1;
-    if (c->ssl) {
-        int rc = SSL_read(c->ssl, buf, (int)cap);
-        if (rc <= 0) {
-            int err = SSL_get_error(c->ssl, rc);
-            if (err == SSL_ERROR_WANT_READ) {
-                if (wait_fd(c->fd, POLLIN, timeout_ms) != 0) return -1;
-                rc = SSL_read(c->ssl, buf, (int)cap);
-                if (rc <= 0) return 0; /* EOF 或错误按 EOF 处理 */
-                return rc;
+    for (;;) {
+        ssize_t n;
+        if (c->ssl) {
+            int rc = SSL_read(c->ssl, c->rbuf, sizeof(c->rbuf));
+            if (rc <= 0) {
+                int err = SSL_get_error(c->ssl, rc);
+                if (err == SSL_ERROR_WANT_READ) {
+                    if (wait_fd(c->fd, POLLIN, timeout_ms) != 0) return -1;
+                    continue;
+                }
+                return 0; /* EOF 或错误按 EOF */
             }
-            return 0; /* EOF */
+            n = rc;
+        } else {
+            n = read(c->fd, c->rbuf, sizeof(c->rbuf));
+            if (n < 0) return (errno == EAGAIN || errno == EWOULDBLOCK) ? -1 : 0;
         }
-        return rc;
+        c->rbuf_len = (size_t)n;
+        c->rbuf_off = 0;
+        return n;
     }
-    ssize_t n = read(c->fd, buf, cap);
-    if (n < 0) return (errno == EAGAIN || errno == EWOULDBLOCK) ? -1 : 0;
-    return n;
+}
+
+/* 读 cap 字节（尽量）：先取内部缓冲，不足则填充 */
+static ssize_t raw_read(RHttpConn *c, char *buf, size_t cap, int timeout_ms) {
+    if (c->rbuf_len > c->rbuf_off) {
+        size_t avail = c->rbuf_len - c->rbuf_off;
+        size_t n = avail < cap ? avail : cap;
+        memcpy(buf, c->rbuf + c->rbuf_off, n);
+        c->rbuf_off += n;
+        if (c->rbuf_off == c->rbuf_len) c->rbuf_len = c->rbuf_off = 0;
+        return (ssize_t)n;
+    }
+    ssize_t n = fill_rbuf(c, timeout_ms);
+    if (n <= 0) return (ssize_t)n; /* -1 超时 / 0 EOF */
+    size_t take = (size_t)n < cap ? (size_t)n : cap;
+    memcpy(buf, c->rbuf, take);
+    c->rbuf_off = take;
+    return (ssize_t)take;
 }
 
 static int raw_write_all(RHttpConn *c, const char *buf, size_t len) {
@@ -459,6 +535,23 @@ static int parse_url(const char *url, char *host, size_t host_cap, uint16_t *por
     return 0;
 }
 
+/* 单次同步请求（连接可复用/新建）；返回 0 成功 */
+static int sync_once(RHttpConn *c, const char *path, const char *const *headers,
+                     const char *body, size_t body_len, int timeout_ms,
+                     RHttpResp *resp, Buf *out) {
+    if (rhttp_send(c, "POST", path, headers, body, body_len) != 0) return -1;
+    if (rhttp_read_headers(c, resp, timeout_ms) != 0) return -1;
+    buf_reset(out);
+    char tmp[16384];
+    for (;;) {
+        ssize_t n = rhttp_read_body(c, tmp, sizeof(tmp), timeout_ms);
+        if (n < 0) break;
+        if (n == 0) break;
+        buf_append(out, tmp, (size_t)n);
+    }
+    return 0;
+}
+
 char *rhttp_request_sync(const char *url, const char *const *headers,
                          const char *body, size_t body_len,
                          int timeout_ms, int *status, size_t *out_len) {
@@ -467,32 +560,40 @@ char *rhttp_request_sync(const char *url, const char *const *headers,
     int tls;
     if (parse_url(url, host, sizeof(host), &port, &tls, path, sizeof(path)) != 0) return NULL;
 
-    RHttpConn *c = rhttp_connect(host, port, tls, timeout_ms);
-    if (!c) return NULL;
-    if (rhttp_send(c, "POST", path, headers, body, body_len) != 0) {
-        rhttp_close(c);
-        return NULL;
-    }
     RHttpResp resp;
-    if (rhttp_read_headers(c, &resp, timeout_ms) != 0) {
-        rhttp_close(c);
-        return NULL;
-    }
     Buf out;
     buf_init(&out);
-    char tmp[16384];
-    for (;;) {
-        ssize_t n = rhttp_read_body(c, tmp, sizeof(tmp), timeout_ms);
-        if (n < 0) break;
-        if (n == 0) break;
-        buf_append(&out, tmp, (size_t)n);
+    int ok = 0;
+    /* 尝试池化连接；失败（失效/新连接失败）则重建重试一次 */
+    for (int attempt = 0; attempt < 2 && !ok; attempt++) {
+        RHttpConn *c = attempt == 0 ? pool_take(host, port, tls) : NULL;
+        int fresh = 0;
+        if (!c) {
+            c = rhttp_connect(host, port, tls, timeout_ms);
+            fresh = 1;
+            if (!c) break;
+        }
+        if (sync_once(c, path, headers, body, body_len, timeout_ms, &resp, &out) == 0) {
+            ok = 1;
+            pool_put(c, host, port, tls);
+        } else {
+            rhttp_close(c);
+            if (!fresh && attempt == 0) {
+                /* 池化连接失效：丢弃重试（下一轮新建） */
+                continue;
+            }
+            break;
+        }
     }
-    rhttp_close(c);
+    if (!ok) {
+        buf_free(&out);
+        return NULL;
+    }
     if (status) *status = resp.status;
     if (out_len) *out_len = out.len;
-    if (!out.data) { /* 空响应：返回可 free 的空串 */
+    if (!out.data) {
         out.data = (uint8_t *)malloc(1);
         if (out.data) out.data[0] = '\0';
     }
-    return (char *)out.data; /* 调用方负责 free（buf.data 是 malloc 的） */
+    return (char *)out.data;
 }

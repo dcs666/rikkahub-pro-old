@@ -183,6 +183,14 @@ TEST(index_search) {
     n = rk_index_search(ix, "世界", strlen("世界"), out, 8);
     ASSERT_EQ_SIZE(1, n);
     ASSERT(out[0] == 4);
+    /* remove_doc: 删除后不再命中 */
+    rk_index_remove_doc(ix, 1);
+    n = rk_index_search(ix, "quick", 5, out, 8);
+    ASSERT_EQ_SIZE(1, n);
+    ASSERT(out[0] == 3);
+    rk_index_remove_doc(ix, 3);
+    n = rk_index_search(ix, "quick", 5, out, 8);
+    ASSERT_EQ_SIZE(0, n);
     /* 无命中 */
     n = rk_index_search(ix, "nonexistent", 11, out, 8);
     ASSERT_EQ_SIZE(0, n);

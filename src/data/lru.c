@@ -133,6 +133,21 @@ int rk_lru_put(RkLru *l, const void *key, size_t key_len,
     l->count++;
     /* 容量淘汰 */
     while (l->count > l->max_entries || l->cur_bytes > l->max_bytes) evict_one(l);
+    /* 负载因子 > 4 时哈希表扩容 */
+    if (l->count > l->nbuckets * 4) {
+        size_t nn = l->nbuckets * 2;
+        RkLruEntry **nb = (RkLruEntry **)calloc(nn, sizeof(RkLruEntry *));
+        if (nb) {
+            for (RkLruEntry *e = l->head; e; e = e->next) {
+                size_t bi = e->hash & (nn - 1);
+                e->hnext = nb[bi];
+                nb[bi] = e;
+            }
+            free(l->buckets);
+            l->buckets = nb;
+            l->nbuckets = nn;
+        }
+    }
     return 0;
 }
 

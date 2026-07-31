@@ -22,6 +22,9 @@ void rk_index_destroy(RkIndex *ix);
 /* 索引文档（text 中的 token → doc）。返回索引 token 数 */
 size_t rk_index_add(RkIndex *ix, uint64_t doc, const char *text, size_t len);
 
+/* 移除文档（posting 删除 + 空 token 节点清理）。O(全部 token × posting) 低频可用 */
+void rk_index_remove_doc(RkIndex *ix, uint64_t doc);
+
 /*
  * AND 搜索：query 全部分词都命中的文档。
  * out 按 doc 升序；返回命中数（<= cap）。

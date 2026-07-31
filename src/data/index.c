@@ -228,5 +228,29 @@ size_t rk_index_search(RkIndex *ix, const char *query, size_t len,
     return n;
 }
 
+void rk_index_remove_doc(RkIndex *ix, uint64_t doc) {
+    for (size_t bi = 0; bi < ix->nbuckets; bi++) {
+        TokNode **pp = &ix->buckets[bi];
+        while (*pp) {
+            TokNode *n = *pp;
+            Posting *p = &n->post;
+            size_t w = 0;
+            for (size_t i = 0; i < p->count; i++)
+                if (p->docs[i] != doc) p->docs[w++] = p->docs[i];
+            p->count = w;
+            if (p->count == 0) {
+                *pp = n->hnext;
+                free(n->tok);
+                free(n->post.docs);
+                free(n);
+                ix->tok_count--;
+            } else {
+                pp = &n->hnext;
+            }
+        }
+    }
+    if (ix->doc_count > 0) ix->doc_count--;
+}
+
 size_t rk_index_token_count(const RkIndex *ix) { return ix->tok_count; }
 size_t rk_index_doc_count(const RkIndex *ix) { return ix->doc_count; }
