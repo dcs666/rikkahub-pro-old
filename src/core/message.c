@@ -186,18 +186,21 @@ void rconv_set_active(RConversation *c, RNode *n) {
 }
 
 size_t rconv_active_messages(const RConversation *c, const RikkaMessage **out, size_t cap) {
-    /* 收集从根到 active 的冻结消息（逆序收集再反转） */
-    RNode *path[4096];
+    /* 收集从根到 active 的冻结消息（逆序收集再反转），path 动态分配 */
     size_t depth = 0;
-    RNode *cur = c->active;
-    while (cur && cur->parent && depth < 4096) {
-        path[depth++] = cur;
-        cur = cur->parent;
-    }
+    for (RNode *cur = c->active; cur && cur->parent; cur = cur->parent) depth++;
+    if (depth > cap) depth = cap;
+    if (depth == 0) return 0;
+    RNode **path = (RNode **)malloc(depth * sizeof(RNode *));
+    if (!path) return 0;
+    size_t d2 = 0;
+    for (RNode *cur = c->active; cur && cur->parent && d2 < depth; cur = cur->parent)
+        path[d2++] = cur;
     size_t n = 0;
-    for (size_t i = depth; i > 0 && n < cap; i--) {
+    for (size_t i = d2; i > 0 && n < cap; i--) {
         RNode *node = path[i - 1];
         if (node->msg) out[n++] = node->msg;
     }
+    free(path);
     return n;
 }

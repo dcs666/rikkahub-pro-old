@@ -61,10 +61,24 @@ void *arena_alloc(Arena *a, size_t align, size_t size) {
             }
         }
         if (!nb) {
-            nb = alloc_block(a);
-            if (!nb) return NULL;
-            nb->next = a->head->next; /* 插入为 head，保持首块顺序 */
-            a->head->next = nb;
+            if (sizeof(Block) + size > a->block_size) {
+                /* 大分配（> 块容量）：创建专用块，块尾追加保持顺序 */
+                nb = (Block *)malloc(sizeof(Block) + size);
+                if (!nb) return NULL;
+                nb->next = NULL;
+                nb->used = sizeof(Block);
+                nb->cap = sizeof(Block) + size;
+                /* 追加到链尾 */
+                Block *tail = a->first ? a->first : a->head;
+                while (tail && tail->next) tail = tail->next;
+                if (tail) tail->next = nb;
+                else a->head = nb;
+            } else {
+                nb = alloc_block(a);
+                if (!nb) return NULL;
+                nb->next = a->head->next; /* 插入为 head，保持首块顺序 */
+                a->head->next = nb;
+            }
         }
         b = nb;
         a->head = b;

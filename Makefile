@@ -31,7 +31,7 @@ $(TEST_BIN): build $(TEST_OBJ) $(OBJ)
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
-$(BENCH_BIN): build/bench_%: benchmarks/bench_%.c $(OBJ)
+$(BENCH_BIN): build/bench_%: benchmarks/bench_%.c $(OBJ) | build
 	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(OBJ) -o $@ $(LDFLAGS)
 
 bench: $(BENCH_BIN)
