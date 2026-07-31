@@ -128,6 +128,28 @@ TEST(active_messages_chain) {
     arena_destroy(a);
 }
 
+TEST(freeze_reasoning_survives_destroy) {
+    /* 回归: freeze 后 destroy, reasoning part 数据不得悬垂 */
+    Arena *a = arena_create(0);
+    RikkaStream s;
+    rstream_init(&s, a, RIKKA_ROLE_ASSISTANT);
+    rstream_append_reasoning(&s, "think-step-1", 12);
+    rstream_append_text(&s, "answer", 6);
+    rstream_freeze(&s);
+    rstream_destroy(&s);
+    int found = 0;
+    for (size_t i = 0; i < s.msg->part_count; i++) {
+        RikkaPart *p = &s.msg->parts[i];
+        if (p->type == RIKKA_PART_REASONING) {
+            found = 1;
+            ASSERT_EQ_SIZE(12, p->len);
+            ASSERT(memcmp(p->data, "think-step-1", 12) == 0);
+        }
+    }
+    ASSERT(found);
+    arena_destroy(a);
+}
+
 TEST(freeze_empty_text_removed) {
     Arena *a = arena_create(0);
     RikkaStream s;
@@ -155,6 +177,7 @@ int run_message_suite(void) {
         RIKKA_TEST_REGISTER(message, stream_large_correctness),
         RIKKA_TEST_REGISTER(message, cow_fork_shared_prefix),
         RIKKA_TEST_REGISTER(message, active_messages_chain),
+        RIKKA_TEST_REGISTER(message, freeze_reasoning_survives_destroy),
         RIKKA_TEST_REGISTER(message, freeze_empty_text_removed),
     };
     return run_suite("message", tests, sizeof(tests) / sizeof(tests[0]));

@@ -90,23 +90,19 @@ void rstream_freeze(RikkaStream *s) {
     }
     s->msg->part_count = w;
     /* 转移缓冲所有权给消息（冻结后消息持有 buf，数据指针保持有效） */
-    if (s->text_buf.cap > 0 && s->msg->part_count > 0) {
+    if (s->text_buf.cap > 0 && s->msg->part_count > 0)
         s->msg->owned_buf = &s->text_buf;
-    }
+    if (s->reasoning_buf.cap > 0 && s->msg->part_count > 0)
+        s->msg->reasoning_owned = &s->reasoning_buf;
     s->msg->frozen = 1;
     s->active = 0;
 }
 
 void rstream_destroy(RikkaStream *s) {
     if (!s) return;
-    if (s->active) {
-        /* 未 freeze：释放未转移的缓冲 */
-        if (s->msg->owned_buf != &s->text_buf) buf_free(&s->text_buf);
-        buf_free(&s->reasoning_buf);
-    } else {
-        /* 已 freeze：text_buf 已转移给消息（msg->owned_buf），只释放 reasoning */
-        buf_free(&s->reasoning_buf);
-    }
+    /* 释放未转移给消息的缓冲（freeze 后由消息持有，不在此释放） */
+    if (s->msg->owned_buf != &s->text_buf) buf_free(&s->text_buf);
+    if (s->msg->reasoning_owned != &s->reasoning_buf) buf_free(&s->reasoning_buf);
 }
 
 /* ---------- 会话节点树 + COW ---------- */

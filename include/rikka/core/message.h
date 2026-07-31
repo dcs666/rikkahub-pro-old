@@ -49,6 +49,7 @@ typedef struct {
     uint64_t prompt_tokens, completion_tokens, total_tokens;
     /* 流式累积缓冲所有权（freeze 后归消息所有；未 freeze 时归 RikkaStream） */
     Buf *owned_buf;
+    Buf *reasoning_owned;   /* reasoning 累积缓冲（同 owned_buf 语义） */
     int frozen;
 } RikkaMessage;
 
