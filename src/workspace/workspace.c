@@ -43,9 +43,9 @@ int rk_workspace_safe_path(RkWorkspace *w, const char *path, char *out, size_t c
         if (slash) {
             *slash = '\0';
             if (!realpath(parent, resolved)) return -1;
-            /* 重新拼接文件名 */
-            strcat(resolved, "/");
-            strcat(resolved, slash + 1);
+            /* 重新拼接文件名（防 strcat 溢出） */
+            int n = snprintf(resolved, sizeof(resolved), "%s/%s", parent, slash + 1);
+            if (n < 0 || (size_t)n >= sizeof(resolved)) return -1;
         } else {
             return -1;
         }
