@@ -700,6 +700,7 @@ typedef struct {
     int timeout_ms;
     int reader_rc;
     int proc_rc;
+    volatile int *cancel;
 } PipeIO;
 
 static void *pipe_reader(void *v) {
@@ -707,10 +708,26 @@ static void *pipe_reader(void *v) {
     RikkaStreamSession *ss = io->ss;
     char buf[16384];
     for (;;) {
+        if (io->cancel && *io->cancel) {
+            /* 取消：关闭连接让读立即返回 */
+            rhttp_close(ss->conn);
+            ss->conn = NULL;
+            io->reader_rc = -1;
+            break;
+        }
         ssize_t n = rhttp_read_body(ss->conn, buf, sizeof(buf), io->timeout_ms);
         if (n < 0) { io->reader_rc = -1; break; }
         if (n == 0) break;
-        while (rk_spsc_push(&io->q, buf, (size_t)n) != 0) pm_msleep(1);
+        while (rk_spsc_push(&io->q, buf, (size_t)n) != 0) {
+            if (io->cancel && *io->cancel) {
+                rhttp_close(ss->conn);
+                ss->conn = NULL;
+                io->reader_rc = -1;
+                rk_spsc_close(&io->q);
+                return NULL;
+            }
+            pm_msleep(1);
+        }
     }
     rk_spsc_close(&io->q);
     return NULL;
@@ -733,12 +750,18 @@ static void *pipe_processor(void *v) {
 }
 
 int rp_stream_pump_async(RikkaStreamSession *ss, int timeout_ms) {
+    return rp_stream_pump_async_cancel(ss, timeout_ms, NULL);
+}
+
+int rp_stream_pump_async_cancel(RikkaStreamSession *ss, int timeout_ms,
+                                volatile int *cancel) {
     if (!ss || !ss->conn) return -1;
     PipeIO io;
     io.ss = ss;
     io.timeout_ms = timeout_ms;
     io.reader_rc = 0;
     io.proc_rc = 0;
+    io.cancel = cancel;
     rk_spsc_init(&io.q, 1 << 20);
     pthread_t rt, pt;
     pthread_create(&rt, NULL, pipe_reader, &io);
@@ -747,6 +770,7 @@ int rp_stream_pump_async(RikkaStreamSession *ss, int timeout_ms) {
     pthread_join(pt, NULL);
     rk_spsc_destroy(&io.q);
     finalize_tool_calls(ss);
+    if (cancel && *cancel) return -1; /* 取消优先 */
     return io.reader_rc != 0 ? io.reader_rc : io.proc_rc;
 }
 
@@ -761,6 +785,7 @@ int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
                       const RikkaMessage *const *msgs, size_t n,
                       RikkaStream *out, int timeout_ms,
                       RkStreamDeltaCb delta_cb, void *delta_ud,
+                      volatile int *cancel,
                       RikkaSessionStats *stats_out) {
     Buf body;
     buf_init(&body);
@@ -768,6 +793,7 @@ int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
     int rc = -1;
     int status = 0;
     for (int attempt = 0; attempt < RIKKA_MAX_RETRIES; attempt++) {
+        if (cancel && *cancel) break; /* 取消 */
         RikkaStreamSession *ss = rp_session_create(cfg);
         if (!ss) break;
         ss->delta_cb = delta_cb;
@@ -775,7 +801,7 @@ int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
         rc = rp_stream_start(ss, NULL, (const char *)body.data, body.len, out,
                              timeout_ms, &status);
         if (rc == 0) {
-            rc = rp_stream_pump_async(ss, timeout_ms);
+            rc = rp_stream_pump_async_cancel(ss, timeout_ms, cancel);
             if (stats_out) *stats_out = *rp_session_stats(ss);
             rp_session_destroy(ss);
             break;
@@ -792,5 +818,5 @@ int rp_chat_stream(const RikkaProviderCfg *cfg,
                    const RikkaMessage *const *msgs, size_t n,
                    RikkaStream *out, int timeout_ms,
                    RikkaSessionStats *stats_out) {
-    return rp_chat_stream_cb(cfg, msgs, n, out, timeout_ms, NULL, NULL, stats_out);
+    return rp_chat_stream_cb(cfg, msgs, n, out, timeout_ms, NULL, NULL, NULL, stats_out);
 }

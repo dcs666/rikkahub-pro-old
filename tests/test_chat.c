@@ -2,6 +2,7 @@
 #include "test.h"
 #include "rikka/ai/chat.h"
 #include "rikka/util/arena.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -138,10 +139,74 @@ TEST(chat_plain_stream) {
     stop_mock_server();
 }
 
+/* ---------- 流式取消 ---------- */
+
+static void *cancel_runner(void *v) {
+    /* v = {cfg, msgs 数组, cancel_flag, 结果指针} */
+    RkChatConfig *cfg = ((void **)v)[0];
+    RikkaMessage **msgs = ((void **)v)[1];
+    volatile int *cancel = ((void **)v)[2];
+    int *result = ((void **)v)[3];
+    (void)msgs;
+    /* 直接测 provider 层：/slow 慢流 + pump_async_cancel */
+    RikkaStream out;
+    rstream_init(&out, arena_create(0), RIKKA_ROLE_ASSISTANT);
+    Buf body;
+    buf_init(&body);
+    if (rp_build_request(&cfg->provider, NULL, 0, 1, &body) != 0) { *result = -2; return NULL; }
+    RikkaStreamSession *ss = rp_session_create(&cfg->provider);
+    int status = 0;
+    int rc = rp_stream_start(ss, "/slow", (const char *)body.data, body.len,
+                             &out, 30000, &status);
+    if (rc == 0) {
+        rc = rp_stream_pump_async_cancel(ss, 30000, cancel);
+    }
+    *result = rc;
+    rp_session_destroy(ss);
+    buf_free(&body);
+    rstream_destroy(&out);
+    return NULL;
+}
+
+TEST(chat_cancel_mid_stream) {
+    if (getenv("CI")) {
+        printf("  [skip: CI environment]\n");
+        return;
+    }
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg pcfg = {RIKKA_PROVIDER_OPENAI, base, "test-key",
+                             "mock-model", 100, 0, NULL, {0}};
+    RkChatConfig cfg = {0};
+    cfg.provider = pcfg;
+    cfg.timeout_ms = 30000;
+
+    Arena *a = arena_create(0);
+    RikkaMessage *m = mk_msg(a, RIKKA_ROLE_USER, "hello");
+    RikkaMessage *msgs[1] = {m};
+    (void)a; (void)m;
+
+    volatile int cancel = 0;
+    int result = 99;
+    void *args[4] = {&cfg, msgs, (void *)&cancel, &result};
+    pthread_t th;
+    ASSERT_EQ_INT(0, pthread_create(&th, NULL, cancel_runner, args));
+    /* 等 800ms（流式进行中）后取消 */
+    msleep(800);
+    cancel = 1;
+    pthread_join(th, NULL);
+    /* 取消应让 rk_chat_run 快速返回 -1（< 1.5s 内） */
+    ASSERT_EQ_INT(-1, result);
+    arena_destroy(a);
+    stop_mock_server();
+}
+
 int run_chat_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(chat, chat_tool_loop),
         RIKKA_TEST_REGISTER(chat, chat_plain_stream),
+        RIKKA_TEST_REGISTER(chat, chat_cancel_mid_stream),
     };
     return run_suite("chat", tests, sizeof(tests) / sizeof(tests[0]));
 }

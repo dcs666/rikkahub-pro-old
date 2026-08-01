@@ -154,7 +154,7 @@ int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
         RikkaStream out;
         rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
         rc = rp_chat_stream_cb(&pcfg, arr, work.count, &out, timeout,
-                               delta_bridge, cb, NULL);
+                               delta_bridge, cb, cfg->cancel_flag, NULL);
         if (rc != 0) {
             rstream_destroy(&out);
             err = strdup("provider request failed");

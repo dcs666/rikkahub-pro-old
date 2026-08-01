@@ -307,22 +307,6 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == '/slow':
-            # 无长度流式，持续输出
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/event-stream')
-            self.end_headers()
-            for i in range(5):
-                try:
-                    self.wfile.write(('data: tick%d\n\n' % i).encode())
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError, ValueError):
-                    break
-                time.sleep(0.05)
-            try:
-                self.wfile.close()
-            except Exception:
-                pass
         elif self.path == '/chat/completions':
             # 请求体含 tools → 工具循环回放（首轮 tool_calls，后续最终文本）；
             # 否则与 /openai 相同文本回放（OCR 等无工具场景）。
@@ -441,6 +425,27 @@ class H(BaseHTTPRequestHandler):
             b = bad.encode()
             try:
                 self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                self.wfile.write(b'0\r\n\r\n')
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
+        elif self.path == '/slow':
+            # 慢速流：每 200ms 一个 tick，共 5 个（约 1s）。
+            # http_sse_split_events 断言 tick0-4；chat_cancel 需流足够慢。
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            for i in range(5):
+                e = 'data: tick%d\n\n' % i
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+                time.sleep(0.2)
+            try:
                 self.wfile.write(b'0\r\n\r\n')
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, ValueError):

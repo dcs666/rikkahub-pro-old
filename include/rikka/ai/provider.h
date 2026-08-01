@@ -86,6 +86,9 @@ char *rp_take_error_detail(RikkaStreamSession *ss);
  * 返回 0 正常完成，-1 网络/协议错误。
  */
 int rp_stream_pump(RikkaStreamSession *ss, int timeout_ms);
+/* 异步 pump 变体：可传入取消标志（置 1 立即中断） */
+int rp_stream_pump_async_cancel(RikkaStreamSession *ss, int timeout_ms,
+                                volatile int *cancel);
 
 const RikkaSessionStats *rp_session_stats(const RikkaStreamSession *ss);
 
@@ -102,11 +105,13 @@ int rp_chat_stream(const RikkaProviderCfg *cfg,
                    RikkaStream *out, int timeout_ms,
                    RikkaSessionStats *stats_out);
 
-/* 同 rp_chat_stream，另带流式增量回调（可 NULL）——rk_chat 编排循环用 */
+/* 同 rp_chat_stream，另带流式增量回调（可 NULL）——rk_chat 编排循环用。
+ * cancel: 非 NULL 时流式期间周期检查，置 1 则立即中断（关闭连接，返回 -1）。 */
 int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
                       const RikkaMessage *const *msgs, size_t n,
                       RikkaStream *out, int timeout_ms,
                       RkStreamDeltaCb delta_cb, void *delta_ud,
+                      volatile int *cancel,
                       RikkaSessionStats *stats_out);
 
 #endif /* RIKKA_AI_PROVIDER_H */
