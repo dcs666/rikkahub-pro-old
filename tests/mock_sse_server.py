@@ -2,6 +2,7 @@
 """本地 mock 服务器：/sse 返回 chunked SSE 流，/json 返回 JSON，/mcp/* 为 MCP SSE 传输端点。
 供 C 测试真实网络往返。"""
 import json
+import os
 import sys
 import threading
 import time
@@ -49,6 +50,8 @@ class H(BaseHTTPRequestHandler):
     def _mcp_message(self):
         length = int(self.headers.get('Content-Length', 0) or 0)
         body = self.rfile.read(length).decode('utf-8', 'replace') if length else ''
+        if os.environ.get('MCP_DEBUG'):
+            sys.stderr.write('[mcp-debug] POST body: ' + body + '\n')
         resp = {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'parse error'}}
         try:
             req = json.loads(body)

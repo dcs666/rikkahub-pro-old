@@ -17,6 +17,7 @@ jobs:
           RIKKA_TEST_TLS: "1"
         run: |
           make clean
+          make cli
           make test 2>&1 | tee /tmp/test.log
           if grep -E 'warning' /tmp/test.log; then echo "WARNINGS PRESENT" && exit 1; fi
           grep -q "ALL SUITES PASSED" /tmp/test.log

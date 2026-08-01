@@ -203,6 +203,45 @@ TEST(mcp_sse_idle_no_heartbeat) {
     stop_mock_server();
 }
 
+/* CLI MCP 模式端到端：SSE 传输在真实 CLI 进程中跑通（list + call） */
+TEST(mcp_cli_e2e_sse) {
+    if (access("build/rikkahub", R_OK) != 0) {
+        printf("  [skip: build/rikkahub not built]\n");
+        return;
+    }
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/sse", g_port);
+    char cmd[1024];
+    char buf[8192];
+    /* --mcp-list */
+    snprintf(cmd, sizeof(cmd), "build/rikkahub --mcp %s --mcp-list 2>&1", url);
+    FILE *f = popen(cmd, "r");
+    ASSERT_NOT_NULL(f);
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = '\0';
+    int rc = pclose(f);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT(strstr(buf, "echo") != NULL);
+    ASSERT(strstr(buf, "Echo tool") != NULL);
+    /* --mcp-call with args */
+    snprintf(cmd, sizeof(cmd),
+             "build/rikkahub --mcp %s --mcp-call echo --mcp-args '{\"text\":\"cli-e2e\"}' 2>&1",
+             url);
+    f = popen(cmd, "r");
+    ASSERT_NOT_NULL(f);
+    n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = '\0';
+    rc = pclose(f);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT(strstr(buf, "echo: cli-e2e") != NULL);
+    stop_mock_server();
+}
+
 int run_mcp_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(mcp, mcp_connect_and_list),
@@ -212,6 +251,7 @@ int run_mcp_suite(void) {
         RIKKA_TEST_REGISTER(mcp, mcp_sse_error_response),
         RIKKA_TEST_REGISTER(mcp, mcp_sse_post_failure),
         RIKKA_TEST_REGISTER(mcp, mcp_sse_idle_no_heartbeat),
+        RIKKA_TEST_REGISTER(mcp, mcp_cli_e2e_sse),
     };
     return run_suite("mcp", tests, sizeof(tests) / sizeof(tests[0]));
 }
