@@ -11,16 +11,25 @@
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 #include <errno.h>
 
 int rk_gateway_init(RkGateway *g, int port) {
     if (!g) return -1;
+    /* 网络服务器标准：客户端提前断开时 write 应返回 EPIPE 而非 SIGPIPE
+     * 杀进程（handler 线程可能在任何时刻写已关闭的客户端 fd） */
+    signal(SIGPIPE, SIG_IGN);
     memset(g, 0, sizeof(RkGateway));
     g->port = port;
     g->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (g->fd < 0) return -1;
     int opt = 1;
     setsockopt(g->fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    /* SO_REUSEPORT：多实例模式（rk_gateway_run_multi）下内核负载均衡；
+     * 所有共享端口的 socket 都必须设置，因此单实例也统一开启 */
+#ifdef SO_REUSEPORT
+    setsockopt(g->fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -43,6 +52,29 @@ int rk_gateway_init(RkGateway *g, int port) {
     pthread_cond_init(&g->life_cond, NULL);
     g->active_handlers = 0;
     return 0;
+}
+
+/* 多实例：为第 2..n 个 worker 创建共享端口的监听 socket（SO_REUSEPORT）。
+ * 返回 fd（调用方负责关闭）或 -1。 */
+int rk_gateway_listen_extra(int port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    int opt = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#ifdef SO_REUSEPORT
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons((uint16_t)port);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        listen(fd, 128) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
 }
 
 int rk_gateway_add_provider(RkGateway *g, const char *name, const char *api_key, const char *base_url) {
@@ -83,18 +115,41 @@ static RHttpConn *pool_get_conn(RkGateway *g, const char *host, int port, int tl
     return conn;
 }
 
-/* 释放连接回池 */
+/* 释放连接回池；已到 EOF 的连接（服务器已关闭）不可复用，移出池并关闭 */
 static void pool_release_conn(RkGateway *g, RHttpConn *conn) {
     pthread_mutex_lock(&g->pool_mutex);
     for (size_t i = 0; i < g->pool_count; i++) {
         if (g->pool[i].conn == conn) {
-            g->pool[i].in_use = 0;
-            pthread_mutex_unlock(&g->pool_mutex);
+            if (rhttp_eof(conn)) {
+                /* 死连接：移出池（尾元素覆盖）并关闭，防止被复用/清理时二次释放 */
+                g->pool[i] = g->pool[g->pool_count - 1];
+                g->pool_count--;
+                pthread_mutex_unlock(&g->pool_mutex);
+                rhttp_close(conn);
+            } else {
+                g->pool[i].in_use = 0;
+                pthread_mutex_unlock(&g->pool_mutex);
+            }
             return;
         }
     }
     pthread_mutex_unlock(&g->pool_mutex);
     /* 不在池中（池满时新建的连接），直接释放 */
+    rhttp_close(conn);
+}
+
+/* 丢弃连接：从池中移除条目（防清理二次释放/防复用）并关闭。
+ * 用于 send/read 失败路径——此时连接不可信。 */
+static void pool_discard(RkGateway *g, RHttpConn *conn) {
+    pthread_mutex_lock(&g->pool_mutex);
+    for (size_t i = 0; i < g->pool_count; i++) {
+        if (g->pool[i].conn == conn) {
+            g->pool[i] = g->pool[g->pool_count - 1];
+            g->pool_count--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g->pool_mutex);
     rhttp_close(conn);
 }
 
@@ -230,7 +285,7 @@ static void handle_request(RkGateway *g, int client_fd) {
         char full_path[512];
         snprintf(full_path, sizeof(full_path), "%s/chat/completions", path_prefix);
         if (rhttp_send(conn, "POST", full_path, headers, body, strlen(body)) != 0) {
-            rhttp_close(conn);
+            pool_discard(g, conn);
             const char *resp = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n";
             ssize_t _w = write(client_fd, resp, strlen(resp)); (void)_w;
             arena_destroy(a);
@@ -239,7 +294,7 @@ static void handle_request(RkGateway *g, int client_fd) {
         }
         RHttpResp resp;
         if (rhttp_read_headers(conn, &resp, 30000) != 0) {
-            rhttp_close(conn);
+            pool_discard(g, conn);
             const char *resp_str = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n";
             ssize_t _w = write(client_fd, resp_str, strlen(resp_str)); (void)_w;
             arena_destroy(a);
@@ -268,14 +323,17 @@ static void handle_request(RkGateway *g, int client_fd) {
     close(client_fd);
 }
 
-int rk_gateway_run(RkGateway *g) {
-    if (!g || g->fd < 0) return -1;
+/* 单 worker epoll 事件循环：阻塞直到 running=0。
+ * fd 生命周期：worker 0 的主监听 fd 由 gateway_cleanup 关闭；
+ * 额外 fd 由调用方（gateway_worker_thread）关闭——此处不关，防双重 close。 */
+static int loop_run(RkGateway *g, int fd) {
+    if (!g || fd < 0) return -1;
     int epfd = epoll_create1(0);
     if (epfd < 0) return -1;
     struct epoll_event ev;
     ev.events = EPOLLIN;
-    ev.data.fd = g->fd;
-    if (epoll_ctl(epfd, EPOLL_CTL_ADD, g->fd, &ev) != 0) {
+    ev.data.fd = fd;
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev) != 0) {
         close(epfd);
         return -1;
     }
@@ -287,11 +345,11 @@ int rk_gateway_run(RkGateway *g) {
             break;
         }
         for (int i = 0; i < n; i++) {
-            if (events[i].data.fd == g->fd) {
+            if (events[i].data.fd == fd) {
                 /* 新连接 */
                 struct sockaddr_in client_addr;
                 socklen_t addr_len = sizeof(client_addr);
-                int client_fd = accept(g->fd, (struct sockaddr *)&client_addr, &addr_len);
+                int client_fd = accept(fd, (struct sockaddr *)&client_addr, &addr_len);
                 if (client_fd >= 0) {
                     HandleCtx *ctx = (HandleCtx *)malloc(sizeof(HandleCtx));
                     if (ctx) {
@@ -312,7 +370,12 @@ int rk_gateway_run(RkGateway *g) {
         }
     }
     close(epfd);
-    /* 等待在途请求全部结束（stop 只置位标志，此处才是资源清理点） */
+    return 0;
+}
+
+/* 共享退出路径：等在途请求结束 → 清理连接池/生命周期对象 → 关闭主监听 fd。
+ * 所有 worker 循环退出后由 run/run_multi 调用一次。 */
+static void gateway_cleanup(RkGateway *g) {
     pthread_mutex_lock(&g->life_mutex);
     while (g->active_handlers > 0)
         pthread_cond_wait(&g->life_cond, &g->life_mutex);
@@ -330,6 +393,59 @@ int rk_gateway_run(RkGateway *g) {
     /* 监听 fd 由事件循环线程独占关闭（stop 不触碰，无跨线程 fd 竞争） */
     close(g->fd);
     g->fd = -1;
+}
+
+int rk_gateway_run(RkGateway *g) {
+    if (!g || g->fd < 0) return -1;
+    int rc = loop_run(g, g->fd);
+    gateway_cleanup(g);
+    return rc;
+}
+
+/* 多实例 worker 包装 */
+typedef struct {
+    RkGateway *g;
+    int fd;
+} WorkerCtx;
+
+static void *gateway_worker_thread(void *arg) {
+    WorkerCtx *w = (WorkerCtx *)arg;
+    loop_run(w->g, w->fd);
+    /* 额外监听 fd 由 worker 自行关闭；主 fd（worker 0）归 cleanup */
+    if (w->fd != w->g->fd) close(w->fd);
+    free(w);
+    return NULL;
+}
+
+int rk_gateway_run_multi(RkGateway *g, int n) {
+    if (!g || g->fd < 0 || n < 1) return -1;
+    if (n > 64) n = 64;
+    pthread_t tids[64];
+    int created = 0;
+    for (int i = 0; i < n; i++) {
+        int fd;
+        if (i == 0) {
+            fd = g->fd; /* worker 0 持有主监听 fd */
+        } else {
+            fd = rk_gateway_listen_extra(g->port);
+            if (fd < 0) break; /* 额外监听失败：以已创建的 worker 继续 */
+        }
+        WorkerCtx *w = (WorkerCtx *)malloc(sizeof(WorkerCtx));
+        if (!w) {
+            if (i > 0) close(fd);
+            break;
+        }
+        w->g = g;
+        w->fd = fd;
+        if (pthread_create(&tids[created], NULL, gateway_worker_thread, w) != 0) {
+            free(w);
+            if (i > 0) close(fd);
+            break;
+        }
+        created++;
+    }
+    for (int i = 0; i < created; i++) pthread_join(tids[i], NULL);
+    gateway_cleanup(g);
     return 0;
 }
 

@@ -53,6 +53,17 @@ int rk_gateway_add_provider(RkGateway *g, const char *name, const char *api_key,
  * 因此 stop 只做信号，资源释放全部发生在 run 返回前。 */
 int rk_gateway_run(RkGateway *g);
 
+/*
+ * 多实例运行：n 个 worker 线程各自独立 epoll 事件循环，
+ * 通过 SO_REUSEPORT 共享端口（内核负载均衡），连接池跨 worker 共享。
+ * 语义与 rk_gateway_run 相同：阻塞直到 stop，退出时统一清理。
+ */
+int rk_gateway_run_multi(RkGateway *g, int n);
+
+/* 多实例辅助：为额外 worker 创建共享端口监听 socket（SO_REUSEPORT）。
+ * 返回 fd（调用方负责关闭）或 -1。 */
+int rk_gateway_listen_extra(int port);
+
 /* 停止网关（仅置位停止标志；事件循环 ≤1s 内退出）。
  * 非线程安全约束：stop 与 run 可并发，但 stop 后必须 join run 线程
  * 才能安全释放/复用 RkGateway 内存。 */

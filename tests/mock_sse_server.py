@@ -288,6 +288,7 @@ class H(BaseHTTPRequestHandler):
 
 class ReuseServer(ThreadingHTTPServer):
     allow_reuse_address = True
+    request_queue_size = 128  # 并发测试：默认 5 的 backlog 会拒掉并发连接
 
 
 if __name__ == '__main__':
