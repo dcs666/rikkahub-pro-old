@@ -29,6 +29,7 @@ typedef enum {
     RIKKA_PART_IMAGE = 2,       /* 图片 URL 或 base64 data URI */
     RIKKA_PART_TOOL_CALL = 3,
     RIKKA_PART_TOOL_RESULT = 4,
+    RIKKA_PART_DOCUMENT = 5,    /* 上传文档（docx/epub/pdf/pptx/文本） */
 } RikkaPartType;
 
 typedef struct {
@@ -38,12 +39,16 @@ typedef struct {
     const char *tool_name; /* TOOL_CALL / TOOL_RESULT */
     const char *tool_id;
     int is_error;          /* TOOL_RESULT 失败标记 */
+    const char *doc_mime;  /* DOCUMENT: mime 类型 */
+    const char *doc_name;  /* DOCUMENT: 文件名 */
 } RikkaPart;
 
 typedef struct {
     RikkaRole role;
     RikkaPart *parts;
     size_t part_count, part_cap;
+    /* 消息创建时间（Unix 秒；0 = 未知）——time_reminder/模板变换用 */
+    int64_t created_at;
     /* 使用量元数据 */
     int has_usage;
     uint64_t prompt_tokens, completion_tokens, total_tokens;
