@@ -85,6 +85,15 @@ int rk_tts_openai(const char *api_key, const char *text, const char *voice, RkAu
 int rk_asr_openai(const char *api_key, const uint8_t *audio, size_t len,
                   const char *format, char **text) {
     if (!api_key || !audio || !text) return -1;
+    /* format 白名单（防 multipart 注入：只允许字母数字） */
+    if (format) {
+        for (const char *p = format; *p; p++) {
+            if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                  (*p >= '0' && *p <= '9'))) {
+                return -1;
+            }
+        }
+    }
     /* multipart/form-data 构建 */
     char boundary[64] = "----RikkaBoundary123456";
     char body[65536];
