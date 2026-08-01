@@ -394,38 +394,7 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
     }
 }
 
-/* base_url 解析（host/port/tls/prefix） */
-static int parse_base(const char *url, char *host, size_t host_cap, uint16_t *port,
-                      int *tls, char *prefix, size_t prefix_cap) {
-    const char *p = url;
-    *tls = 0;
-    if (strncmp(p, "https://", 8) == 0) { *tls = 1; p += 8; }
-    else if (strncmp(p, "http://", 7) == 0) { p += 7; }
-    else return -1;
-    const char *he = p;
-    while (*he && *he != ':' && *he != '/') he++;
-    size_t hn = (size_t)(he - p);
-    if (hn >= host_cap) return -1;
-    memcpy(host, p, hn);
-    host[hn] = '\0';
-    *port = *tls ? 443 : 80;
-    if (*he == ':') {
-        const char *ps = he + 1;
-        long po = 0;
-        while (*ps >= '0' && *ps <= '9') po = po * 10 + (*ps - '0'), ps++;
-        if (po > 0 && po < 65536) *port = (uint16_t)po;
-        he = ps;
-    }
-    if (*he == '/') {
-        size_t pn = strlen(he);
-        if (pn >= prefix_cap) return -1;
-        memcpy(prefix, he, pn + 1);
-    } else {
-        snprintf(prefix, prefix_cap, "/");
-    }
-    return 0;
-}
-
+/* base_url 解析已统一到 rhttp_parse_url（rikka/http/http.h） */
 static const char *default_chat_path(RikkaProviderId id) {
     switch (id) {
         case RIKKA_PROVIDER_OPENAI: return "/chat/completions";
@@ -462,18 +431,15 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
     char host[256], prefix[512], full[1024];
     uint16_t port;
     int tls;
-    if (parse_base(ss->cfg.base_url, host, sizeof(host), &port, &tls,
-                   prefix, sizeof(prefix)) != 0)
+    if (rhttp_parse_url(ss->cfg.base_url, host, sizeof(host), &port, &tls,
+                        prefix, sizeof(prefix)) != 0)
         return -1;
     if (!path) {
         if (ss->cfg.id == RIKKA_PROVIDER_GOOGLE) {
-            snprintf(full, sizeof(full), "%s%s", prefix, default_chat_path(ss->cfg.id));
-            /* 字面量格式串：model 作为 %s 参数（防 model 含 % 被当格式符） */
-            char model_path[1024];
-            snprintf(model_path, sizeof(model_path),
-                     "/v1beta/models/%.240s:streamGenerateContent?alt=sse",
-                     ss->cfg.model ? ss->cfg.model : "");
-            snprintf(full, sizeof(full), "%s%s", prefix, model_path);
+            /* 字面量格式串：model 作为 %.240s 参数（防 model 含 % 被当格式符） */
+            snprintf(full, sizeof(full),
+                     "%s/v1beta/models/%.240s:streamGenerateContent?alt=sse",
+                     prefix, ss->cfg.model ? ss->cfg.model : "");
         } else {
             snprintf(full, sizeof(full), "%s%s", prefix, default_chat_path(ss->cfg.id));
         }
