@@ -85,9 +85,10 @@ static size_t zip_find_all(const uint8_t *data, size_t len, const char *suffix,
         uint32_t uncomp_sz = data[off+22] | (data[off+23] << 8) | (data[off+24] << 16) | (data[off+25] << 24);
         uint16_t fname_len = data[off+26] | (data[off+27] << 8);
         uint16_t extra_len = data[off+28] | (data[off+29] << 8);
-        if (off + 30 + fname_len > len) break;
+        if (fname_len > len - off - 30) break; /* 溢出防护 */
         const char *fname = (const char *)data + off + 30;
         size_t data_off = off + 30 + fname_len + extra_len;
+        if (data_off > len) break;
         /* 检查后缀 */
         if (fname_len >= suffix_len &&
             memcmp(fname + fname_len - suffix_len, suffix, suffix_len) == 0) {
