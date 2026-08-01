@@ -348,14 +348,9 @@ void rk_mcp_disconnect(RkMcpClient *c) {
         pthread_mutex_lock(&c->lock);
         c->stopped = 1;
         pthread_mutex_unlock(&c->lock);
-        /* 唤醒读线程：shutdown 让阻塞 poll/read 立即返回（不释放连接） */
-        pthread_mutex_lock(&c->lock);
-        RHttpConn *conn = c->sse_conn;
-        pthread_mutex_unlock(&c->lock);
-        if (conn) {
-            int fd = rhttp_get_fd(conn);
-            if (fd >= 0) shutdown(fd, SHUT_RDWR);
-        }
+        /* 读线程 poll 超时(≤5s；有心跳时事件后立即)自行退出并 rhttp_close——
+         * 不跨线程 shutdown/close fd，避免与 rhttp_close 的 fd 生命周期
+         * 竞争（TSan 曾报 http.c:151 race，且 fd 号可能被复用误伤） */
         pthread_join(c->sse_thread, NULL);
         /* 清理残留挂起请求（线程已退出，无并发） */
         PendingMcpResp *r = c->pending;
