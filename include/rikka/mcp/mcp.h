@@ -37,6 +37,13 @@ typedef struct {
     uint16_t endpoint_port;
     int endpoint_tls;
     char endpoint_path[512];
+    /* ---- Streamable HTTP 传输状态（rk_mcp_connect_streamable 初始化） ---- */
+    int is_streamable;       /* 1 = Streamable HTTP 模式 */
+    char stream_host[256];
+    uint16_t stream_port;
+    int stream_tls;
+    char stream_path[512];
+    char stream_session_id[128]; /* mcp-session-id（服务器签发） */
 } RkMcpClient;
 
 typedef struct {
@@ -50,6 +57,11 @@ int rk_mcp_connect(RkMcpClient *c, const char *command, char *const *args);
 
 /* 连接 MCP 服务器（SSE 传输，HTTP 长连接） */
 int rk_mcp_connect_sse(RkMcpClient *c, const char *url);
+
+/* 连接 MCP 服务器（Streamable HTTP 传输，MCP 2025-03-26 规范）：
+ * POST 发消息（响应 200/201 直接 JSON 或 202 后 SSE 事件流），
+ * mcp-session-id 会话保持；不建立 GET 推送流（本客户端不需要服务器主动推送）。 */
+int rk_mcp_connect_streamable(RkMcpClient *c, const char *url);
 
 void rk_mcp_disconnect(RkMcpClient *c);
 

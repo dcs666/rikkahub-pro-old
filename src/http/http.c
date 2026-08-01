@@ -57,6 +57,9 @@ struct RHttpConn {
     long chunk_remain;
     int chunk_done;
     long body_read;    /* content-length 已读 */
+    /* 最近一次响应的原始头（rhttp_resp_header 查找用；下次 read_headers 失效） */
+    char *resp_hdrs;
+    size_t resp_hdrs_len;
 };
 
 static int set_nonblock(int fd, int on) {
@@ -146,9 +149,40 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
 
 void rhttp_close(RHttpConn *c) {
     if (!c) return;
+    free(c->resp_hdrs);
     if (c->ssl) { SSL_shutdown(c->ssl); SSL_free(c->ssl); }
     if (c->fd >= 0) close(c->fd);
     free(c);
+}
+
+/* 复制最近一次响应头的值到 out（含 NUL，尾随空白去除）。返回 0 找到。 */
+int rhttp_resp_header(RHttpConn *c, const char *name, char *out, size_t out_sz) {
+    if (!c || !c->resp_hdrs || !name || !out || out_sz == 0) return -1;
+    size_t nlen = strlen(name);
+    const char *p = c->resp_hdrs;
+    while (*p) {
+        const char *nl = strchr(p, '\n');
+        size_t llen = nl ? (size_t)(nl - p) : strlen(p);
+        const char *colon = (const char *)memchr(p, ':', llen);
+        if (colon) {
+            size_t name_len = (size_t)(colon - p);
+            if (name_len == nlen && strncasecmp(p, name, nlen) == 0) {
+                const char *val = colon + 1;
+                const char *vend = p + llen;
+                while (val < vend && *val == ' ') val++;
+                while (vend > val && (vend[-1] == ' ' || vend[-1] == '\r')) vend--;
+                size_t vlen = (size_t)(vend - val);
+                if (vlen >= out_sz) return -1; /* 缓冲区不足 */
+                memcpy(out, val, vlen);
+                out[vlen] = '\0';
+                return 0;
+            }
+        }
+        if (!nl) break;
+        p = nl + 1;
+        if (*p == '\r') p++;
+    }
+    return -1;
 }
 
 /* ---------- 连接池（B1：短请求 keep-alive 复用） ---------- */
@@ -366,6 +400,16 @@ int rhttp_read_headers(RHttpConn *c, RHttpResp *resp, int timeout_ms) {
     if (read_headers_raw(c, &hdr, timeout_ms) != 0) {
         buf_free(&hdr);
         return -1;
+    }
+    /* 保留原始头供 rhttp_resp_header 查找（NUL 结尾副本） */
+    {
+        char *copy = (char *)realloc(c->resp_hdrs, hdr.len + 1);
+        if (copy) {
+            c->resp_hdrs = copy;
+            memcpy(c->resp_hdrs, hdr.data, hdr.len);
+            c->resp_hdrs[hdr.len] = '\0';
+            c->resp_hdrs_len = hdr.len;
+        }
     }
     /* 状态行 */
     char *text = (char *)hdr.data;

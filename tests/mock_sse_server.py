@@ -88,9 +88,72 @@ class H(BaseHTTPRequestHandler):
         self.send_header('Content-Length', '0')
         self.end_headers()
 
+    def _mcp_stream(self, use_202):
+        """Streamable HTTP：POST JSON-RPC。直答(200+JSON) 或 202+SSE 事件流。
+        session 校验：首次发 'sess-1'，后续必须匹配，否则 404。"""
+        length = int(self.headers.get('Content-Length', 0) or 0)
+        body = self.rfile.read(length).decode('utf-8', 'replace') if length else ''
+        if os.environ.get('MCP_DEBUG'):
+            sys.stderr.write('[mcp-debug] stream POST body: ' + repr(body) + '\n')
+        sess = self.headers.get('mcp-session-id')
+        expected = 'sess-1'
+        if sess is None:
+            new_session = expected
+        elif sess == expected:
+            new_session = None
+        else:
+            self.send_response(404)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        # 解析请求并构造响应
+        resp = None
+        try:
+            req = json.loads(body) if body else {}
+            method = req.get('method')
+            rid = req.get('id')
+            if method == 'tools/list':
+                resp = {'jsonrpc': '2.0', 'id': rid, 'result': {'tools': [
+                    {'name': 'echo', 'description': 'Echo tool',
+                     'inputSchema': {'type': 'object'}}]}}
+            elif method == 'tools/call':
+                args = (req.get('params') or {}).get('arguments') or {}
+                text = args.get('text', '')
+                resp = {'jsonrpc': '2.0', 'id': rid,
+                        'result': {'content': [{'type': 'text', 'text': 'echo: ' + text}]}}
+            else:
+                resp = {'jsonrpc': '2.0', 'id': rid,
+                        'error': {'code': -32601, 'message': 'not found'}}
+        except Exception:
+            pass
+        payload = json.dumps(resp).encode('utf-8')
+        if use_202:
+            sse = ('event: message\ndata: ' + json.dumps(resp) + '\n\n').encode('utf-8')
+            self.send_response(202)
+            if new_session:
+                self.send_header('mcp-session-id', new_session)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Content-Length', str(len(sse)))
+            self.end_headers()
+            self.wfile.write(sse)
+        else:
+            self.send_response(200)
+            if new_session:
+                self.send_header('mcp-session-id', new_session)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
     def do_POST(self):
         if self.path == '/mcp/messages':
             self._mcp_message()
+            return
+        if self.path == '/mcp/stream':
+            self._mcp_stream(use_202=False)
+            return
+        if self.path == '/mcp/stream202':
+            self._mcp_stream(use_202=True)
             return
         length = int(self.headers.get('Content-Length', 0) or 0)
         if length:

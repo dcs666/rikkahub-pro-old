@@ -366,6 +366,21 @@ void rk_mcp_disconnect(RkMcpClient *c) {
         c->is_sse = 0;
         return;
     }
+    if (c->is_streamable) {
+        /* 无后台线程：直接清理（调用方保证无并发调用） */
+        PendingMcpResp *r = c->pending;
+        while (r) {
+            PendingMcpResp *nx = r->next;
+            free(r->data);
+            free(r);
+            r = nx;
+        }
+        c->pending = NULL;
+        pthread_mutex_destroy(&c->lock);
+        pthread_cond_destroy(&c->cond);
+        c->is_streamable = 0;
+        return;
+    }
     if (c->fd_read >= 0) close(c->fd_read);
     if (c->fd_write >= 0) close(c->fd_write);
     if (c->pid > 0) {
@@ -377,8 +392,200 @@ void rk_mcp_disconnect(RkMcpClient *c) {
 }
 
 /* 发送 JSON-RPC 请求，读响应 */
+/* ---------- Streamable HTTP 传输（MCP 2025-03-26） ---------- */
+
+int rk_mcp_connect_streamable(RkMcpClient *c, const char *url) {
+    if (!c || !url) return -1;
+    char host[256], path[512];
+    uint16_t port;
+    int tls;
+    if (rhttp_parse_url(url, host, sizeof(host), &port, &tls, path, sizeof(path)) != 0)
+        return -1;
+    memset(c, 0, sizeof(*c));
+    c->fd_read = c->fd_write = -1;
+    c->pid = 0;
+    c->next_id = 1;
+    c->is_streamable = 1;
+    snprintf(c->stream_host, sizeof(c->stream_host), "%s", host);
+    c->stream_port = port;
+    c->stream_tls = tls;
+    snprintf(c->stream_path, sizeof(c->stream_path), "%s", path);
+    pthread_mutex_init(&c->lock, NULL);
+    pthread_cond_init(&c->cond, NULL);
+    return 0;
+}
+
+static void stream_mark_error(RkMcpClient *c, int id) {
+    pthread_mutex_lock(&c->lock);
+    for (PendingMcpResp *r = c->pending; r; r = r->next) {
+        if (r->id == id && !r->done) { r->done = 1; r->error = 1; }
+    }
+    pthread_cond_broadcast(&c->cond);
+    pthread_mutex_unlock(&c->lock);
+}
+
+static int rpc_call_streamable(RkMcpClient *c, const char *method, const char *params_json,
+                               char **result) {
+    char req[32768];
+    int id = c->next_id++;
+    int n = snprintf(req, sizeof(req),
+                     "{\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":\"%s\"%s%s}",
+                     id, method,
+                     params_json ? ",\"params\":" : "",
+                     params_json ? params_json : "");
+    if (n < 0 || (size_t)n >= sizeof(req)) return -1;
+
+    /* 注册挂起请求 */
+    PendingMcpResp *r = (PendingMcpResp *)calloc(1, sizeof(PendingMcpResp));
+    if (!r) return -1;
+    r->id = id;
+    pthread_mutex_lock(&c->lock);
+    r->next = c->pending;
+    c->pending = r;
+    pthread_mutex_unlock(&c->lock);
+
+    /* POST（每请求独立连接；session id 由服务器签发后携带） */
+    const char *hdrs[8];
+    int nh = 0;
+    hdrs[nh++] = "Content-Type";
+    hdrs[nh++] = "application/json";
+    hdrs[nh++] = "Accept";
+    hdrs[nh++] = "application/json, text/event-stream";
+    pthread_mutex_lock(&c->lock);
+    if (c->stream_session_id[0]) {
+        hdrs[nh++] = "mcp-session-id";
+        hdrs[nh++] = c->stream_session_id;
+    }
+    pthread_mutex_unlock(&c->lock);
+    hdrs[nh] = NULL;
+
+    RHttpConn *conn = rhttp_connect(c->stream_host, c->stream_port, c->stream_tls, 30000);
+    struct timespec ts;
+    int rc = -1;
+    if (!conn) {
+        stream_mark_error(c, id);
+        goto wait_and_finish;
+    }
+    if (rhttp_send(conn, "POST", c->stream_path, hdrs, req, (size_t)n) != 0) {
+        rhttp_close(conn);
+        stream_mark_error(c, id);
+        goto wait_and_finish;
+    }
+    RHttpResp resp;
+    if (rhttp_read_headers(conn, &resp, 30000) != 0) {
+        rhttp_close(conn);
+        stream_mark_error(c, id);
+        goto wait_and_finish;
+    }
+    /* 会话 id（服务器签发；复制式 API，防 NUL 陷阱） */
+    char sid[128];
+    if (rhttp_resp_header(conn, "mcp-session-id", sid, sizeof(sid)) == 0) {
+        pthread_mutex_lock(&c->lock);
+        snprintf(c->stream_session_id, sizeof(c->stream_session_id), "%s", sid);
+        pthread_mutex_unlock(&c->lock);
+        if (mcp_debug())
+            fprintf(stderr, "[mcp-debug] streamable session-id=%s\n", sid);
+    }
+    if (resp.status == 404) {
+        /* 会话无效：清 session id 后重试（调用方） */
+        pthread_mutex_lock(&c->lock);
+        c->stream_session_id[0] = '\0';
+        pthread_mutex_unlock(&c->lock);
+        rhttp_close(conn);
+        stream_mark_error(c, id);
+        goto wait_and_finish;
+    }
+    if (resp.status == 202) {
+        /* 响应体 = SSE 事件流：喂 sse_event_cb（与 SSE 传输共用匹配逻辑） */
+        RsseParser *p = rsse_create(sse_event_cb, c);
+        char buf[8192];
+        for (;;) {
+            pthread_mutex_lock(&c->lock);
+            int done = 0;
+            for (PendingMcpResp *pr = c->pending; pr; pr = pr->next) {
+                if (pr->id == id && pr->done) { done = 1; break; }
+            }
+            pthread_mutex_unlock(&c->lock);
+            if (done) break;
+            ssize_t rn = rhttp_read_body(conn, buf, sizeof(buf), 30000);
+            if (rn < 0) break; /* 超时：等 cond 超时统一处理 */
+            if (rn == 0) break; /* EOF */
+            if (rsse_feed(p, buf, (size_t)rn) != 0) break;
+        }
+        rsse_finish(p);
+        rsse_destroy(p);
+    } else if (resp.status >= 200 && resp.status < 300) {
+        /* 响应体 = 直接 JSON-RPC 响应 */
+        char body[65536];
+        size_t blen = 0;
+        for (;;) {
+            ssize_t rn = rhttp_read_body(conn, body + blen, sizeof(body) - blen - 1, 30000);
+            if (rn <= 0) break;
+            blen += (size_t)rn;
+            if (blen >= sizeof(body) - 1) break;
+        }
+        body[blen] = '\0';
+        Arena *a = arena_create(0);
+        size_t err = 0;
+        RJson *v = rjson_parse(a, body, blen, &err);
+        if (v) {
+            const RJson *idj = rjson_obj_get(v, "id");
+            const RJson *errj = rjson_obj_get(v, "error");
+            const RJson *resj = errj ? NULL : rjson_obj_get(v, "result");
+            if (idj && idj->type == RJSON_NUMBER && (int)idj->u.number == id) {
+                pthread_mutex_lock(&c->lock);
+                for (PendingMcpResp *pr = c->pending; pr; pr = pr->next) {
+                    if (pr->id == id && !pr->done) {
+                        pr->done = 1;
+                        pr->error = errj != NULL;
+                        if (resj) {
+                            RJsonOut out;
+                            rjson_out_init(&out);
+                            rjson_write_value(&out, resj);
+                            pr->data = out.buf; /* malloc，所有权转移 */
+                        }
+                        break;
+                    }
+                }
+                pthread_cond_broadcast(&c->cond);
+                pthread_mutex_unlock(&c->lock);
+            }
+        }
+        arena_destroy(a);
+    } else {
+        if (mcp_debug())
+            fprintf(stderr, "[mcp-debug] streamable POST status=%d\n", resp.status);
+        stream_mark_error(c, id);
+    }
+    rhttp_close(conn);
+
+wait_and_finish:
+    /* 等响应（含 202 流 EOF/超时/断开的统一出口） */
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 30;
+    pthread_mutex_lock(&c->lock);
+    while (!r->done) {
+        if (pthread_cond_timedwait(&c->cond, &c->lock, &ts) != 0) break; /* 超时 */
+    }
+    rc = r->error ? -1 : 0;
+    if (r->data) {
+        if (result) *result = r->data; /* 所有权转移 */
+        else free(r->data);
+        r->data = NULL;
+    } else if (!r->done) {
+        rc = -1; /* 30s 无响应 */
+    }
+    PendingMcpResp **pp = &c->pending;
+    while (*pp && *pp != r) pp = &(*pp)->next;
+    if (*pp) *pp = r->next;
+    free(r);
+    pthread_mutex_unlock(&c->lock);
+    return rc;
+}
+
 static int rpc_call(RkMcpClient *c, const char *method, const char *params_json, char **result) {
     if (c->is_sse) return rpc_call_sse(c, method, params_json, result);
+    if (c->is_streamable) return rpc_call_streamable(c, method, params_json, result);
     char req[32768];
     int id = c->next_id++;
     int n = snprintf(req, sizeof(req),

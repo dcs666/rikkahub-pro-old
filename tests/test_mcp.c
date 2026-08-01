@@ -242,6 +242,90 @@ TEST(mcp_cli_e2e_sse) {
     stop_mock_server();
 }
 
+TEST(mcp_streamable_direct) {
+    if (getenv("CI")) {
+        printf("  [skip: CI environment]\n");
+        return;
+    }
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/stream", g_port);
+    RkMcpClient c;
+    ASSERT_EQ_INT(0, rk_mcp_connect_streamable(&c, url));
+    /* list tools（首次请求：服务器签发 session id） */
+    RkMcpTool *tools = NULL;
+    size_t count = 0;
+    ASSERT_EQ_INT(0, rk_mcp_list_tools(&c, &tools, &count));
+    ASSERT_EQ_INT(1, (int)count);
+    ASSERT(strcmp(tools[0].name, "echo") == 0);
+    rk_mcp_tools_free(tools, count);
+    /* call tool（第二次请求：session id 必须正确传递，否则 404） */
+    char *result = NULL;
+    ASSERT_EQ_INT(0, rk_mcp_call_tool(&c, "echo", "{\"text\":\"s1\"}", &result));
+    ASSERT_NOT_NULL(result);
+    ASSERT(strstr(result, "echo: s1") != NULL);
+    free(result);
+    rk_mcp_disconnect(&c);
+    stop_mock_server();
+}
+
+TEST(mcp_streamable_202) {
+    if (getenv("CI")) {
+        printf("  [skip: CI environment]\n");
+        return;
+    }
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/stream202", g_port);
+    RkMcpClient c;
+    ASSERT_EQ_INT(0, rk_mcp_connect_streamable(&c, url));
+    char *result = NULL;
+    ASSERT_EQ_INT(0, rk_mcp_call_tool(&c, "echo", "{\"text\":\"s202\"}", &result));
+    ASSERT_NOT_NULL(result);
+    ASSERT(strstr(result, "echo: s202") != NULL);
+    free(result);
+    rk_mcp_disconnect(&c);
+    stop_mock_server();
+}
+
+TEST(mcp_streamable_bad_session) {
+    /* 手工构造：先发一个请求拿 session，然后伪造错误 session → 404 → error */
+    if (getenv("CI")) {
+        printf("  [skip: CI environment]\n");
+        return;
+    }
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/stream", g_port);
+    RkMcpClient c;
+    ASSERT_EQ_INT(0, rk_mcp_connect_streamable(&c, url));
+    /* 正常请求拿 session */
+    char *result = NULL;
+    ASSERT_EQ_INT(0, rk_mcp_call_tool(&c, "echo", "{\"text\":\"a\"}", &result));
+    free(result);
+    /* 伪造错误 session（外部不可见——直接破坏内部状态模拟） */
+    pthread_mutex_lock(&c.lock);
+    snprintf(c.stream_session_id, sizeof(c.stream_session_id), "wrong-sess");
+    pthread_mutex_unlock(&c.lock);
+    result = NULL;
+    ASSERT_EQ_INT(-1, rk_mcp_call_tool(&c, "echo", "{\"text\":\"b\"}", &result));
+    ASSERT_NULL(result);
+    rk_mcp_disconnect(&c);
+    stop_mock_server();
+}
+
 int run_mcp_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(mcp, mcp_connect_and_list),
@@ -252,6 +336,9 @@ int run_mcp_suite(void) {
         RIKKA_TEST_REGISTER(mcp, mcp_sse_post_failure),
         RIKKA_TEST_REGISTER(mcp, mcp_sse_idle_no_heartbeat),
         RIKKA_TEST_REGISTER(mcp, mcp_cli_e2e_sse),
+        RIKKA_TEST_REGISTER(mcp, mcp_streamable_direct),
+        RIKKA_TEST_REGISTER(mcp, mcp_streamable_202),
+        RIKKA_TEST_REGISTER(mcp, mcp_streamable_bad_session),
     };
     return run_suite("mcp", tests, sizeof(tests) / sizeof(tests[0]));
 }

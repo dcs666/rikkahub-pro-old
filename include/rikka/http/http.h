@@ -33,6 +33,10 @@ int rhttp_send(RHttpConn *c, const char *method, const char *path,
 /* 读取并解析响应头。返回 0 成功 */
 int rhttp_read_headers(RHttpConn *c, RHttpResp *resp, int timeout_ms);
 
+/* 复制最近一次响应头的值到 out（含 NUL，尾随空白去除）。
+ * 返回 0 找到，-1 未找到/缓冲区不足。 */
+int rhttp_resp_header(RHttpConn *c, const char *name, char *out, size_t out_sz);
+
 /*
  * 流式读体（透明解码 chunked）。返回 >0 字节数、0 = EOF、-1 = 超时/错误。
  * 非 chunked 且无 content-length 时读到连接关闭（SSE 常见）。
