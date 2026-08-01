@@ -20,8 +20,8 @@ jobs:
           make test 2>&1 | tee /tmp/test.log
           if grep -E 'warning' /tmp/test.log; then echo "WARNINGS PRESENT" && exit 1; fi
           grep -q "ALL SUITES PASSED" /tmp/test.log
-      - name: Benchmarks
-        run: make bench
+      - name: Benchmarks (threshold gate)
+        run: make check-bench
 
   sanitizers:
     runs-on: ubuntu-latest

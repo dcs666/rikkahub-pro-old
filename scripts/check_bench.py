@@ -35,6 +35,22 @@ check("SPSC 吞吐", grab(p, r'throughput\s+:\s+([\d.]+) Mops'), 5.0, False)
 h = section("highlight")
 check("高亮 ns/line", grab(h, r'per line\s+:\s+(\d+) ns'), 2000.0, True)
 
+# P3 md 增量（bench_md）：流式每 token < 50 us（本地 ~3.7）
+md = section("md")
+check("md per token", grab(md, r'per token\s+:\s+([\d.]+) us'), 50.0, True)
+
+# P3 epub（bench_epub）：40 章解析 < 10 ms（本地 ~0.12）
+e = section("epub")
+check("epub parse", grab(e, r'parse\s+:\s+([\d.]+) ms'), 10.0, True)
+
+# P3 arena（bench_arena）：复用必须快于 malloc/free（本地 ~68x）
+a = section("arena")
+check("arena speedup", grab(a, r'speedup\s+:\s+([\d.]+)x'), 2.0, False)
+
+# P3 SSE（bench_sse）：> 0.5 M events/s（本地 ~4.4）
+s = section("sse")
+check("SSE throughput", grab(s, r'throughput\s+:\s+([\d.]+) M events/s'), 0.5, False)
+
 # M2 流式累积（bench_message）：> 100x
 m = section("message")
 check("流式 speedup", grab(m, r'speedup\s+:\s+([\d.]+)x'), 100.0, False)
