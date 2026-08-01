@@ -47,7 +47,7 @@ static const uint8_t *zip_find_central(const uint8_t *data, size_t len,
         uint16_t extra_len = data[off+30] | (data[off+31] << 8);
         uint16_t comment_len = data[off+32] | (data[off+33] << 8);
         uint32_t local_off = data[off+42] | (data[off+43] << 8) | (data[off+44] << 16) | (data[off+45] << 24);
-        if (off + 46 + fname_len > len) break;
+        if (fname_len > len - off - 46) break; /* 溢出防护 */
         const char *fname = (const char *)data + off + 46;
         if (fname_len == name_len && memcmp(fname, name, name_len) == 0) {
             *comp_size = comp_sz;
@@ -63,7 +63,9 @@ static const uint8_t *zip_find_central(const uint8_t *data, size_t len,
             }
             return NULL;
         }
-        off += 46 + fname_len + extra_len + comment_len;
+        size_t next_off = off + 46 + fname_len + extra_len + comment_len;
+        if (next_off <= off) break; /* 溢出防护 */
+        off = next_off;
     }
     return NULL;
 }
