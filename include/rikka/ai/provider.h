@@ -28,6 +28,14 @@ typedef struct {
     const char *model;
     int max_tokens;         /* Claude 必需；OpenAI/Google 可选（0=不发送） */
     int enable_cache_control; /* Claude cache_control 断点（B 级） */
+    /* 重试策略（HTTP 层中间件）：max_retries=0 不重试（默认）。
+     * 可重试条件：网络/连接错误、HTTP 429、5xx；其余 4xx 立即失败。
+     * 退避：base_delay_ms << attempt，封顶 max_delay_ms。 */
+    struct {
+        int max_retries;
+        int base_delay_ms;  /* 0 = 用默认 100 */
+        int max_delay_ms;   /* 0 = 用默认 2000 */
+    } retry;
 } RikkaProviderCfg;
 
 /* 构建 chat completion 请求体（stream=1 时含 stream:true）。返回 0 成功 */
@@ -52,13 +60,22 @@ RikkaStreamSession *rp_session_create(const RikkaProviderCfg *cfg);
 void rp_session_destroy(RikkaStreamSession *ss);
 
 /*
- * 发起流式请求。body 为构建好的请求 JSON；out 为累积目标（每 token 零拷贝）。
- * 内部：连接 → 发送 → 读响应头（检查 status）。
- * 返回 0 成功（HTTP 2xx），负值错误；*http_status 输出状态码。
+ * 发起流式请求（含重试中间件）。body 为构建好的请求 JSON；out 为累积目标。
+ * 内部：连接 → 发送 → 读响应头（检查 status）；非 2xx 时按 retry 策略
+ * 指数退避重试（网络错误 / 429 / 5xx），其余 4xx 立即失败。
+ * 返回 0 成功（HTTP 2xx），-1 网络错误（重试耗尽），-2 非 2xx（重试耗尽或不可重试）；
+ * *http_status 输出最后一次状态码。
  */
 int rp_stream_start(RikkaStreamSession *ss, const char *path,
                     const char *body, size_t body_len,
                     RikkaStream *out, int timeout_ms, int *http_status);
+
+/*
+ * 取最近一次非 2xx 响应的错误详情（从响应体提取 provider 的
+ * {"error":{"message":...}}）。返回 malloc 字符串（调用方 free），
+ * 无错误体/无法解析返回 NULL。所有权转移后 session 内部不再持有。
+ */
+char *rp_take_error_detail(RikkaStreamSession *ss);
 
 /*
  * 泵送事件直到 EOF/错误。text 累积到 out 的 text part，

@@ -13,6 +13,10 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 18888
 streams_lock = threading.Lock()
 streams = {}  # id(self.wfile) -> wfile
 
+# 重试中间件测试钩子：/flaky 前 2 次 500，之后成功；/flaky429 同理
+flaky_hits = 0
+flaky429_hits = 0
+
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
@@ -160,9 +164,40 @@ class H(BaseHTTPRequestHandler):
             self.path = '/openai'
             self.do_GET()
         elif self.path == '/fail500':
+            body = json.dumps({'error': {'message': 'boom 500'}}).encode('utf-8')
             self.send_response(500)
-            self.send_header('Content-Length', '0')
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
             self.end_headers()
+            self.wfile.write(body)
+        elif self.path == '/flaky':
+            global flaky_hits
+            flaky_hits += 1
+            if flaky_hits <= 2:  # 前两次 500 → 触发重试，第三次成功
+                body = json.dumps({'error': {'message': 'flaky 500'}}).encode('utf-8')
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.path = '/openai'
+            self.do_GET()
+            return
+        elif self.path == '/flaky429':
+            global flaky429_hits
+            flaky429_hits += 1
+            if flaky429_hits <= 2:  # 429 限流 → 重试
+                body = json.dumps({'error': {'message': 'rate limited'}}).encode('utf-8')
+                self.send_response(429)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.path = '/openai'
+            self.do_GET()
+            return
         elif self.path == '/sse_bad':
             # 畸形 SSE：超长行（> 8KB）触发解析错误
             self.send_response(200)

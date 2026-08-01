@@ -56,7 +56,7 @@ TEST(build_openai) {
     tp->len = 5;
     msgs[3] = tr;
 
-    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk-test", "gpt-4o", 100, 0};
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk-test", "gpt-4o", 100, 0, {0}};
     Buf out;
     buf_init(&out);
     ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 4, 1, &out));
@@ -107,7 +107,7 @@ TEST(build_claude) {
     tc->len = strlen(tc->data);
     msgs[2] = asst;
 
-    RikkaProviderCfg cfg = {RIKKA_PROVIDER_CLAUDE, "https://api.anthropic.com", "sk-ant", "claude-3-5-sonnet", 4096, 0};
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_CLAUDE, "https://api.anthropic.com", "sk-ant", "claude-3-5-sonnet", 4096, 0, {0}};
     Buf out;
     buf_init(&out);
     ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 3, 1, &out));
@@ -148,7 +148,7 @@ TEST(build_google) {
     msgs[0] = mk_msg(a, RIKKA_ROLE_SYSTEM, "sys");
     msgs[1] = mk_msg(a, RIKKA_ROLE_USER, "q?");
 
-    RikkaProviderCfg cfg = {RIKKA_PROVIDER_GOOGLE, "https://generativelanguage.googleapis.com", "AIza", "gemini-pro", 0, 0};
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_GOOGLE, "https://generativelanguage.googleapis.com", "AIza", "gemini-pro", 0, 0, {0}};
     Buf out;
     buf_init(&out);
     ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 2, 1, &out));
@@ -179,7 +179,7 @@ static void run_stream_test(RikkaProviderId id, const char *mock_path,
     start_mock_server();
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
-    RikkaProviderCfg cfg = {id, base, "test-key", "mock-model", 100, 0};
+    RikkaProviderCfg cfg = {id, base, "test-key", "mock-model", 100, 0, {0}};
 
     Arena *a = arena_create(0);
     const RikkaMessage *msgs[1];
@@ -215,7 +215,7 @@ static void run_stream_test(RikkaProviderId id, const char *mock_path,
 }
 
 TEST(build_empty_messages) {
-    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk", "gpt-4o", 0, 0};
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk", "gpt-4o", 0, 0, {0}};
     Buf out;
     buf_init(&out);
     ASSERT_EQ_INT(0, rp_build_request(&cfg, NULL, 0, 1, &out));
@@ -237,7 +237,7 @@ TEST(build_openai_image) {
     p->data = "https://img.png";
     p->len = strlen("https://img.png");
     const RikkaMessage *msgs[1] = {m};
-    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk", "gpt-4o", 0, 0};
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk", "gpt-4o", 0, 0, {0}};
     Buf out;
     buf_init(&out);
     ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 1, 1, &out));
@@ -262,7 +262,7 @@ TEST(build_openai_tool) {
     p->data = "result";
     p->len = 6;
     const RikkaMessage *msgs[1] = {m};
-    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk", "gpt-4o", 0, 0};
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://api.openai.com/v1", "sk", "gpt-4o", 0, 0, {0}};
     Buf out;
     buf_init(&out);
     ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 1, 1, &out));
@@ -280,17 +280,16 @@ TEST(build_openai_tool) {
 }
 
 TEST(stream_retry_on_500) {
-    /* 500 错误触发重试（pm_msleep 路径），最终失败 */
+    /* 默认策略不重试：500 直接失败，且能提取错误详情 */
     start_mock_server();
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
-    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0};
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0, {0}};
     Arena *a = arena_create(0);
     const RikkaMessage *msgs[1];
     msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
     RikkaStream out;
     rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
-    /* 手动构造 /fail500 路径的 session 测试重试 */
     RikkaStreamSession *ss = rp_session_create(&cfg);
     Buf body;
     buf_init(&body);
@@ -299,6 +298,112 @@ TEST(stream_retry_on_500) {
     int rc = rp_stream_start(ss, "/fail500", (const char *)body.data, body.len, &out, 3000, &status);
     ASSERT(rc != 0);
     ASSERT_EQ_INT(500, status);
+    char *detail = rp_take_error_detail(ss);
+    ASSERT_NOT_NULL(detail);
+    ASSERT(strstr(detail, "boom 500") != NULL);
+    free(detail);
+    rstream_destroy(&out);
+    buf_free(&body);
+    rp_session_destroy(ss);
+    arena_destroy(a);
+    stop_mock_server();
+}
+
+/* 重试中间件：500 两次后成功（指数退避期间 mock 恢复） */
+TEST(stream_retry_success_after_500) {
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0, {0}};
+    cfg.retry.max_retries = 3;
+    cfg.retry.base_delay_ms = 10;
+    cfg.retry.max_delay_ms = 100;
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaStream out;
+    rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+    RikkaStreamSession *ss = rp_session_create(&cfg);
+    Buf body;
+    buf_init(&body);
+    rp_build_request(&cfg, msgs, 1, 1, &body);
+    int status = 0;
+    int rc = rp_stream_start(ss, "/flaky", (const char *)body.data, body.len, &out, 5000, &status);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_EQ_INT(200, status);
+    ASSERT_EQ_INT(0, rp_stream_pump(ss, 3000));
+    rstream_freeze(&out);
+    char text[512];
+    text_of(&out, text, sizeof(text), 0);
+    ASSERT(strstr(text, "Hello") != NULL);
+    /* 重试过程中捕获的临时错误详情不应泄漏给成功调用 */
+    char *detail = rp_take_error_detail(ss);
+    ASSERT_NULL(detail);
+    rstream_destroy(&out);
+    buf_free(&body);
+    rp_session_destroy(ss);
+    arena_destroy(a);
+    stop_mock_server();
+}
+
+/* 重试中间件：429 限流两次后成功 */
+TEST(stream_retry_429_then_success) {
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0, {0}};
+    cfg.retry.max_retries = 3;
+    cfg.retry.base_delay_ms = 10;
+    cfg.retry.max_delay_ms = 100;
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaStream out;
+    rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+    RikkaStreamSession *ss = rp_session_create(&cfg);
+    Buf body;
+    buf_init(&body);
+    rp_build_request(&cfg, msgs, 1, 1, &body);
+    int status = 0;
+    int rc = rp_stream_start(ss, "/flaky429", (const char *)body.data, body.len, &out, 5000, &status);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_EQ_INT(200, status);
+    ASSERT_EQ_INT(0, rp_stream_pump(ss, 3000));
+    rstream_freeze(&out);
+    char text[512];
+    text_of(&out, text, sizeof(text), 0);
+    ASSERT(strstr(text, "Hello") != NULL);
+    rstream_destroy(&out);
+    buf_free(&body);
+    rp_session_destroy(ss);
+    arena_destroy(a);
+    stop_mock_server();
+}
+
+/* 重试中间件：其他 4xx 不重试（立即失败） */
+TEST(stream_retry_4xx_no_retry) {
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0, {0}};
+    cfg.retry.max_retries = 3;
+    cfg.retry.base_delay_ms = 10;
+    cfg.retry.max_delay_ms = 100;
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaStream out;
+    rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+    RikkaStreamSession *ss = rp_session_create(&cfg);
+    Buf body;
+    buf_init(&body);
+    rp_build_request(&cfg, msgs, 1, 1, &body);
+    int status = 0;
+    int rc = rp_stream_start(ss, "/nope", (const char *)body.data, body.len, &out, 3000, &status);
+    ASSERT_EQ_INT(-2, rc);
+    ASSERT_EQ_INT(404, status);
+    char *detail = rp_take_error_detail(ss);
+    ASSERT_NULL(detail); /* 404 无 JSON 错误体 */
     rstream_destroy(&out);
     buf_free(&body);
     rp_session_destroy(ss);
@@ -323,7 +428,7 @@ TEST(stream_bad_sse_no_deadlock) {
     start_mock_server();
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
-    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0};
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0, {0}};
     Arena *a = arena_create(0);
     const RikkaMessage *msgs[1];
     msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
@@ -356,6 +461,9 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, build_openai_image),
         RIKKA_TEST_REGISTER(provider, build_openai_tool),
         RIKKA_TEST_REGISTER(provider, stream_retry_on_500),
+        RIKKA_TEST_REGISTER(provider, stream_retry_success_after_500),
+        RIKKA_TEST_REGISTER(provider, stream_retry_429_then_success),
+        RIKKA_TEST_REGISTER(provider, stream_retry_4xx_no_retry),
         RIKKA_TEST_REGISTER(provider, stream_openai),
         RIKKA_TEST_REGISTER(provider, stream_claude),
         RIKKA_TEST_REGISTER(provider, stream_google),

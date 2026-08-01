@@ -320,6 +320,7 @@ struct RikkaStreamSession {
     RikkaStream *out;
     RikkaSessionStats stats;
     Buf type_buf;
+    char *last_error;        /* 最近一次非 2xx 错误详情（malloc，take 转移所有权） */
 };
 
 /* 提取路径表 */
@@ -420,14 +421,46 @@ void rp_session_destroy(RikkaStreamSession *ss) {
     if (ss->js_text) rjson_stream_destroy(ss->js_text);
     if (ss->js_reason) rjson_stream_destroy(ss->js_reason);
     buf_free(&ss->type_buf);
+    free(ss->last_error);
     free(ss);
 }
 
-int rp_stream_start(RikkaStreamSession *ss, const char *path,
-                    const char *body, size_t body_len,
-                    RikkaStream *out, int timeout_ms, int *http_status) {
-    if (!ss || !out) return -1;
-    ss->out = out;
+/* ---------- 重试中间件（P4a） ---------- */
+
+/* 读非 2xx 响应体（≤64KB）并提取 provider 的 {"error":{"message":...}}。
+ * 三家 provider（OpenAI/Claude/Google）错误结构同构，单一提取即可。 */
+static void capture_error_detail(RikkaStreamSession *ss, RHttpConn *conn) {
+    char buf[8192];
+    Buf body;
+    buf_init(&body);
+    while (body.len < 65536) {
+        ssize_t n = rhttp_read_body(conn, buf, sizeof(buf), 3000);
+        if (n <= 0) break;
+        buf_append(&body, buf, (size_t)n);
+    }
+    if (body.len > 0) {
+        Arena *a = arena_create(0);
+        size_t err = 0;
+        RJson *v = rjson_parse(a, (const char *)body.data, body.len, &err);
+        if (v) {
+            const RJson *e = rjson_obj_get(v, "error");
+            const RJson *m = e ? rjson_obj_get(e, "message") : NULL;
+            if (m && m->type == RJSON_STRING) {
+                free(ss->last_error);
+                ss->last_error = strndup(m->u.str.ptr, m->u.str.len);
+            }
+        }
+        arena_destroy(a);
+    }
+    buf_free(&body);
+}
+
+/* 单次尝试：解析 URL → 连接 → 发送 → 读响应头。
+ * 返回 0 成功（conn 归 session 所有），-1 网络错误，-2 非 2xx
+ * （此时已捕获错误详情并关闭连接）。 */
+static int start_once(RikkaStreamSession *ss, const char *path,
+                      const char *body, size_t body_len,
+                      int timeout_ms, int *http_status) {
     char host[256], prefix[512], full[1024];
     uint16_t port;
     int tls;
@@ -445,8 +478,8 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
         }
         path = full;
     }
-    ss->conn = rhttp_connect(host, port, tls, timeout_ms);
-    if (!ss->conn) return -1;
+    RHttpConn *conn = rhttp_connect(host, port, tls, timeout_ms);
+    if (!conn) return -1;
 
     char auth[512];
     const char *hdrs[8];
@@ -465,11 +498,60 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
     hdrs[nh++] = "text/event-stream";
     hdrs[nh] = NULL;
 
-    if (rhttp_send(ss->conn, "POST", path, hdrs, body, body_len) != 0) return -1;
+    if (rhttp_send(conn, "POST", path, hdrs, body, body_len) != 0) {
+        rhttp_close(conn);
+        return -1;
+    }
     RHttpResp resp;
-    if (rhttp_read_headers(ss->conn, &resp, timeout_ms) != 0) return -1;
+    if (rhttp_read_headers(conn, &resp, timeout_ms) != 0) {
+        rhttp_close(conn);
+        return -1;
+    }
     if (http_status) *http_status = resp.status;
-    if (resp.status < 200 || resp.status >= 300) return -2; /* 非 2xx */
+    if (resp.status < 200 || resp.status >= 300) {
+        capture_error_detail(ss, conn);
+        rhttp_close(conn);
+        return -2;
+    }
+    ss->conn = conn;
+    return 0;
+}
+
+int rp_stream_start(RikkaStreamSession *ss, const char *path,
+                    const char *body, size_t body_len,
+                    RikkaStream *out, int timeout_ms, int *http_status) {
+    if (!ss || !out) return -1;
+    ss->out = out;
+    free(ss->last_error);
+    ss->last_error = NULL;
+
+    int retries = ss->cfg.retry.max_retries;
+    if (retries < 0) retries = 0;
+    long base = ss->cfg.retry.base_delay_ms > 0 ? ss->cfg.retry.base_delay_ms : 100;
+    long maxd = ss->cfg.retry.max_delay_ms > 0 ? ss->cfg.retry.max_delay_ms : 2000;
+
+    int status = 0;
+    int attempt = 0;
+    for (;;) {
+        int rc = start_once(ss, path, body, body_len, timeout_ms, &status);
+        if (rc == 0) {
+            /* 成功：重试过程中捕获的临时错误详情不留存 */
+            free(ss->last_error);
+            ss->last_error = NULL;
+            break;
+        }
+        int retryable = (rc == -1) || (status == 429 || status >= 500);
+        if (!retryable || attempt >= retries) {
+            if (http_status) *http_status = status;
+            return rc;
+        }
+        /* 指数退避：base << attempt，封顶 maxd */
+        long delay = base << attempt;
+        if (delay > maxd) delay = maxd;
+        if (delay > 0) pm_msleep(delay);
+        attempt++;
+    }
+    if (http_status) *http_status = status;
 
     ss->sse = rsse_create(on_sse_event, ss);
     ss->js_type = rjson_stream_create(P_CLAUDE_TYPE, sink_type, ss);
@@ -491,6 +573,13 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
             break;
     }
     return 0;
+}
+
+char *rp_take_error_detail(RikkaStreamSession *ss) {
+    if (!ss) return NULL;
+    char *e = ss->last_error;
+    ss->last_error = NULL;
+    return e;
 }
 
 int rp_stream_pump(RikkaStreamSession *ss, int timeout_ms) {
