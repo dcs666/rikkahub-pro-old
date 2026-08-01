@@ -30,12 +30,10 @@ jobs:
       - name: Install deps
         run: sudo apt-get update && sudo apt-get install -y libssl-dev
       - name: UBSan + fuzz parsers
+        run: make ubsan
+      - name: ASan + LSan (leak detection)
         run: |
-          make clean
-          make test CFLAGS="-O1 -g -fsanitize=undefined -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -std=c11"
-          make build/fuzz_parsers CFLAGS="-O1 -g -fsanitize=undefined -fno-sanitize-recover=all -Wall -Wextra -Wpedantic -std=c11"
-          ./build/fuzz_parsers 20000
+          make asan
+          make lsan
       - name: TSan (SPSC/pipeline)
-        run: |
-          make clean
-          make test CFLAGS="-O1 -g -fsanitize=thread -Wall -Wextra -Wpedantic -std=c11" LDFLAGS="-lpthread -lssl -lcrypto -lz -fsanitize=thread"
+        run: make tsan

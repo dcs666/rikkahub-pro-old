@@ -66,6 +66,31 @@ tsan:
 	make clean
 	@make test CFLAGS="-O1 -g -fsanitize=thread -Wall -Wextra -Wpedantic -std=c11" LDFLAGS="$(LDFLAGS) -fsanitize=thread"
 
+# ---- sanitizer 门禁 (ASan/UBSan/LSan) ----
+# 用法: make ubsan / make asan / make lsan — 自动 clean + 全测试 + fuzz
+# FUZZ_ROUNDS 可调: CI 默认 20000,本地可 FUZZ_ROUNDS=2000 轻量验证
+# 注: ASan 在 proot/受限容器内 shadow 映射会失败,本地建议用 ubsan/lsan,asan 留给 CI
+SAN_CFLAGS := -O1 -g -Wall -Wextra -Wpedantic -std=c11
+FUZZ_ROUNDS ?= 20000
+
+ubsan:
+	make clean
+	@make test CFLAGS="$(SAN_CFLAGS) -fsanitize=undefined -fno-sanitize-recover=all"
+	@make build/fuzz_parsers CFLAGS="$(SAN_CFLAGS) -fsanitize=undefined -fno-sanitize-recover=all"
+	./build/fuzz_parsers $(FUZZ_ROUNDS)
+
+asan:
+	make clean
+	@make test CFLAGS="$(SAN_CFLAGS) -fsanitize=address -fno-sanitize-recover=all" LDFLAGS="$(LDFLAGS) -fsanitize=address"
+	@make build/fuzz_parsers CFLAGS="$(SAN_CFLAGS) -fsanitize=address -fno-sanitize-recover=all" LDFLAGS="$(LDFLAGS) -fsanitize=address"
+	./build/fuzz_parsers $(FUZZ_ROUNDS)
+
+lsan:
+	make clean
+	@make test CFLAGS="$(SAN_CFLAGS) -fsanitize=leak" LDFLAGS="$(LDFLAGS) -fsanitize=leak"
+	@make build/fuzz_parsers CFLAGS="$(SAN_CFLAGS) -fsanitize=leak" LDFLAGS="$(LDFLAGS) -fsanitize=leak"
+	./build/fuzz_parsers $(FUZZ_ROUNDS)
+
 # CLI 工具
 CLI_BIN := build/rikkahub
 
