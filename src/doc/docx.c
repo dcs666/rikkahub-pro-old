@@ -124,8 +124,8 @@ static char *xml_extract_text(const char *xml, size_t len, size_t *out_len) {
             /* 找 </w:t> */
             size_t text_start = tag_end;
             size_t close = text_start;
-            while (close + 5 < len && memcmp(xml + close, "</w:t>", 6) != 0) close++;
-            if (close + 5 >= len) break;
+            while (close < len && len - close >= 6 && memcmp(xml + close, "</w:t>", 6) != 0) close++;
+            if (close >= len || len - close < 6) break;
             /* 复制文本 */
             size_t text_len = close - text_start;
             if (text_len > len - out_off) break; /* 溢出防护 */
