@@ -38,4 +38,19 @@ typedef struct {
 int rk_render_markdown(const char *md, size_t len, RkRenderDoc *out);
 void rk_render_doc_free(RkRenderDoc *doc);
 
+/*
+ * 渲染块 JSON 线协议（UI 壳跨语言消费，如 Kotlin/Swift 端）。
+ * 结构：
+ *   {"blocks":[
+ *     {"type":"text","text":"..."},
+ *     {"type":"heading","level":2,"text":"..."},
+ *     {"type":"quote","text":"..."},
+ *     {"type":"list_item","text":"..."},
+ *     {"type":"code","lang":"c","text":"...",
+ *      "tokens":[{"start":S,"len":L,"type":"keyword"},...]},
+ *   ]}
+ * 返回 malloc 字符串（调用方 free），失败返回 NULL。
+ */
+char *rk_render_markdown_json(const char *md, size_t len);
+
 #endif /* RIKKA_RENDER_RENDER_H */
