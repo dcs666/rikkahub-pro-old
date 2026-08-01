@@ -14,7 +14,7 @@ TEST_BIN := build/test_runner
 BENCH_SRC := $(wildcard benchmarks/bench_*.c)
 BENCH_BIN := $(patsubst benchmarks/%.c,build/%,$(BENCH_SRC))
 
-.PHONY: all test bench clean check tsan fuzz check-bench
+.PHONY: all test bench clean check tsan fuzz check-bench cli
 
 all: $(OBJ)
 
@@ -65,6 +65,14 @@ check:
 tsan:
 	make clean
 	@make test CFLAGS="-O1 -g -fsanitize=thread -Wall -Wextra -Wpedantic -std=c11" LDFLAGS="$(LDFLAGS) -fsanitize=thread"
+
+# CLI 工具
+CLI_BIN := build/rikkahub
+
+$(CLI_BIN): build tools/rikkahub.c $(OBJ)
+	$(CC) $(CFLAGS) $(CPPFLAGS) tools/rikkahub.c $(OBJ) -o $@ $(LDFLAGS)
+
+cli: $(CLI_BIN)
 
 check-bench:
 	@make clean >/dev/null 2>&1

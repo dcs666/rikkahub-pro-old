@@ -65,6 +65,10 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.close()
             except Exception:
                 pass
+        elif self.path == '/chat/completions':
+            # 与 /openai 相同的 SSE 回放（CLI 默认路径）
+            self.path = '/openai'
+            self.do_GET()
         elif self.path == '/fail500':
             self.send_response(500)
             self.send_header('Content-Length', '0')
