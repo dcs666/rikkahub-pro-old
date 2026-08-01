@@ -68,9 +68,7 @@ private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
     }
     LazyColumn(
         state = listState,
-        modifier = modifier
-            .fillMaxWidth()
-            .weight(1f),
+        modifier = modifier.fillMaxWidth(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
