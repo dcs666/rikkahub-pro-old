@@ -14,6 +14,7 @@
 - [x] **P4 功能补齐**：4a provider 重试/错误中间件（429/5xx/网络指数退避 + error.message 提取，测试 500/429 重试成功、4xx 不重试）→ 4b 渲染 JSON 线协议（rk_render_markdown_json + 修复代码块 lang 丢失）→ 4c 网关多实例（SO_REUSEPORT + 共享连接池，8 并发 e2e；修复池死连接 502/double-free/SIGPIPE 三连）→ 4d pptx（统一 zip 模块 docx/epub/pptx 共用）
 - [x] **P5 安全终审**：strict 门禁（-Wshadow/-Wformat=2/-Wundef/-Wconversion/-Wsign-conversion/-Wwrite-strings/-Wpointer-arith/-Wcast-align）零警告；CI ASan/LSan 抓出并修复：RJsonOut 非 NUL 结尾、冻结消息 owned_buf 泄漏、MCP disconnect 跨线程 fd race；TSan 全绿
 - [x] **P6 文档收尾**：README 更新（126 测试/新特性/性能表/开发状态）；ROADMAP 勾选
+- [x] **P7 MCP 端到端 + 边界修复**：CLI MCP 调试模式（--mcp/--mcp-list/--mcp-call/--mcp-args，SSE 传输进程级端到端测试）；网关慢客户端读头循环（SO_RCVTIMEO 5s）；audio multipart 动态 body（去 64KB 上限）；池自赋值 memcpy 重叠修复；测试 read 后补 NUL（valgrind 抓）；128 测试
 
 ## M0 基础设施层（本轮）
 - [x] Makefile + 目录骨架
