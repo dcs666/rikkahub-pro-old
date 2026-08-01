@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "test_server.h"
+#include "rikka/ai/ocr.h"
 
 /* 消息构造辅助 */
 static RikkaMessage *mk_msg(Arena *a, RikkaRole role, const char *text) {
@@ -458,6 +459,29 @@ TEST(stream_bad_sse_no_deadlock) {
     stop_mock_server();
 }
 
+/* ---------- OCR（provider 管线 + mock 回放） ---------- */
+
+TEST(ocr_via_provider) {
+    if (getenv("CI")) {
+        printf("  [skip: CI environment]\n");
+        return;
+    }
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0, {0}};
+    char img[128];
+    snprintf(img, sizeof(img), "http://127.0.0.1:%d/pic.png", g_port);
+    char *text = NULL;
+    ASSERT_EQ_INT(0, rk_ocr_image(&cfg, "You are an OCR assistant.", img, 15000, &text));
+    ASSERT_NOT_NULL(text);
+    ASSERT(strlen(text) > 0);
+    /* mock /openai 回放的流式内容（Hello ...） */
+    ASSERT(strstr(text, "Hello") != NULL);
+    free(text);
+    stop_mock_server();
+}
+
 int run_provider_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(provider, build_openai),
@@ -474,6 +498,7 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, stream_claude),
         RIKKA_TEST_REGISTER(provider, stream_google),
         RIKKA_TEST_REGISTER(provider, stream_bad_sse_no_deadlock),
+        RIKKA_TEST_REGISTER(provider, ocr_via_provider),
     };
     return run_suite("provider", tests, sizeof(tests) / sizeof(tests[0]));
 }

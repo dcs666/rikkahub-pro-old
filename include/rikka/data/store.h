@@ -33,6 +33,7 @@ typedef enum {
     RK_ENT_FOLDER,
     RK_ENT_GEN_MEDIA,
     RK_ENT_MANAGED_FILE,
+    RK_ENT_CHAT,             /* 会话元数据（rk_chats 用） */
     RK_ENT_COUNT,
 } RkEntType;
 
@@ -62,6 +63,10 @@ enum {
     RK_ENT_FILE_FOLDER = 0, RK_ENT_FILE_REL_PATH, RK_ENT_FILE_DISPLAY_NAME,
     RK_ENT_FILE_MIME,
     RK_ENT_FILE_SIZE = 0, RK_ENT_FILE_CREATED_AT, RK_ENT_FILE_UPDATED_AT,
+};
+enum {
+    RK_ENT_CHAT_ID = 0, RK_ENT_CHAT_TITLE, RK_ENT_CHAT_CONTENT,
+    RK_ENT_CHAT_UPDATED_AT = 0, RK_ENT_CHAT_PINNED,
 };
 
 typedef struct RkStore RkStore;

@@ -41,7 +41,17 @@ size_t rk_tokenize(const char *text, size_t len, RkTokenCb cb, void *ctx) {
         if (isalnum(c) || c == '_') {
             size_t j = i;
             while (j < len && (isalnum((unsigned char)text[j]) || text[j] == '_')) j++;
-            if (cb) cb(ctx, text + i, j - i);
+            size_t tlen = j - i;
+            /* FTS 大小写不敏感：小写化副本（栈缓冲；超长罕见原样） */
+            char lbuf[128];
+            if (tlen <= sizeof(lbuf)) {
+                for (size_t k = 0; k < tlen; k++) {
+                    lbuf[k] = (char)tolower((unsigned char)text[i + k]);
+                }
+                if (cb) cb(ctx, lbuf, tlen);
+            } else if (cb) {
+                cb(ctx, text + i, tlen);
+            }
             count++;
             i = j;
             continue;

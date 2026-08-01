@@ -26,6 +26,7 @@ int run_transform_suite(void);
 int run_store_suite(void);
 int run_tool_suite(void);
 int run_prompt_suite(void);
+int run_chats_suite(void);
 int run_docx_suite(void);
 int run_pptx_suite(void);
 int run_trace_suite(void);
@@ -64,6 +65,7 @@ int main(int argc, char **argv) {
         {"store", run_store_suite},
         {"tool", run_tool_suite},
         {"prompt", run_prompt_suite},
+        {"chats", run_chats_suite},
         {"workspace", run_workspace_suite},
         {"audio", run_audio_suite},
         {"render", run_render_suite},
