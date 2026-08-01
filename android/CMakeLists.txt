@@ -29,6 +29,8 @@ target_include_directories(rikka PRIVATE
 # 符号，运行时由系统 libssl.so 解析（API 26+ 均内置 OpenSSL 1.1+）。
 if(ANDROID)
     target_link_libraries(rikka PUBLIC z)
+    # 共享库允许未解析符号：运行时由系统 libssl.so 解析（NDK r23+ 无链接库）
+    target_link_options(rikka PRIVATE "-Wl,-z,undefs")
 else()
     target_link_libraries(rikka PUBLIC ssl crypto z)
 endif()
