@@ -33,8 +33,9 @@ object ChatStore {
         val out = JSONArray()
         val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         var n = 0
-        for (s in sessions) {
+        for (i in 0 until sessions.length()) {
             if (n >= limit) break
+            val s = sessions.getJSONObject(i)
             val updated = s.optLong("updated", 0L)
             out.put(JSONObject()
                 .put("id", s.getString("id"))
@@ -53,7 +54,8 @@ object ChatStore {
         val q = query.lowercase(Locale.US)
         val out = JSONArray()
         val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        for (s in sessions) {
+        for (si in 0 until sessions.length()) {
+            val s = sessions.getJSONObject(si)
             val id = s.getString("id")
             val title = s.optString("title").ifBlank { "Untitled" }
             val raw = p.getString("session_$id", null) ?: continue
