@@ -1,22 +1,112 @@
 #!/usr/bin/env python3
-"""本地 mock 服务器：/sse 返回 chunked SSE 流，/json 返回 JSON。供 C 测试真实网络往返。"""
-import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
+"""本地 mock 服务器：/sse 返回 chunked SSE 流，/json 返回 JSON，/mcp/* 为 MCP SSE 传输端点。
+供 C 测试真实网络往返。"""
+import json
 import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 18888
+
+# MCP SSE：活跃 SSE 流注册表（wfile），POST /mcp/messages 时向所有流广播响应
+streams_lock = threading.Lock()
+streams = {}  # id(self.wfile) -> wfile
+
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    # ---- MCP SSE transport ----
+    def _sse_stream(self, endpoint_url, heartbeat=True):
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.end_headers()
+        sid = id(self.wfile)
+        with streams_lock:
+            streams[sid] = self.wfile
+        try:
+            self.wfile.write(b'event: endpoint\ndata: ' + endpoint_url.encode('utf-8') + b'\n\n')
+            self.wfile.flush()
+            while True:
+                time.sleep(1)
+                if not heartbeat:
+                    continue  # 无心跳：探测客户端读超时处理
+                self.wfile.write(b': ping\n\n')  # 心跳同时探测客户端断开
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ValueError):
+            pass
+        finally:
+            with streams_lock:
+                streams.pop(sid, None)
+
+    def _mcp_message(self):
+        length = int(self.headers.get('Content-Length', 0) or 0)
+        body = self.rfile.read(length).decode('utf-8', 'replace') if length else ''
+        resp = {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'parse error'}}
+        try:
+            req = json.loads(body)
+            rid = req.get('id')
+            method = req.get('method', '')
+            if method == 'tools/list':
+                resp = {'jsonrpc': '2.0', 'id': rid, 'result': {'tools': [
+                    {'name': 'echo', 'description': 'Echo tool',
+                     'inputSchema': {'type': 'object'}}]}}
+            elif method == 'tools/call':
+                args = (req.get('params') or {}).get('arguments') or {}
+                text = args.get('text', '')
+                if text == 'boom':
+                    # 测试钩子：JSON-RPC error 响应
+                    resp = {'jsonrpc': '2.0', 'id': rid,
+                            'error': {'code': -32000, 'message': 'boom'}}
+                else:
+                    resp = {'jsonrpc': '2.0', 'id': rid,
+                            'result': {'content': [{'type': 'text', 'text': 'echo: ' + text}]}}
+            else:
+                resp = {'jsonrpc': '2.0', 'id': rid,
+                        'error': {'code': -32601, 'message': 'not found'}}
+        except Exception:
+            pass
+        payload = ('event: message\ndata: ' + json.dumps(resp) + '\n\n').encode('utf-8')
+        with streams_lock:
+            for w in list(streams.values()):
+                try:
+                    w.write(payload)
+                    w.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    pass
+        self.send_response(202)
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
     def do_POST(self):
+        if self.path == '/mcp/messages':
+            self._mcp_message()
+            return
         length = int(self.headers.get('Content-Length', 0) or 0)
         if length:
             self.rfile.read(length)
         self.do_GET()
 
     def do_GET(self):
+        if self.path == '/mcp/sse':
+            self._sse_stream('/mcp/messages')  # 相对 endpoint（主路径）
+            return
+        if self.path == '/mcp/sse_abs':
+            # 绝对 endpoint URL（测试 parse_endpoint 绝对分支）
+            port = self.server.server_address[1]
+            self._sse_stream('http://127.0.0.1:%d/mcp/messages' % port)
+            return
+        if self.path == '/mcp/sse_nohb':
+            # 无心跳流（测试客户端读超时后继续等待，不退出传输）
+            self._sse_stream('/mcp/messages', heartbeat=False)
+            return
+        if self.path == '/mcp/sse_bad':
+            # endpoint 指向不存在的路径（POST 404 → 调用立即失败）
+            self._sse_stream('/mcp/nowhere')
+            return
         if self.path == '/sse':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -161,7 +251,7 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
 
 
-class ReuseServer(HTTPServer):
+class ReuseServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 

@@ -1,8 +1,11 @@
+#define _DEFAULT_SOURCE
 #include "test.h"
 #include "rikka/mcp/mcp.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "test_server.h" /* start_mock_server / stop_mock_server / g_port */
 
 /* python echo MCP 服务器脚本 */
 static const char *MCP_SERVER_PY =
@@ -75,10 +78,140 @@ TEST(mcp_call_tool) {
     rk_mcp_disconnect(&c);
 }
 
+/* SSE 传输：相对 endpoint 主路径（list + call + disconnect） */
+TEST(mcp_sse_connect_and_list) {
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/sse", g_port);
+    RkMcpClient c;
+    int rc = rk_mcp_connect_sse(&c, url);
+    ASSERT_EQ_INT(0, rc);
+    RkMcpTool *tools = NULL;
+    size_t count = 0;
+    rc = rk_mcp_list_tools(&c, &tools, &count);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_EQ_SIZE(1, count);
+    ASSERT(strcmp(tools[0].name, "echo") == 0);
+    ASSERT(strcmp(tools[0].description, "Echo tool") == 0);
+    ASSERT_NOT_NULL(tools[0].input_schema);
+    rk_mcp_tools_free(tools, count);
+    /* 连续两次调用：验证 pending 复用 + 顺序响应匹配 */
+    char *r1 = NULL, *r2 = NULL;
+    rc = rk_mcp_call_tool(&c, "echo", "{\"text\":\"sse1\"}", &r1);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_NOT_NULL(r1);
+    ASSERT(strstr(r1, "echo: sse1") != NULL);
+    rc = rk_mcp_call_tool(&c, "echo", "{\"text\":\"sse2\"}", &r2);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_NOT_NULL(r2);
+    ASSERT(strstr(r2, "echo: sse2") != NULL);
+    free(r1);
+    free(r2);
+    rk_mcp_disconnect(&c);
+    stop_mock_server();
+}
+
+/* SSE 传输：绝对 endpoint URL（服务器发完整 URL） */
+TEST(mcp_sse_absolute_endpoint) {
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/sse_abs", g_port);
+    RkMcpClient c;
+    int rc = rk_mcp_connect_sse(&c, url);
+    ASSERT_EQ_INT(0, rc);
+    RkMcpTool *tools = NULL;
+    size_t count = 0;
+    rc = rk_mcp_list_tools(&c, &tools, &count);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_EQ_SIZE(1, count);
+    ASSERT(strcmp(tools[0].name, "echo") == 0);
+    rk_mcp_tools_free(tools, count);
+    rk_mcp_disconnect(&c);
+    stop_mock_server();
+}
+
+/* SSE 传输：JSON-RPC error 响应 → rc=-1 且 result 不被设置（与 stdio 语义一致） */
+TEST(mcp_sse_error_response) {
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/sse", g_port);
+    RkMcpClient c;
+    int rc = rk_mcp_connect_sse(&c, url);
+    ASSERT_EQ_INT(0, rc);
+    char *r1 = (char *)0x1; /* 哨兵：验证 error 路径不碰 result */
+    rc = rk_mcp_call_tool(&c, "echo", "{\"text\":\"boom\"}", &r1);
+    ASSERT_EQ_INT(-1, rc);
+    ASSERT(r1 == (char *)0x1);
+    rk_mcp_disconnect(&c);
+    stop_mock_server();
+}
+
+/* SSE 传输：message endpoint POST 失败（404）→ 调用立即失败 */
+TEST(mcp_sse_post_failure) {
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/sse_bad", g_port);
+    RkMcpClient c;
+    int rc = rk_mcp_connect_sse(&c, url);
+    ASSERT_EQ_INT(0, rc);
+    RkMcpTool *tools = NULL;
+    size_t count = 0;
+    rc = rk_mcp_list_tools(&c, &tools, &count);
+    ASSERT_EQ_INT(-1, rc);
+    ASSERT_NULL(tools);
+    rk_mcp_disconnect(&c);
+    stop_mock_server();
+}
+
+/* SSE 传输：服务器无心跳时，客户端读超时后必须继续等待而非断开传输
+ * （回归：读线程曾把超时误当退出条件，5s 空闲即杀连接） */
+TEST(mcp_sse_idle_no_heartbeat) {
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char url[160];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d/mcp/sse_nohb", g_port);
+    RkMcpClient c;
+    int rc = rk_mcp_connect_sse(&c, url);
+    ASSERT_EQ_INT(0, rc);
+    usleep(6500000); /* 超过读线程 5s 超时阈值 */
+    char *r1 = NULL;
+    rc = rk_mcp_call_tool(&c, "echo", "{\"text\":\"alive\"}", &r1);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_NOT_NULL(r1);
+    ASSERT(strstr(r1, "alive") != NULL);
+    free(r1);
+    rk_mcp_disconnect(&c);
+    stop_mock_server();
+}
+
 int run_mcp_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(mcp, mcp_connect_and_list),
         RIKKA_TEST_REGISTER(mcp, mcp_call_tool),
+        RIKKA_TEST_REGISTER(mcp, mcp_sse_connect_and_list),
+        RIKKA_TEST_REGISTER(mcp, mcp_sse_absolute_endpoint),
+        RIKKA_TEST_REGISTER(mcp, mcp_sse_error_response),
+        RIKKA_TEST_REGISTER(mcp, mcp_sse_post_failure),
+        RIKKA_TEST_REGISTER(mcp, mcp_sse_idle_no_heartbeat),
     };
     return run_suite("mcp", tests, sizeof(tests) / sizeof(tests[0]));
 }

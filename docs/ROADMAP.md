@@ -2,6 +2,18 @@
 
 原则：每个里程碑 = 可独立编译 + 单元测试 + 基准数字；先立基线再优化；对标 JVM 版指标。
 
+## 2026-08 重构轮次（进行中）
+
+顺序由依赖决定：先安全网 → 动结构 → 功能 → 终审。每阶段独立 commit + make clean && make test 全绿 + 零 warning。
+
+- [x] **P0 基线加固**：Makefile 加 `ubsan/asan/lsan` 目标；CI sanitizers job 改用 make 目标并新增 ASan+LSan
+- [x] **P2 MCP SSE 传输**：http 暴露 fd + `rhttp_parse_url` 公开；SSE transport（endpoint 握手/挂起请求/pending 链表/读线程）；语义与 stdio 对齐（result 成员提取、error 不设 result）；修复读线程超时误杀连接 bug；新增 5 个测试（error/POST404/无心跳空闲回归）
+- [ ] **P1 结构重构**：评估拆大文件（json.c 932 / provider.c 633 / http.c 620 / md.c 607）；统一错误码；头文件组织
+- [ ] **P3 基准补齐**：md 增量 / json 增量 vs 全量 / doc-epub / arena / SSE 累积 bench + check_bench 阈值
+- [ ] **P4 功能补齐**：4a provider 重试/错误中间件（parseErrorDetail）→ 4b 渲染排版块协议 → 4c 网关多实例 → 4d pptx
+- [ ] **P5 安全终审**：-Wshadow/-Wformat=2/-Wundef/-Wconversion 全开、ASan/LSan 全跑、fuzz 5 万轮
+- [ ] **P6 文档收尾**：README/ROADMAP 更新数字与勾选
+
 ## M0 基础设施层（本轮）
 - [x] Makefile + 目录骨架
 - [x] Buf 动态字节缓冲（append/reset 复用容量 = 零分配累积基础）

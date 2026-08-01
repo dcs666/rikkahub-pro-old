@@ -54,4 +54,11 @@ char *rhttp_request_sync(const char *url, const char *const *headers,
                          const char *body, size_t body_len,
                          int timeout_ms, int *status, size_t *out_len);
 
+/*
+ * 解析 http(s):// URL 为 host/port/tls/path。支持端口（127.0.0.1:8080/x）。
+ * 返回 0 成功；host/path 以 NUL 结尾写入调用方缓冲。
+ */
+int rhttp_parse_url(const char *url, char *host, size_t host_cap, uint16_t *port,
+                    int *tls, char *path, size_t path_cap);
+
 #endif /* RIKKA_HTTP_HTTP_H */

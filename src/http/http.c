@@ -525,8 +525,8 @@ int rhttp_get_fd(const RHttpConn *c) { return c ? c->fd : -1; }
 
 /* ---------- 同步请求 ---------- */
 
-static int parse_url(const char *url, char *host, size_t host_cap, uint16_t *port,
-                     int *tls, char *path, size_t path_cap) {
+int rhttp_parse_url(const char *url, char *host, size_t host_cap, uint16_t *port,
+                    int *tls, char *path, size_t path_cap) {
     const char *p = url;
     *tls = 0;
     if (strncmp(p, "https://", 8) == 0) { *tls = 1; p += 8; }
@@ -579,7 +579,7 @@ char *rhttp_request_sync(const char *url, const char *const *headers,
     char host[256], path[2048];
     uint16_t port;
     int tls;
-    if (parse_url(url, host, sizeof(host), &port, &tls, path, sizeof(path)) != 0) return NULL;
+    if (rhttp_parse_url(url, host, sizeof(host), &port, &tls, path, sizeof(path)) != 0) return NULL;
 
     RHttpResp resp;
     Buf out;
