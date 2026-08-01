@@ -24,8 +24,14 @@ add_library(rikka SHARED ${RIKKA_SRC})
 target_include_directories(rikka PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 
-# Android API 26+：系统自带 libssl/libcrypto/libz（bionic）
-target_link_libraries(rikka PUBLIC ssl crypto z)
+# Android API 26+：系统自带 libssl/libcrypto/libz（bionic）。
+# 注意: NDK r23+ 不提供 libssl/libcrypto 链接库——共享库允许未解析
+# 符号，运行时由系统 libssl.so 解析（API 26+ 均内置 OpenSSL 1.1+）。
+if(ANDROID)
+    target_link_libraries(rikka PUBLIC z)
+else()
+    target_link_libraries(rikka PUBLIC ssl crypto z)
+endif()
 
 # JNI 头（NDK 提供）
 target_include_directories(rikka PRIVATE
