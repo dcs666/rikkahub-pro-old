@@ -1,5 +1,6 @@
 #include "test.h"
 #include <stdio.h>
+#include <string.h>
 
 int run_suite(const char *suite_name, const RikkaTest *tests, size_t count) {
     int passed = 0;
@@ -34,29 +35,42 @@ int run_buffer_suite(void);
 int run_arena_suite(void);
 int run_log_suite(void);
 
-int main(void) {
+int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0); /* 卡死时也能看到进度 */
-    int failed = 0;
-    failed |= run_buffer_suite();
-    failed |= run_arena_suite();
-    failed |= run_log_suite();
-    failed |= run_json_suite();
-    failed |= run_message_suite();
-    failed |= run_http_suite();
-    failed |= run_provider_suite();
-    failed |= run_highlight_suite();
-    failed |= run_md_suite();
-    failed |= run_data_suite();
-    failed |= run_trace_suite();
-    failed |= run_docx_suite();
-    failed |= run_epub_suite();
-    failed |= run_mcp_suite();
-    failed |= run_workspace_suite();
-    failed |= run_audio_suite();
-    failed |= run_render_suite();
-    failed |= run_gateway_suite();
-    failed |= run_gateway_e2e_suite();
-    failed |= run_pipe_suite();
+    /* 可选过滤：./test_runner [suite_name]（定向跑单个套件，如 TSan 局部验证） */
+    const char *only = argc > 1 ? argv[1] : NULL;
+    struct { const char *name; int (*fn)(void); } suites[] = {
+        {"buffer", run_buffer_suite},
+        {"arena", run_arena_suite},
+        {"log", run_log_suite},
+        {"json", run_json_suite},
+        {"message", run_message_suite},
+        {"http", run_http_suite},
+        {"provider", run_provider_suite},
+        {"highlight", run_highlight_suite},
+        {"md", run_md_suite},
+        {"data", run_data_suite},
+        {"trace", run_trace_suite},
+        {"docx", run_docx_suite},
+        {"epub", run_epub_suite},
+        {"mcp", run_mcp_suite},
+        {"workspace", run_workspace_suite},
+        {"audio", run_audio_suite},
+        {"render", run_render_suite},
+        {"gateway", run_gateway_suite},
+        {"gateway_e2e", run_gateway_e2e_suite},
+        {"pipe", run_pipe_suite},
+    };
+    int failed = 0, ran = 0;
+    for (size_t i = 0; i < sizeof(suites) / sizeof(suites[0]); i++) {
+        if (only && strcmp(only, suites[i].name) != 0) continue;
+        ran++;
+        failed |= suites[i].fn();
+    }
+    if (only && ran == 0) {
+        printf("unknown suite: %s\n", only);
+        return 2;
+    }
     if (failed == 0) {
         printf("\nALL SUITES PASSED\n");
         return 0;

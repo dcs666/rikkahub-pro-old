@@ -36,6 +36,10 @@ typedef struct {
     RkPoolConn pool[32];
     size_t pool_count;
     pthread_mutex_t pool_mutex;
+    /* 生命周期：活跃请求计数（stop 后 run 退出路径等待归零再清理） */
+    pthread_mutex_t life_mutex;
+    pthread_cond_t life_cond;
+    int active_handlers;
 } RkGateway;
 
 /* 初始化网关（监听端口） */
@@ -44,10 +48,14 @@ int rk_gateway_init(RkGateway *g, int port);
 /* 添加 provider */
 int rk_gateway_add_provider(RkGateway *g, const char *name, const char *api_key, const char *base_url);
 
-/* 运行网关（阻塞，epoll 事件循环） */
+/* 运行网关（阻塞，epoll 事件循环）。
+ * 退出时等待所有在途请求结束并清理连接池/监听 fd；
+ * 因此 stop 只做信号，资源释放全部发生在 run 返回前。 */
 int rk_gateway_run(RkGateway *g);
 
-/* 停止网关 */
+/* 停止网关（仅置位停止标志；事件循环 ≤1s 内退出）。
+ * 非线程安全约束：stop 与 run 可并发，但 stop 后必须 join run 线程
+ * 才能安全释放/复用 RkGateway 内存。 */
 void rk_gateway_stop(RkGateway *g);
 
 #endif /* RIKKA_GATEWAY_GATEWAY_H */

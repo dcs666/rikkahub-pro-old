@@ -39,6 +39,9 @@ int rk_gateway_init(RkGateway *g, int port) {
     __atomic_store_n(&g->running, 1, __ATOMIC_RELAXED);
     g->pool_count = 0;
     pthread_mutex_init(&g->pool_mutex, NULL);
+    pthread_mutex_init(&g->life_mutex, NULL);
+    pthread_cond_init(&g->life_cond, NULL);
+    g->active_handlers = 0;
     return 0;
 }
 
@@ -106,7 +109,16 @@ typedef struct {
 
 static void *handle_request_thread(void *arg) {
     HandleCtx *ctx = (HandleCtx *)arg;
-    handle_request(ctx->g, ctx->client_fd);
+    RkGateway *g = ctx->g;
+    /* 活跃计数：run 的退出路径等待其归零后才清理连接池 */
+    pthread_mutex_lock(&g->life_mutex);
+    g->active_handlers++;
+    pthread_mutex_unlock(&g->life_mutex);
+    handle_request(g, ctx->client_fd);
+    pthread_mutex_lock(&g->life_mutex);
+    g->active_handlers--;
+    pthread_cond_broadcast(&g->life_cond);
+    pthread_mutex_unlock(&g->life_mutex);
     free(ctx);
     return NULL;
 }
@@ -309,17 +321,12 @@ int rk_gateway_run(RkGateway *g) {
         }
     }
     close(epfd);
-    return 0;
-}
-
-void rk_gateway_stop(RkGateway *g) {
-    if (!g) return;
-    __atomic_store_n(&g->running, 0, __ATOMIC_RELAXED);
-    if (g->fd >= 0) {
-        close(g->fd);
-        g->fd = -1;
-    }
-    /* 清理连接池 */
+    /* 等待在途请求全部结束（stop 只置位标志，此处才是资源清理点） */
+    pthread_mutex_lock(&g->life_mutex);
+    while (g->active_handlers > 0)
+        pthread_cond_wait(&g->life_cond, &g->life_mutex);
+    pthread_mutex_unlock(&g->life_mutex);
+    /* 清理连接池（此刻无 handler 使用） */
     pthread_mutex_lock(&g->pool_mutex);
     for (size_t i = 0; i < g->pool_count; i++) {
         if (g->pool[i].conn) rhttp_close(g->pool[i].conn);
@@ -327,4 +334,18 @@ void rk_gateway_stop(RkGateway *g) {
     g->pool_count = 0;
     pthread_mutex_unlock(&g->pool_mutex);
     pthread_mutex_destroy(&g->pool_mutex);
+    pthread_mutex_destroy(&g->life_mutex);
+    pthread_cond_destroy(&g->life_cond);
+    /* 监听 fd 由事件循环线程独占关闭（stop 不触碰，无跨线程 fd 竞争） */
+    close(g->fd);
+    g->fd = -1;
+    return 0;
+}
+
+void rk_gateway_stop(RkGateway *g) {
+    if (!g) return;
+    /* 仅置位停止标志。事件循环 epoll 超时 ≤1s 后自行退出并清理。
+     * 不再 close(fd)/销毁 mutex：跨线程 fd 操作与在途 handler 使用
+     * 会构成数据竞争（TSan 曾报 rk_gateway_stop vs rk_gateway_run）。 */
+    __atomic_store_n(&g->running, 0, __ATOMIC_RELAXED);
 }
