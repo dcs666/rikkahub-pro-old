@@ -220,8 +220,9 @@ int epub_parse(const uint8_t *data, size_t len, EpubContent *out) {
         free(html);
         if (!text) continue;
         /* 合并 */
-        if (merged_len + text_len + 2 > merged_cap) {
+        if (text_len > merged_cap - merged_len - 2) {
             size_t new_cap = merged_cap * 2;
+            if (new_cap < merged_len + text_len + 2) new_cap = merged_len + text_len + 2;
             char *new_merged = (char *)realloc(merged, new_cap);
             if (!new_merged) { free(text); break; }
             merged = new_merged;
