@@ -178,6 +178,10 @@ int docx_parse(const uint8_t *data, size_t len, DocxContent *out) {
             return -1;
         }
         xml_len = strm.total_out;
+        if (xml_len > uncomp_size) { /* 解压大小异常 */
+            free(xml);
+            return -1;
+        }
         xml[xml_len] = '\0';
     } else {
         return -1; /* 不支持的压缩方法 */

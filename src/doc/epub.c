@@ -181,6 +181,10 @@ static char *inflate_entry(const ZipEntry *e, size_t *out_len) {
             return NULL;
         }
         *out_len = strm.total_out;
+        if (*out_len > e->uncomp_size) { /* 解压大小异常 */
+            free(out);
+            return NULL;
+        }
         out[*out_len] = '\0';
     }
     return out;
