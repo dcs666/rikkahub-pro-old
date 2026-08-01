@@ -50,7 +50,7 @@ fun ChatScreen(vm: ChatViewModel) {
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { showSettings = true }) { Text("设置") }
         }
-        MessageList(vm)
+        MessageList(vm, Modifier.weight(1f))
         InputBar(vm)
     }
     if (showSettings) {
@@ -59,7 +59,7 @@ fun ChatScreen(vm: ChatViewModel) {
 }
 
 @Composable
-private fun MessageList(vm: ChatViewModel) {
+private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(vm.messages.size) {
         if (vm.messages.isNotEmpty()) {
@@ -68,7 +68,7 @@ private fun MessageList(vm: ChatViewModel) {
     }
     LazyColumn(
         state = listState,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .weight(1f),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
