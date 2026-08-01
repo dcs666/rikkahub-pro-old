@@ -263,9 +263,9 @@ static uint32_t rd_u32(Rd *r) {
     return v;
 }
 static int64_t rd_i64(Rd *r) {
-    if (r->off + 8 > r->len) { r->err = 1; return 0; }
+    if (r->off + (size_t)8 > r->len) { r->err = 1; return 0; }
     uint64_t v = 0;
-    for (int i = 0; i < 8; i++) v |= (uint64_t)r->p[r->off + i] << (8 * i);
+    for (size_t i = 0; i < 8; i++) v |= (uint64_t)r->p[r->off + i] << (8 * i);
     r->off += 8;
     return (int64_t)v;
 }
