@@ -19,6 +19,11 @@ static const char *MCP_SERVER_PY =
     "    print(json.dumps(resp), flush=True)\n";
 
 TEST(mcp_connect_and_list) {
+    /* 检查 python3 可用性 */
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
     /* 写 python 脚本到 /tmp */
     FILE *f = fopen("/tmp/mcp_echo.py", "w");
     ASSERT_NOT_NULL(f);
@@ -40,6 +45,10 @@ TEST(mcp_connect_and_list) {
 }
 
 TEST(mcp_call_tool) {
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
     FILE *f = fopen("/tmp/mcp_echo.py", "w");
     ASSERT_NOT_NULL(f);
     fputs(MCP_SERVER_PY, f);
