@@ -32,6 +32,12 @@ target_include_directories(rikka PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../include"
     "${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include")
 
+# NDK 无 openssl 头：用 shim（系统 libssl.so 提供符号）
+if(ANDROID)
+    target_include_directories(rikka PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/ndk-include")
+endif()
+
 # 告警门禁与引擎一致（-Werror 构建期兜底）
 target_compile_options(rikka PRIVATE
     -Wall -Wextra -Wpedantic
