@@ -20,6 +20,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         DeviceTools.init(applicationContext)
+        ChatStore.init(applicationContext)
         setContent {
             RikkaTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {

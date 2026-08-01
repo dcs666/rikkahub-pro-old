@@ -105,6 +105,8 @@ static int parse_history(Arena *a, const char *history_json,
 
 static jclass g_dev_cls = NULL;
 static jmethodID g_dev_ask_user, g_dev_clip, g_dev_tts, g_dev_cal, g_dev_st, g_dev_js;
+static jclass g_store_cls = NULL;
+static jmethodID g_store_recent, g_store_search;
 
 static JNIEnv *env_of(void) {
     JNIEnv *env = NULL;
@@ -214,6 +216,44 @@ static char *jni_javascript_eval(const char *code, void *ud) {
     return jstrdup_utf(env, r);
 }
 
+/* ---------- 会话存储（反调 Kotlin ChatStore） ---------- */
+
+static void ensure_store_cls(JNIEnv *env) {
+    if (g_store_cls) return;
+    jclass c = (*env)->FindClass(env, "me/rerere/rikkahub/ce/ChatStore");
+    if (!c) return;
+    g_store_cls = (jclass)(*env)->NewGlobalRef(env, c);
+    g_store_recent = (*env)->GetStaticMethodID(env, g_store_cls, "recentChats",
+                                               "(I)Ljava/lang/String;");
+    g_store_search = (*env)->GetStaticMethodID(env, g_store_cls, "conversationSearch",
+                                               "(Ljava/lang/String;)Ljava/lang/String;");
+    (*env)->DeleteLocalRef(env, c);
+}
+
+static char *jni_recent_chats(int limit, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return NULL;
+    ensure_store_cls(env);
+    if (!g_store_cls || !g_store_recent) return NULL;
+    jstring r = (jstring)(*env)->CallStaticObjectMethod(env, g_store_cls,
+                                                        g_store_recent, (jint)limit);
+    return jstrdup_utf(env, r);
+}
+
+static char *jni_conversation_search(const char *query, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return NULL;
+    ensure_store_cls(env);
+    if (!g_store_cls || !g_store_search) return NULL;
+    jstring q = (*env)->NewStringUTF(env, query);
+    jstring r = (jstring)(*env)->CallStaticObjectMethod(env, g_store_cls,
+                                                        g_store_search, q);
+    (*env)->DeleteLocalRef(env, q);
+    return jstrdup_utf(env, r);
+}
+
 /* ---------- JNI 入口 ---------- */
 
 JNIEXPORT jstring JNICALL
@@ -260,6 +300,8 @@ Java_me_rerere_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.calendar_query = jni_calendar_query;
     tenv.screen_time_query = jni_screen_time_query;
     tenv.javascript_eval = jni_javascript_eval;
+    tenv.recent_chats = jni_recent_chats;
+    tenv.conversation_search = jni_conversation_search;
     rk_tools_init(&reg);
     rk_tools_register_builtin(&reg, &tenv);
 
