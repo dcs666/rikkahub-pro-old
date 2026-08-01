@@ -63,9 +63,11 @@ TEST(rbin_truncation_guard) {
     RConversation c;
     rconv_init(&c, a);
     for (int i = 0; i < 20; i++) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "msg %d with data", i);
-        RikkaMessage *m = mk_msg(a, RIKKA_ROLE_USER, buf);
+        /* RikkaPart.data 零拷贝引用调用方内存——文本必须放入 arena 生命周期 */
+        char *s = arena_alloc(a, 1, 32);
+        ASSERT_NOT_NULL(s);
+        snprintf(s, 32, "msg %d with data", i);
+        RikkaMessage *m = mk_msg(a, RIKKA_ROLE_USER, s);
         rconv_append(&c, m);
     }
     Buf bin;
@@ -105,9 +107,11 @@ TEST(rbin_file_snapshot) {
     RConversation c;
     rconv_init(&c, a);
     for (int i = 0; i < 100; i++) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "message number %d", i);
-        RikkaMessage *m = mk_msg(a, RIKKA_ROLE_USER, buf);
+        /* 零拷贝契约：文本放入 arena */
+        char *s = arena_alloc(a, 1, 64);
+        ASSERT_NOT_NULL(s);
+        snprintf(s, 64, "message number %d", i);
+        RikkaMessage *m = mk_msg(a, RIKKA_ROLE_USER, s);
         rconv_append(&c, m);
     }
     const char *path = "/tmp/rbin_test.bin";
