@@ -27,10 +27,14 @@ target_include_directories(rikka PRIVATE
 # Android API 26+：系统自带 libssl/libcrypto/libz（bionic）。
 # 注意: NDK r23+ 不提供 libssl/libcrypto 链接库——共享库允许未解析
 # 符号，运行时由系统 libssl.so 解析（API 26+ 均内置 OpenSSL 1.1+）。
+# Android API 26+：系统自带 libssl/libcrypto/libz（bionic）。
+# 注意: NDK r23+ 不提供 libssl/libcrypto 链接库——共享库允许未解析
+# 符号，运行时由系统 libssl.so 解析（API 26+ 均内置 OpenSSL 1.1+）。
+# AGP 会附加 --no-undefined，须用全局 linker flags 覆盖。
 if(ANDROID)
     target_link_libraries(rikka PUBLIC z)
-    # 共享库允许未解析符号：运行时由系统 libssl.so 解析（NDK r23+ 无链接库）
-    target_link_options(rikka PRIVATE "-Wl,-z,undefs")
+    set(CMAKE_SHARED_LINKER_FLAGS
+        "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,undefs")
 else()
     target_link_libraries(rikka PUBLIC ssl crypto z)
 endif()
