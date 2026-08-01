@@ -18,7 +18,7 @@ RikkaHub AI 客户端核心运行时的 **纯 C 重写**。目标不是"C 版 An
 
 ```bash
 make            # 构建全部
-make test       # 单元测试 (128/128)
+make test       # 单元测试 (173/173)
 make check      # 零 warning 门禁 + 全测试
 make strict     # 严格告警门禁 (-Wshadow/-Wconversion/...)
 make bench      # 性能基准
@@ -47,6 +47,9 @@ rikkahub --interactive
 # MCP 工具调试（SSE 传输）
 rikkahub --mcp http://127.0.0.1:18888/mcp/sse --mcp-list
 rikkahub --mcp http://127.0.0.1:18888/mcp/sse --mcp-call echo --mcp-args '{"text":"hi"}'
+
+# MCP 工具调试（Streamable HTTP 传输）
+rikkahub --mcp http://127.0.0.1:18888/mcp --mcp-list
 
 # 性能分析
 rikkahub --trace "explain this"
@@ -89,7 +92,7 @@ rikkahub --trace "explain this"
 
 ## 质量验证
 
-- **128/128 单元测试** · 零 warning（-Wall/-Wextra/-Wpedantic）+ strict 门禁（-Wshadow/-Wformat=2/-Wundef/-Wconversion/-Wsign-conversion/-Wwrite-strings/-Wpointer-arith/-Wcast-align）
+- **173/173 单元测试** · 零 warning（-Wall/-Wextra/-Wpedantic）+ strict 门禁（-Wshadow/-Wformat=2/-Wundef/-Wconversion/-Wsign-conversion/-Wwrite-strings/-Wpointer-arith/-Wcast-align）
 - **fuzz 35 万轮**（随机 + 结构化）UBSan 干净（CI 每轮 2 万）
 - **ASan/LSan/TSan/UBSan** 全量 CI 门禁；valgrind 全量 0 errors / 0 leaks
 - **压力测试**：100KB 单消息 + 1000 轮对话

@@ -15,6 +15,10 @@
 - [x] **P5 安全终审**：strict 门禁（-Wshadow/-Wformat=2/-Wundef/-Wconversion/-Wsign-conversion/-Wwrite-strings/-Wpointer-arith/-Wcast-align）零警告；CI ASan/LSan 抓出并修复：RJsonOut 非 NUL 结尾、冻结消息 owned_buf 泄漏、MCP disconnect 跨线程 fd race；TSan 全绿
 - [x] **P6 文档收尾**：README 更新（126 测试/新特性/性能表/开发状态）；ROADMAP 勾选
 - [x] **P7 MCP 端到端 + 边界修复**：CLI MCP 调试模式（--mcp/--mcp-list/--mcp-call/--mcp-args，SSE 传输进程级端到端测试）；网关慢客户端读头循环（SO_RCVTIMEO 5s）；audio multipart 动态 body（去 64KB 上限）；池自赋值 memcpy 重叠修复；测试 read 后补 NUL（valgrind 抓）；128 测试
+- [x] **P8 消息变换管线**：对标 JVM transformers 全套——输入 7 步（time_reminder/prompt_injection 5 位置+优先级+safe insert/placeholder 11 键/document_as_prompt/ocr/template/workspace_reminder）+ 输出 3 步（think_tag/regex_output/base64_image）；POSIX ERE + $N 替换；COW 消息列表；29 测试
+- [x] **P9 数据实体面**：rk_store 记录存储（Favorite/Folder/GenMedia/ManagedFile，字段槽位 + 唯一约束 + 紧凑二进制快照原子写 + get_copy 安全读写）；4 测试
+- [x] **P10 MCP Streamable HTTP + OAuth**：Streamable HTTP 传输（直答 JSON / 202 SSE 流 / mcp-session-id）；OAuth 2.1 全环节（RFC 9728/8414 发现、RFC 7591 注册、PKCE S256、授权码、刷新）；http 层 rhttp_resp_header 复制式 API；5 测试
+- [x] **P11 工具系统**：注册表 + 7 个内置工具（get_time_info/workspace 读写编辑/shell 超时/memory_tool/use_skill）+ 设备工具回调接口（日历/屏幕时间/剪贴板/TTS/JS/AskUser/搜索）；路径穿越防护；7 测试；**151 测试**
 
 ## M0 基础设施层（本轮）
 - [x] Makefile + 目录骨架
