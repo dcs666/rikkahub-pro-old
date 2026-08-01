@@ -128,7 +128,7 @@ static char *xml_extract_text(const char *xml, size_t len, size_t *out_len) {
             if (close + 5 >= len) break;
             /* 复制文本 */
             size_t text_len = close - text_start;
-            if (out_off + text_len > len) break; /* 安全 */
+            if (text_len > len - out_off) break; /* 溢出防护 */
             memcpy(out + out_off, xml + text_start, text_len);
             out_off += text_len;
             /* 段落结束加换行 */
