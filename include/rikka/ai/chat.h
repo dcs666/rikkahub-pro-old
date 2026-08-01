@@ -41,6 +41,8 @@ typedef struct RkChatConfig {
     const RkToolEnv *tool_env;    /* 工具环境（tools 非 NULL 时必填） */
     int max_tool_rounds;          /* 0 = 默认 8 */
     int timeout_ms;               /* 每轮超时；0 = 默认 60000 */
+    /* 取消标志（volatile int*；非 NULL 时生成期间周期检查，置 1 则中断返回 -1）。 */
+    volatile int *cancel_flag;
 } RkChatConfig;
 
 /* 运行一轮对话。msgs 为冻结历史（COW 列表或数组）。

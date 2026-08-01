@@ -13,6 +13,12 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 file(GLOB_RECURSE RIKKA_SRC CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/../src/*/*.c")
 
+# JNI 桥（仅 Android/NDK 构建；本地 Linux 构建不含）
+if(ANDROID)
+    list(APPEND RIKKA_SRC
+         "${CMAKE_CURRENT_SOURCE_DIR}/app/src/main/cpp/engine_jni.c")
+endif()
+
 add_library(rikka SHARED ${RIKKA_SRC})
 
 target_include_directories(rikka PRIVATE
@@ -20,6 +26,11 @@ target_include_directories(rikka PRIVATE
 
 # Android API 26+：系统自带 libssl/libcrypto/libz（bionic）
 target_link_libraries(rikka PUBLIC ssl crypto z)
+
+# JNI 头（NDK 提供）
+target_include_directories(rikka PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+    "${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include")
 
 # 告警门禁与引擎一致（-Werror 构建期兜底）
 target_compile_options(rikka PRIVATE

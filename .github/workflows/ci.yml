@@ -52,7 +52,6 @@ jobs:
         uses: android-actions/setup-android@v3
       - name: NDK cross-compile librikka.so
         run: |
-          echo "NDK=$ANDROID_NDK_HOME" || true
           NDK="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
           cmake -S android -B android/build \
             -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
@@ -61,3 +60,11 @@ jobs:
           cmake --build android/build -j2 2>&1 | tee /tmp/android_build.log
           if grep -E 'warning' /tmp/android_build.log; then echo "WARNINGS PRESENT" && exit 1; fi
           ls -la android/build/librikka.so
+      - name: Build APK (Gradle)
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
+      - name: Assemble debug APK
+        run: |
+          gradle -p android :app:assembleDebug --no-daemon 2>&1 | tail -5
+          ls -la android/app/build/outputs/apk/debug/*.apk

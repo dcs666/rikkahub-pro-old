@@ -13,9 +13,7 @@
 static void delta_bridge(void *ud, int kind, const char *data, size_t len) {
     RkChatCallbacks *cb = (RkChatCallbacks *)ud;
     if (cb && cb->on_delta) cb->on_delta(cb->ud, kind, data, len);
-}
-
-/* 追加工具结果消息（TOOL part + TOOL_RESULT part） */
+}/* 追加工具结果消息（TOOL part + TOOL_RESULT part） */
 static void append_tool_result(RkMsgList *work, Arena *a, const char *tool_name,
                                const char *tool_id, const char *result) {
     RikkaMessage *m = rk_msgl_add(work, RIKKA_ROLE_TOOL);
@@ -142,6 +140,11 @@ int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
     size_t n_owned = 0;
 
     for (int round = 0; round <= max_rounds; round++) {
+        if (cfg->cancel_flag && *cfg->cancel_flag) {
+            rc = -1;
+            err = strdup("cancelled");
+            break;
+        }
         /* 请求（变换后列表快照） */
         const RikkaMessage **arr = (const RikkaMessage **)arena_alloc(
             a, sizeof(void *), work.count * sizeof(*arr));
