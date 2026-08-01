@@ -55,7 +55,8 @@ static size_t zip_find_all_central(const uint8_t *data, size_t len, const char *
             if (local_off + 30 <= len) {
                 uint16_t l_fname_len = data[local_off+26] | (data[local_off+27] << 8);
                 uint16_t l_extra_len = data[local_off+28] | (data[local_off+29] << 8);
-                e->data = data + local_off + 30 + l_fname_len + l_extra_len;
+                size_t data_off = local_off + 30 + l_fname_len + l_extra_len;
+                e->data = (data_off <= len) ? data + data_off : NULL;
             } else {
                 e->data = NULL;
             }

@@ -95,6 +95,22 @@ static void pool_release_conn(RkGateway *g, RHttpConn *conn) {
     rhttp_close(conn);
 }
 
+/* 前向声明 */
+static void handle_request(RkGateway *g, int client_fd);
+
+/* 线程包装 */
+typedef struct {
+    RkGateway *g;
+    int client_fd;
+} HandleCtx;
+
+static void *handle_request_thread(void *arg) {
+    HandleCtx *ctx = (HandleCtx *)arg;
+    handle_request(ctx->g, ctx->client_fd);
+    free(ctx);
+    return NULL;
+}
+
 /* 处理 HTTP 请求 */
 static void handle_request(RkGateway *g, int client_fd) {
     char req[65536];
@@ -241,7 +257,20 @@ int rk_gateway_run(RkGateway *g) {
                 socklen_t addr_len = sizeof(client_addr);
                 int client_fd = accept(g->fd, (struct sockaddr *)&client_addr, &addr_len);
                 if (client_fd >= 0) {
-                    handle_request(g, client_fd);
+                    HandleCtx *ctx = (HandleCtx *)malloc(sizeof(HandleCtx));
+                    if (ctx) {
+                        ctx->g = g;
+                        ctx->client_fd = client_fd;
+                        pthread_t tid;
+                        if (pthread_create(&tid, NULL, handle_request_thread, ctx) == 0) {
+                            pthread_detach(tid);
+                        } else {
+                            free(ctx);
+                            close(client_fd);
+                        }
+                    } else {
+                        close(client_fd);
+                    }
                 }
             }
         }
