@@ -194,9 +194,15 @@ void rk_mcp_tools_free(RkMcpTool *tools, size_t count) {
 
 int rk_mcp_call_tool(RkMcpClient *c, const char *name, const char *args_json, char **result) {
     char params[8192];
+    /* name 转义防 JSON 注入 */
+    RJsonOut jo;
+    rjson_out_init(&jo);
+    rjson_write_string(&jo, name, strlen(name));
     int n = snprintf(params, sizeof(params),
-                     "{\"name\":\"%s\",\"arguments\":%s}",
-                     name, args_json ? args_json : "{}");
+                     "{\"name\":%s,\"arguments\":%s}",
+                     jo.buf ? jo.buf : "\"\"",
+                     args_json ? args_json : "{}");
+    rjson_out_free(&jo);
     if (n < 0 || (size_t)n >= sizeof(params)) return -1;
     return rpc_call(c, "tools/call", params, result);
 }
