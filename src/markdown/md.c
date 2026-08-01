@@ -217,8 +217,8 @@ static void md_parse_blocks(MdCtx *c, size_t start, size_t end) {
         /* # heading */
         if (line[j] == '#') {
             int level = 0;
-            while (j + level < line_len && line[j + level] == '#') level++;
-            size_t hstart = j + level;
+            while (j + (size_t)level < line_len && line[j + (size_t)level] == '#') level++;
+            size_t hstart = j + (size_t)level;
             while (hstart < line_len && line[hstart] == ' ') hstart++;
             RikkaMdBlock *b = md_add_block(c, RIKKA_MD_HEADING, i + hstart, i + line_len);
             if (b) b->level = level;

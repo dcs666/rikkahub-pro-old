@@ -38,7 +38,7 @@ TEST(mcp_connect_and_list) {
     fputs(MCP_SERVER_PY, f);
     fclose(f);
     RkMcpClient c;
-    char *args[] = {"python3", "/tmp/mcp_echo.py", NULL};
+    char *args[] = {(char *)"python3", (char *)"/tmp/mcp_echo.py", NULL};
     int rc = rk_mcp_connect(&c, "python3", args);
     ASSERT_EQ_INT(0, rc);
     RkMcpTool *tools = NULL;
@@ -66,7 +66,7 @@ TEST(mcp_call_tool) {
     fputs(MCP_SERVER_PY, f);
     fclose(f);
     RkMcpClient c;
-    char *args[] = {"python3", "/tmp/mcp_echo.py", NULL};
+    char *args[] = {(char *)"python3", (char *)"/tmp/mcp_echo.py", NULL};
     int rc = rk_mcp_connect(&c, "python3", args);
     ASSERT_EQ_INT(0, rc);
     char *result = NULL;

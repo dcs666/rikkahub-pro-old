@@ -22,10 +22,10 @@ static size_t find_eocd(const uint8_t *data, size_t len) {
 
 /* 条目匹配回调：返回 1 收集该条目 */
 typedef int (*ZipWalkCb)(const char *name, size_t name_len, uint16_t method,
-                         uint32_t comp_sz, uint32_t uncomp_sz, void *ctx);
+                         uint32_t comp_sz, uint32_t uncomp_sz, const void *ctx);
 
 /* 遍历 central directory；匹配条目写入 entries（数据指针一并解析）。 */
-static size_t walk_central(const uint8_t *data, size_t len, ZipWalkCb cb, void *ctx,
+static size_t walk_central(const uint8_t *data, size_t len, ZipWalkCb cb, const void *ctx,
                            ZipEntry *entries, size_t max_entries) {
     size_t eocd_off = find_eocd(data, len);
     if (eocd_off == 0) return 0;
@@ -82,7 +82,7 @@ typedef struct {
 } ExactCtx;
 
 static int exact_cb(const char *name, size_t name_len, uint16_t method,
-                    uint32_t comp_sz, uint32_t uncomp_sz, void *v) {
+                    uint32_t comp_sz, uint32_t uncomp_sz, const void *v) {
     (void)method; (void)comp_sz; (void)uncomp_sz;
     ExactCtx *c = (ExactCtx *)v;
     return name_len == c->len && memcmp(name, c->name, c->len) == 0;
@@ -105,17 +105,17 @@ int zip_find(const uint8_t *data, size_t len, const char *name, ZipEntry *out) {
 
 typedef struct {
     ZipNameMatch match;
-    void *ctx;
+    const void *ctx;
 } MatchCtx;
 
 static int match_cb(const char *name, size_t name_len, uint16_t method,
-                    uint32_t comp_sz, uint32_t uncomp_sz, void *v) {
+                    uint32_t comp_sz, uint32_t uncomp_sz, const void *v) {
     (void)method; (void)comp_sz; (void)uncomp_sz;
     MatchCtx *c = (MatchCtx *)v;
     return c->match(name, name_len, c->ctx);
 }
 
-size_t zip_find_matching(const uint8_t *data, size_t len, ZipNameMatch match, void *ctx,
+size_t zip_find_matching(const uint8_t *data, size_t len, ZipNameMatch match, const void *ctx,
                          ZipEntry *entries, size_t max_entries) {
     if (!data || !match || !entries || max_entries == 0) return 0;
     MatchCtx mc;
@@ -134,14 +134,16 @@ char *zip_inflate(const ZipEntry *e, size_t *out_len) {
         out[e->comp_size] = '\0';
         if (out_len) *out_len = e->comp_size;
     } else if (e->method == 8) {
+        /* zip 条目大小来自 uint32 字段，不可能超过 uInt（32 位）；guard 供静态分析 */
+        if (e->comp_size > 0xFFFFFFFFu || e->uncomp_size > 0xFFFFFFFFu) return NULL;
         out = (char *)malloc(e->uncomp_size + 1);
         if (!out) return NULL;
         z_stream strm;
         memset(&strm, 0, sizeof(strm));
         strm.next_in = (Bytef *)e->data;
-        strm.avail_in = e->comp_size;
+        strm.avail_in = (uInt)e->comp_size;
         strm.next_out = (Bytef *)out;
-        strm.avail_out = e->uncomp_size;
+        strm.avail_out = (uInt)e->uncomp_size;
         if (inflateInit2(&strm, -15) != Z_OK) { /* raw deflate */
             free(out);
             return NULL;

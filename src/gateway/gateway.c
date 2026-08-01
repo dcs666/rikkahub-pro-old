@@ -301,6 +301,8 @@ static void handle_request(RkGateway *g, int client_fd) {
             close(client_fd);
             return;
         }
+        if (getenv("GW_DEBUG"))
+            fprintf(stderr, "[gw] provider status=%d reason=%.32s\n", resp.status, resp.reason);
         /* 转发响应 */
         char resp_header[512];
         int hn = snprintf(resp_header, sizeof(resp_header),
@@ -309,12 +311,15 @@ static void handle_request(RkGateway *g, int client_fd) {
         ssize_t _w = write(client_fd, resp_header, (size_t)hn); (void)_w;
         /* 转发 body */
         char buf[16384];
+        int client_gone = 0;
         for (;;) {
             ssize_t r = rhttp_read_body(conn, buf, sizeof(buf), 30000);
             if (r <= 0) break;
-            ssize_t _w = write(client_fd, buf, (size_t)r); (void)_w;
+            if (write(client_fd, buf, (size_t)r) < 0) { client_gone = 1; break; }
         }
-        pool_release_conn(g, conn);
+        /* 客户端提前断开时响应体未读完，连接带残留数据不可复用 → 作废 */
+        if (client_gone) pool_discard(g, conn);
+        else pool_release_conn(g, conn);
         arena_destroy(a);
     } else {
         const char *resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";

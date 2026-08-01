@@ -387,6 +387,8 @@ int rhttp_read_headers(RHttpConn *c, RHttpResp *resp, int timeout_ms) {
             reason[rn++] = *p++;
         }
         reason[rn] = '\0';
+    } else if (getenv("HTTP_DEBUG")) {
+        fprintf(stderr, "[http] non-HTTP response header (len=%zu): %.120s\n", len, text);
     }
     /* 头字段 */
     memset(resp, 0, sizeof(RHttpResp));

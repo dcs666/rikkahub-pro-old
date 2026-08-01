@@ -96,10 +96,12 @@ static int parse_endpoint(RkMcpClient *c, const char *ep,
                                c->endpoint_path, sizeof(c->endpoint_path));
     }
     if (ep[0] != '/') return -1; /* 非法相对路径 */
+    size_t eplen = strlen(ep);
+    if (eplen >= sizeof(c->endpoint_path)) return -1; /* 防截断 */
     snprintf(c->endpoint_host, sizeof(c->endpoint_host), "%s", base_host);
     c->endpoint_port = base_port;
     c->endpoint_tls = base_tls;
-    snprintf(c->endpoint_path, sizeof(c->endpoint_path), "%s", ep);
+    memcpy(c->endpoint_path, ep, eplen + 1);
     return 0;
 }
 

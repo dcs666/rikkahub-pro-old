@@ -91,6 +91,13 @@ lsan:
 	@make build/fuzz_parsers CFLAGS="$(SAN_CFLAGS) -fsanitize=leak" LDFLAGS="$(LDFLAGS) -fsanitize=leak"
 	./build/fuzz_parsers $(FUZZ_ROUNDS)
 
+# 严格告警门禁（P5 终审，本地跑；CI 不强制）
+strict:
+	make clean
+	@make test CFLAGS="$(SAN_CFLAGS) -Wshadow -Wformat=2 -Wundef -Wconversion -Wsign-conversion -Wwrite-strings -Wpointer-arith -Wcast-align" 2>&1 | tee /tmp/rikka_strict.log
+	@if grep -E ': warning:' /tmp/rikka_strict.log; then echo "!! STRICT WARNINGS PRESENT"; exit 1; fi
+	@grep -q "ALL SUITES PASSED" /tmp/rikka_strict.log && echo "STRICT OK"
+
 # CLI 工具
 CLI_BIN := build/rikkahub
 

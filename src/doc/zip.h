@@ -20,9 +20,9 @@ typedef struct {
 int zip_find(const uint8_t *data, size_t len, const char *name, ZipEntry *out);
 
 /* 按文件名谓词匹配（epub 后缀 / pptx 路径前缀用）。
- * 返回匹配数（≤ max_entries）。 */
-typedef int (*ZipNameMatch)(const char *name, size_t name_len, void *ctx);
-size_t zip_find_matching(const uint8_t *data, size_t len, ZipNameMatch match, void *ctx,
+ * 返回匹配数（≤ max_entries）。ctx 只读（const）。 */
+typedef int (*ZipNameMatch)(const char *name, size_t name_len, const void *ctx);
+size_t zip_find_matching(const uint8_t *data, size_t len, ZipNameMatch match, const void *ctx,
                          ZipEntry *entries, size_t max_entries);
 
 /* 解压条目（stored / raw deflate）。返回 malloc 缓冲（调用方 free），

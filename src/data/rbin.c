@@ -52,7 +52,7 @@ static uint32_t rd_u32(Rd *r) {
 static uint64_t rd_u64(Rd *r) {
     if (r->off + 8 > r->len) { r->err = 1; return 0; }
     uint64_t v = 0;
-    for (int i = 0; i < 8; i++) v |= ((uint64_t)r->p[r->off + i]) << (8 * i);
+    for (int i = 0; i < 8; i++) v |= ((uint64_t)r->p[r->off + (size_t)i]) << (8 * i);
     r->off += 8;
     return v;
 }

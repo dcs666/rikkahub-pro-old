@@ -61,6 +61,8 @@ static void *req_thread(void *arg) {
     }
     resp[resp_len] = '\0';
     rc->ok = (strstr(resp, "200") != NULL) && (strstr(resp, "Hello") != NULL);
+    if (!rc->ok)
+        fprintf(stderr, "[gw-test] req failed: len=%zu resp=%.120s\n", resp_len, resp);
     close(fd);
     return NULL;
 }

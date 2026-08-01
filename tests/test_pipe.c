@@ -149,7 +149,7 @@ TEST(spsc_wraparound_stress) {
         ASSERT_EQ_INT(0, rk_spsc_push(&q, item, strlen(item)));
         ssize_t n = rk_spsc_pop(&q, out, sizeof(out));
         ASSERT_EQ_SIZE(strlen(item), n);
-        ASSERT(memcmp(out, item, n) == 0);
+        ASSERT(memcmp(out, item, (size_t)n) == 0);
     }
     rk_spsc_destroy(&q);
 }

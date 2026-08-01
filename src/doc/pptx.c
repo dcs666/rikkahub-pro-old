@@ -8,7 +8,7 @@
 #define PPTX_MAX_SLIDES 256
 
 /* 文件名匹配：ppt/slides/slide*.xml */
-static int slide_match(const char *name, size_t name_len, void *ctx) {
+static int slide_match(const char *name, size_t name_len, const void *ctx) {
     (void)ctx;
     static const char prefix[] = "ppt/slides/slide";
     static const char suffix[] = ".xml";

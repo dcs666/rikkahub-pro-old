@@ -5,7 +5,7 @@
 #include <string.h>
 
 /* 文件名后缀匹配（.xhtml / .html） */
-static int epub_suffix_match(const char *name, size_t name_len, void *ctx) {
+static int epub_suffix_match(const char *name, size_t name_len, const void *ctx) {
     const char *suffix = (const char *)ctx;
     size_t slen = strlen(suffix);
     return name_len >= slen && memcmp(name + name_len - slen, suffix, slen) == 0;

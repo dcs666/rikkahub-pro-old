@@ -99,17 +99,17 @@ int rk_asr_openai(const char *api_key, const uint8_t *audio, size_t len,
     char body[65536];
     size_t off = 0;
     /* file part */
-    off += snprintf(body + off, sizeof(body) - off,
-                    "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.%s\"\r\n"
-                    "Content-Type: audio/%s\r\n\r\n",
-                    boundary, format ? format : "mp3", format ? format : "mp3");
+    off += (size_t)snprintf(body + off, sizeof(body) - off,
+                            "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.%s\"\r\n"
+                            "Content-Type: audio/%s\r\n\r\n",
+                            boundary, format ? format : "mp3", format ? format : "mp3");
     if (len > sizeof(body) - off - 100) return -1; /* 溢出防护 */
     memcpy(body + off, audio, len);
     off += len;
-    off += snprintf(body + off, sizeof(body) - off,
-                    "\r\n--%s\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n",
-                    boundary);
-    off += snprintf(body + off, sizeof(body) - off, "\r\n--%s--\r\n", boundary);
+    off += (size_t)snprintf(body + off, sizeof(body) - off,
+                            "\r\n--%s\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n",
+                            boundary);
+    off += (size_t)snprintf(body + off, sizeof(body) - off, "\r\n--%s--\r\n", boundary);
     /* HTTP POST */
     RHttpConn *c = rhttp_connect("api.openai.com", 443, 1, 60000);
     if (!c) return -1;
@@ -163,12 +163,13 @@ int rk_wav_encode(const uint8_t *pcm, size_t len, int sample_rate, int channels,
     if (sample_rate <= 0 || channels <= 0 || channels > 2) return -1;
     /* WAV header (44 bytes) + PCM data */
     if (len > SIZE_MAX - 44) return -1; /* 溢出防护 */
+    if (len > UINT32_MAX - 36) return -1; /* WAV chunk 大小字段是 uint32 */
     size_t total = 44 + len;
     uint8_t *wav = (uint8_t *)malloc(total);
     if (!wav) return -1;
     /* RIFF header */
     memcpy(wav, "RIFF", 4);
-    uint32_t chunk_size = 36 + len;
+    uint32_t chunk_size = (uint32_t)(36 + len);
     memcpy(wav + 4, &chunk_size, 4);
     memcpy(wav + 8, "WAVE", 4);
     /* fmt chunk */
@@ -181,15 +182,15 @@ int rk_wav_encode(const uint8_t *pcm, size_t len, int sample_rate, int channels,
     memcpy(wav + 22, &num_channels, 2);
     uint32_t sr = (uint32_t)sample_rate;
     memcpy(wav + 24, &sr, 4);
-    uint32_t byte_rate = sr * channels * 2; /* 16-bit */
+    uint32_t byte_rate = sr * (uint32_t)channels * 2u; /* 16-bit */
     memcpy(wav + 28, &byte_rate, 4);
-    uint16_t block_align = channels * 2;
+    uint16_t block_align = (uint16_t)((uint32_t)channels * 2u);
     memcpy(wav + 32, &block_align, 2);
     uint16_t bits_per_sample = 16;
     memcpy(wav + 34, &bits_per_sample, 2);
     /* data chunk */
     memcpy(wav + 36, "data", 4);
-    uint32_t data_size = len;
+    uint32_t data_size = (uint32_t)len;
     memcpy(wav + 40, &data_size, 4);
     memcpy(wav + 44, pcm, len);
     *out = wav;
