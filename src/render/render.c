@@ -50,7 +50,9 @@ int rk_render_markdown(const char *md, size_t len, RkRenderDoc *out) {
                 rb->lang = NULL;
                 /* 代码高亮 */
                 if (mb->len > 0 && mb->len < 100000) { /* 限制大小 */
-                    rb->hl_tokens = (RikkaHlToken *)malloc(mb->len * sizeof(RikkaHlToken));
+                    if (mb->len <= SIZE_MAX / sizeof(RikkaHlToken)) {
+                        rb->hl_tokens = (RikkaHlToken *)malloc(mb->len * sizeof(RikkaHlToken));
+                    }
                     if (rb->hl_tokens) {
                         rb->hl_count = rikka_hl_tokenize(
                             rb->lang ? rb->lang : "text",
