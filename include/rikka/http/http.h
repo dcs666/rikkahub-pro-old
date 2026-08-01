@@ -42,6 +42,13 @@ ssize_t rhttp_read_body(RHttpConn *c, char *buf, size_t cap, int timeout_ms);
 /* 连接是否已 EOF（供 SSE 循环判定） */
 int rhttp_eof(RHttpConn *c);
 
+/*
+ * 获取底层 socket fd。连接仍归 RHttpConn 所有（rhttp_close 负责关闭），
+ * 调用方只读（如 MCP SSE 传输需要把 fd 交给外部事件循环/poll）。
+ * 失败返回 -1。
+ */
+int rhttp_get_fd(const RHttpConn *c);
+
 /* 便捷：一次同步请求（非流式），返回 malloc 的 body（*out_len），失败 NULL */
 char *rhttp_request_sync(const char *url, const char *const *headers,
                          const char *body, size_t body_len,

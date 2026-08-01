@@ -2,6 +2,7 @@
 #include "test.h"
 #include "rikka/http/http.h"
 #include "rikka/http/sse.h"
+#include <poll.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,6 +93,27 @@ TEST(http_sse_split_events) {
     ASSERT(strcmp(g_caps[4].data, "tick4") == 0);
 }
 
+TEST(http_get_fd) {
+    /* fd 暴露 API：MCP SSE 传输依赖（读线程 poll 用） */
+    start_mock_server();
+    RHttpConn *c = rhttp_connect("127.0.0.1", (uint16_t)g_port, 0, 5000);
+    ASSERT_NOT_NULL(c);
+    int fd = rhttp_get_fd(c);
+    ASSERT(fd >= 0);
+    /* fd 可被 poll 正常监听：连接刚建立、无数据，短超时内应超时（revents 空） */
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    int pr = poll(&pfd, 1, 30);
+    ASSERT(pr >= 0);
+    ASSERT_EQ_INT(0, pfd.revents & (POLLIN | POLLERR | POLLHUP));
+    /* 连接归 RHttpConn 所有：close 后 fd 才失效 */
+    rhttp_close(c);
+    ASSERT_EQ_INT(-1, rhttp_get_fd(NULL));
+    stop_mock_server();
+}
+
 TEST(http_sync_json) {
     start_mock_server();
     char url[128];
@@ -136,6 +158,7 @@ int run_http_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(http, http_sse_stream),
         RIKKA_TEST_REGISTER(http, http_sse_split_events),
+        RIKKA_TEST_REGISTER(http, http_get_fd),
         RIKKA_TEST_REGISTER(http, http_sync_json),
         RIKKA_TEST_REGISTER(http, http_404),
         RIKKA_TEST_REGISTER(http, tls_smoke),

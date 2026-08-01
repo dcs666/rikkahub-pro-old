@@ -521,6 +521,8 @@ ssize_t rhttp_read_body(RHttpConn *c, char *buf, size_t cap, int timeout_ms) {
 
 int rhttp_eof(RHttpConn *c) { return c->eof; }
 
+int rhttp_get_fd(const RHttpConn *c) { return c ? c->fd : -1; }
+
 /* ---------- 同步请求 ---------- */
 
 static int parse_url(const char *url, char *host, size_t host_cap, uint16_t *port,

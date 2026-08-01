@@ -7,7 +7,10 @@
  * 根治测试间端口竞态（残留 server/TIME_WAIT/垂死进程）。
  */
 #define _POSIX_C_SOURCE 200809L
+/* 调用方可能已定义（test_gateway_e2e.c 顶部），避免 redefined warning */
+#ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE
+#endif
 #include <arpa/inet.h>
 #include <signal.h>
 #include <stdint.h>
