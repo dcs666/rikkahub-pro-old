@@ -155,15 +155,110 @@ class H(BaseHTTPRequestHandler):
         if self.path == '/mcp/stream202':
             self._mcp_stream(use_202=True)
             return
+        if self.path == '/oauth/register':
+            self._oauth_register()
+            return
+        if self.path == '/oauth/token':
+            self._oauth_token()
+            return
         length = int(self.headers.get('Content-Length', 0) or 0)
         if length:
             self.rfile.read(length)
         self.do_GET()
 
+    def _oauth_meta(self):
+        """OAuth 受保护资源元数据 (RFC 9728)"""
+        base = 'http://127.0.0.1:%d/oauth' % self.server.server_address[1]
+        meta = {'resource': base + '/resource',
+                'authorization_servers': [base + '/as']}
+        body = json.dumps(meta).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _oauth_as_wellknown(self):
+        """授权服务器元数据 (RFC 8414)"""
+        base = 'http://127.0.0.1:%d/oauth' % self.server.server_address[1]
+        md = {'issuer': base + '/as',
+              'authorization_endpoint': base + '/authorize',
+              'token_endpoint': base + '/token',
+              'registration_endpoint': base + '/register'}
+        body = json.dumps(md).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _oauth_register(self):
+        length = int(self.headers.get('Content-Length', 0) or 0)
+        body = self.rfile.read(length).decode('utf-8', 'replace') if length else ''
+        req = json.loads(body) if body else {}
+        resp = {'client_id': 'client-1'}
+        if req.get('scope'):
+            resp['scope'] = req['scope']
+        payload = json.dumps(resp).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _oauth_token(self):
+        length = int(self.headers.get('Content-Length', 0) or 0)
+        body = self.rfile.read(length).decode('utf-8', 'replace') if length else ''
+        params = dict(kv.split('=', 1) for kv in body.split('&') if '=' in kv)
+        grant = params.get('grant_type')
+        if grant == 'authorization_code':
+            resp = {'access_token': 'at-1', 'token_type': 'Bearer',
+                    'expires_in': 3600, 'refresh_token': 'rt-1',
+                    'scope': params.get('scope') or ''}
+        elif grant == 'refresh_token':
+            resp = {'access_token': 'at-2', 'token_type': 'Bearer',
+                    'expires_in': 3600}
+        else:
+            self.send_response(400)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        payload = json.dumps(resp).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_GET(self):
+        if self.path == '/oauth/resource':
+            self.send_response(401)
+            self.send_header('WWW-Authenticate',
+                             'Bearer resource_metadata="http://127.0.0.1:%d/oauth/meta"'
+                             % self.server.server_address[1])
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if self.path == '/oauth/meta':
+            self._oauth_meta()
+            return
+        if self.path == '/oauth/as/.well-known/oauth-authorization-server':
+            self._oauth_as_wellknown()
+            return
+        if self.path == '/oauth/authorize':
+            # 模拟授权页：302 到 redirect_uri?code=code-1&state=...
+            from urllib.parse import urlparse, parse_qs, urlencode
+            q = parse_qs(urlparse(self.path).query)
+            redirect = q.get('redirect_uri', [''])[0]
+            state = q.get('state', [''])[0]
+            loc = redirect + '?code=code-1&state=' + state
+            self.send_response(302)
+            self.send_header('Location', loc)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         if self.path == '/mcp/sse':
             self._sse_stream('/mcp/messages')  # 相对 endpoint（主路径）
-            return
         if self.path == '/mcp/sse_abs':
             # 绝对 endpoint URL（测试 parse_endpoint 绝对分支）
             port = self.server.server_address[1]

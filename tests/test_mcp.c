@@ -1,11 +1,13 @@
 #define _DEFAULT_SOURCE
 #include "test.h"
 #include "rikka/mcp/mcp.h"
+#include "rikka/mcp/mcp_oauth.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
-#include "test_server.h" /* start_mock_server / stop_mock_server / g_port */
+#include "test_server.h"
+#include <openssl/sha.h> /* start_mock_server / stop_mock_server / g_port */
 
 /* python echo MCP 服务器脚本 */
 static const char *MCP_SERVER_PY =
@@ -326,6 +328,97 @@ TEST(mcp_streamable_bad_session) {
     stop_mock_server();
 }
 
+TEST(mcp_oauth_full_flow) {
+    if (getenv("CI")) {
+        printf("  [skip: CI environment]\n");
+        return;
+    }
+    if (system("which python3 >/dev/null 2>&1") != 0) {
+        printf("  [skip: python3 not found]\n");
+        return;
+    }
+    start_mock_server();
+    char resource[160];
+    snprintf(resource, sizeof(resource), "http://127.0.0.1:%d/oauth/resource", g_port);
+    RkMcpOAuth o;
+    memset(&o, 0, sizeof(o));
+    /* 1. 发现（401 → resource_metadata → authorization server well-known） */
+    ASSERT_EQ_INT(0, rk_mcp_oauth_discover(&o, resource, 15000));
+    ASSERT_NOT_NULL(o.authorization_endpoint);
+    ASSERT_NOT_NULL(o.token_endpoint);
+    ASSERT_NOT_NULL(o.registration_endpoint);
+    ASSERT(strstr(o.authorization_endpoint, "/oauth/authorize") != NULL);
+    /* 2. 注册 */
+    ASSERT_EQ_INT(0, rk_mcp_oauth_register(&o, "rikkahub://callback", "tools.read", 15000));
+    ASSERT_NOT_NULL(o.client_id);
+    ASSERT(strcmp(o.client_id, "client-1") == 0);
+    /* 3. PKCE */
+    char verifier[64], challenge[64];
+    ASSERT_EQ_INT(0, rk_mcp_oauth_pkce(verifier, challenge));
+    ASSERT_EQ_INT(43, (int)strlen(verifier));
+    ASSERT_EQ_INT(43, (int)strlen(challenge));
+    ASSERT(strstr(challenge, "=") == NULL); /* base64url 无 padding */
+    /* 4. 授权 URL */
+    char *auth_url = rk_mcp_oauth_authorize_url(&o, "rikkahub://callback", verifier, "st-1");
+    ASSERT_NOT_NULL(auth_url);
+    ASSERT(strstr(auth_url, "response_type=code") != NULL);
+    ASSERT(strstr(auth_url, "client_id=client-1") != NULL);
+    ASSERT(strstr(auth_url, "code_challenge=") != NULL);
+    ASSERT(strstr(auth_url, "code_challenge_method=S256") != NULL);
+    ASSERT(strstr(auth_url, "state=st-1") != NULL);
+    free(auth_url);
+    /* 5. 回调解析 */
+    char code[128], state[128];
+    ASSERT_EQ_INT(0, rk_mcp_oauth_parse_callback("rikkahub://callback?code=code-1&state=st-1",
+                                                 code, sizeof(code), state, sizeof(state)));
+    ASSERT(strcmp(code, "code-1") == 0);
+    ASSERT(strcmp(state, "st-1") == 0);
+    /* 6. 换令牌 */
+    ASSERT_EQ_INT(0, rk_mcp_oauth_exchange(&o, "rikkahub://callback", code, verifier, 15000));
+    ASSERT_NOT_NULL(o.access_token);
+    ASSERT(strcmp(o.access_token, "at-1") == 0);
+    ASSERT_NOT_NULL(o.refresh_token);
+    ASSERT(strcmp(o.refresh_token, "rt-1") == 0);
+    ASSERT(o.expires_in > 0);
+    /* 7. 刷新 */
+    ASSERT_EQ_INT(0, rk_mcp_oauth_refresh(&o, 15000));
+    ASSERT(strcmp(o.access_token, "at-2") == 0);
+    rk_mcp_oauth_free(&o);
+    stop_mock_server();
+}
+
+TEST(mcp_oauth_tools) {
+    /* base64url roundtrip */
+    const uint8_t data[] = {0xfb, 0xff, 0xef, 0x00, 0x01, 0x02};
+    char *b64 = rk_oauth_b64url_encode(data, sizeof(data));
+    ASSERT_NOT_NULL(b64);
+    /* fb ff ef → 111110|111111|111111|101111 → -__v ; 00 01 02 → AAEC */
+    ASSERT(strcmp(b64, "-__vAAEC") == 0);
+    size_t len = 0;
+    uint8_t *dec = rk_oauth_b64url_decode(b64, &len);
+    ASSERT_NOT_NULL(dec);
+    ASSERT_EQ_INT((int)sizeof(data), (int)len);
+    ASSERT(memcmp(dec, data, sizeof(data)) == 0);
+    free(dec);
+    free(b64);
+    /* PKCE 向量：RFC 7636 附录 B（verifier → challenge 已知值） */
+    char v[64], ch[64];
+    ASSERT_EQ_INT(0, rk_mcp_oauth_pkce(v, ch));
+    /* verifier → challenge 一致性：重算 */
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256((const unsigned char *)v, strlen(v), digest);
+    char *expect = rk_oauth_b64url_encode(digest, SHA256_DIGEST_LENGTH);
+    ASSERT_NOT_NULL(expect);
+    ASSERT(strcmp(ch, expect) == 0);
+    free(expect);
+    /* urlencode */
+    char *enc = rk_oauth_urlencode("a b+c/é");
+    ASSERT_NOT_NULL(enc);
+    ASSERT(strstr(enc, "%20") != NULL);
+    ASSERT(strstr(enc, "%2B") != NULL);
+    free(enc);
+}
+
 int run_mcp_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(mcp, mcp_connect_and_list),
@@ -339,6 +432,8 @@ int run_mcp_suite(void) {
         RIKKA_TEST_REGISTER(mcp, mcp_streamable_direct),
         RIKKA_TEST_REGISTER(mcp, mcp_streamable_202),
         RIKKA_TEST_REGISTER(mcp, mcp_streamable_bad_session),
+        RIKKA_TEST_REGISTER(mcp, mcp_oauth_full_flow),
+        RIKKA_TEST_REGISTER(mcp, mcp_oauth_tools),
     };
     return run_suite("mcp", tests, sizeof(tests) / sizeof(tests[0]));
 }
