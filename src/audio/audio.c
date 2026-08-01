@@ -145,7 +145,9 @@ int rk_asr_openai(const char *api_key, const uint8_t *audio, size_t len,
 int rk_wav_encode(const uint8_t *pcm, size_t len, int sample_rate, int channels,
                   uint8_t **out, size_t *out_len) {
     if (!pcm || !out) return -1;
+    if (sample_rate <= 0 || channels <= 0 || channels > 2) return -1;
     /* WAV header (44 bytes) + PCM data */
+    if (len > SIZE_MAX - 44) return -1; /* 溢出防护 */
     size_t total = 44 + len;
     uint8_t *wav = (uint8_t *)malloc(total);
     if (!wav) return -1;
