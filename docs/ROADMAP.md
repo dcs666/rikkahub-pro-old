@@ -9,6 +9,7 @@
 - [x] **P0 基线加固**：Makefile 加 `ubsan/asan/lsan` 目标；CI sanitizers job 改用 make 目标并新增 ASan+LSan
 - [x] **P2 MCP SSE 传输**：http 暴露 fd + `rhttp_parse_url` 公开；SSE transport（endpoint 握手/挂起请求/pending 链表/读线程）；语义与 stdio 对齐（result 成员提取、error 不设 result）；修复读线程超时误杀连接 bug；新增 5 个测试（error/POST404/无心跳空闲回归）
 - [x] **P1 结构重构**：三份 URL 解析统一为 `rhttp_parse_url`（gateway 内联解析顺带修复 path_prefix 未初始化读；provider 的 parse_base 删除；google 路径合并单 snprintf 消除 -Wformat-truncation）；`docs/CONVENTIONS.md` 固化返回值/所有权/并发/编译约定；未拆大文件——各模块 200-930 行且内聚，拆分的收益小于风险；构建产物 *.d/.build-flags 取消追踪
+- [x] **BUG 修复（CI 暴露）**：① gateway `rk_gateway_stop` 跨线程 close(fd) 数据竞争（TSan）→ stop 只置位标志，资源清理移到 run 退出路径 + active_handlers 等待；② `RJsonOut.buf` 不 NUL 结尾 → strlen 读堆垃圾（CI 上 mcp_sse 解析失败，本地靠堆布局侥幸通过）→ out_append 保持 NUL 不变式 + 回归测试；③ 测试 runner 支持 `./test_runner [suite]` 定向运行
 - [ ] **P3 基准补齐**：md 增量 / json 增量 vs 全量 / doc-epub / arena / SSE 累积 bench + check_bench 阈值
 - [ ] **P4 功能补齐**：4a provider 重试/错误中间件（parseErrorDetail）→ 4b 渲染排版块协议 → 4c 网关多实例 → 4d pptx
 - [ ] **P5 安全终审**：-Wshadow/-Wformat=2/-Wundef/-Wconversion 全开、ASan/LSan 全跑、fuzz 5 万轮

@@ -125,6 +125,33 @@ TEST(serialize_roundtrip) {
     arena_destroy(a2);
 }
 
+/* 回归：RJsonOut.buf 必须始终 NUL 结尾（消费方用 strlen/%s/strstr 直接处理）。
+ * 曾缺失 NUL 导致 strlen 读到堆垃圾，CI 上 rjson_parse 解析失败
+ * （本地靠堆布局侥幸通过）。 */
+TEST(serialize_nul_terminated) {
+    Arena *a = arena_create(0);
+    const char *txt = "{\"tools\":[{\"name\":\"echo\"}]}";
+    size_t err = 0;
+    RJson *v = rjson_parse(a, txt, strlen(txt), &err);
+    ASSERT_NOT_NULL(v);
+    RJsonOut o;
+    rjson_out_init(&o);
+    rjson_write_value(&o, v);
+    ASSERT_NOT_NULL(o.buf);
+    ASSERT(o.buf[o.len] == '\0');           /* 末尾字节必须为 NUL */
+    ASSERT_EQ_SIZE(o.len, strlen(o.buf));   /* strlen 必须恰好等于 len */
+    /* 字符串写出同样不变式 */
+    RJsonOut s;
+    rjson_out_init(&s);
+    rjson_write_string(&s, "abc", 3);
+    ASSERT_NOT_NULL(s.buf);
+    ASSERT(s.buf[s.len] == '\0');
+    ASSERT_EQ_SIZE(s.len, strlen(s.buf));
+    rjson_out_free(&o);
+    rjson_out_free(&s);
+    arena_destroy(a);
+}
+
 /* ---------- 增量流式提取 ---------- */
 
 static const RJsonStreamPathElem path_choices_content[] = {
@@ -331,6 +358,7 @@ int run_json_suite(void) {
         RIKKA_TEST_REGISTER(json, stream_whitespace_and_finish),
         RIKKA_TEST_REGISTER(json, stream_lone_surrogate_tolerant),
         RIKKA_TEST_REGISTER(json, stream_deep_nesting_error),
+        RIKKA_TEST_REGISTER(json, serialize_nul_terminated),
     };
     return run_suite("json", tests, sizeof(tests) / sizeof(tests[0]));
 }

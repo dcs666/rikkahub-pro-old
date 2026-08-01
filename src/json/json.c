@@ -320,9 +320,10 @@ static void out_reserve(RJsonOut *o, size_t extra) {
 }
 
 static void out_append(RJsonOut *o, const char *s, size_t n) {
-    out_reserve(o, n);
+    out_reserve(o, n + 1);           /* +1 保证 NUL 结尾 */
     memcpy(o->buf + o->len, s, n);
     o->len += n;
+    o->buf[o->len] = '\0';           /* 不变式：buf 始终是合法 C 字符串 */
 }
 
 static void hex4(RJsonOut *o, uint32_t cp) {
