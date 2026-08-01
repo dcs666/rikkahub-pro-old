@@ -37,6 +37,8 @@ int rk_gateway_init(RkGateway *g, int port) {
         return -1;
     }
     g->running = 1;
+    g->pool_count = 0;
+    pthread_mutex_init(&g->pool_mutex, NULL);
     return 0;
 }
 
@@ -47,6 +49,47 @@ int rk_gateway_add_provider(RkGateway *g, const char *name, const char *api_key,
     snprintf(p->api_key, sizeof(p->api_key), "%s", api_key ? api_key : "");
     snprintf(p->base_url, sizeof(p->base_url), "%s", base_url ? base_url : "");
     return 0;
+}
+
+/* 从连接池获取连接 */
+static RHttpConn *pool_get_conn(RkGateway *g, const char *host, int port, int tls) {
+    pthread_mutex_lock(&g->pool_mutex);
+    for (size_t i = 0; i < g->pool_count; i++) {
+        RkPoolConn *pc = &g->pool[i];
+        if (!pc->in_use && pc->port == port && pc->tls == tls &&
+            strcmp(pc->host, host) == 0) {
+            pc->in_use = 1;
+            pthread_mutex_unlock(&g->pool_mutex);
+            return pc->conn;
+        }
+    }
+    pthread_mutex_unlock(&g->pool_mutex);
+    /* 新建连接 */
+    RHttpConn *conn = rhttp_connect(host, (uint16_t)port, tls, 30000);
+    if (!conn) return NULL;
+    pthread_mutex_lock(&g->pool_mutex);
+    if (g->pool_count < 32) {
+        RkPoolConn *pc = &g->pool[g->pool_count++];
+        snprintf(pc->host, sizeof(pc->host), "%s", host);
+        pc->port = port;
+        pc->tls = tls;
+        pc->conn = conn;
+        pc->in_use = 1;
+    }
+    pthread_mutex_unlock(&g->pool_mutex);
+    return conn;
+}
+
+/* 释放连接回池 */
+static void pool_release_conn(RkGateway *g, RHttpConn *conn) {
+    pthread_mutex_lock(&g->pool_mutex);
+    for (size_t i = 0; i < g->pool_count; i++) {
+        if (g->pool[i].conn == conn) {
+            g->pool[i].in_use = 0;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g->pool_mutex);
 }
 
 /* 处理 HTTP 请求 */
@@ -113,8 +156,8 @@ static void handle_request(RkGateway *g, int client_fd) {
         if (strncmp(url, "https://", 8) == 0) { tls = 1; port = 443; url += 8; }
         else if (strncmp(url, "http://", 7) == 0) { url += 7; }
         sscanf(url, "%255[^/]%255s", host, path_prefix);
-        /* 连接 provider */
-        RHttpConn *conn = rhttp_connect(host, (uint16_t)port, tls, 30000);
+        /* 连接 provider（连接池） */
+        RHttpConn *conn = pool_get_conn(g, host, port, tls);
         if (!conn) {
             const char *resp = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n";
             ssize_t _w = write(client_fd, resp, strlen(resp)); (void)_w;
@@ -161,7 +204,7 @@ static void handle_request(RkGateway *g, int client_fd) {
             if (r <= 0) break;
             ssize_t _w = write(client_fd, buf, (size_t)r); (void)_w;
         }
-        rhttp_close(conn);
+        pool_release_conn(g, conn);
         arena_destroy(a);
     } else {
         const char *resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
@@ -211,4 +254,12 @@ void rk_gateway_stop(RkGateway *g) {
         close(g->fd);
         g->fd = -1;
     }
+    /* 清理连接池 */
+    pthread_mutex_lock(&g->pool_mutex);
+    for (size_t i = 0; i < g->pool_count; i++) {
+        if (g->pool[i].conn) rhttp_close(g->pool[i].conn);
+    }
+    g->pool_count = 0;
+    pthread_mutex_unlock(&g->pool_mutex);
+    pthread_mutex_destroy(&g->pool_mutex);
 }

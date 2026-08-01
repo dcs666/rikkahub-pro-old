@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <pthread.h>
 
 /*
  * 服务端网关：HTTP 服务器 + AI 请求代理。
@@ -16,12 +17,25 @@ typedef struct {
     char base_url[256];
 } RkProviderConfig;
 
+/* 连接池条目 */
+typedef struct {
+    char host[256];
+    int port;
+    int tls;
+    void *conn;  /* RHttpConn* */
+    int in_use;
+} RkPoolConn;
+
 typedef struct {
     int fd;              /* listen socket */
     int port;
     int running;
     RkProviderConfig providers[16];
     size_t provider_count;
+    /* 连接池 */
+    RkPoolConn pool[32];
+    size_t pool_count;
+    pthread_mutex_t pool_mutex;
 } RkGateway;
 
 /* 初始化网关（监听端口） */

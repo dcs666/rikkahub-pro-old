@@ -22,8 +22,12 @@ typedef struct {
     char *input_schema;  /* JSON schema 字符串 */
 } RkMcpTool;
 
-/* 连接 MCP 服务器（fork+exec command args） */
+/* 连接 MCP 服务器（fork+exec command args，stdio 传输） */
 int rk_mcp_connect(RkMcpClient *c, const char *command, char *const *args);
+
+/* 连接 MCP 服务器（SSE 传输，HTTP 长连接） */
+int rk_mcp_connect_sse(RkMcpClient *c, const char *url);
+
 void rk_mcp_disconnect(RkMcpClient *c);
 
 /* 列出工具 */

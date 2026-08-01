@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "rikka/mcp/mcp.h"
 #include "rikka/json/json.h"
+#include "rikka/http/http.h"
 #include "rikka/util/arena.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +39,44 @@ int rk_mcp_connect(RkMcpClient *c, const char *command, char *const *args) {
     c->pid = pid;
     c->next_id = 1;
     return 0;
+}
+
+int rk_mcp_connect_sse(RkMcpClient *c, const char *url) {
+    if (!c || !url) return -1;
+    /* 解析 URL */
+    char host[256], path[512];
+    int tls = 0, port = 80;
+    const char *u = url;
+    if (strncmp(u, "https://", 8) == 0) { tls = 1; port = 443; u += 8; }
+    else if (strncmp(u, "http://", 7) == 0) { u += 7; }
+    sscanf(u, "%255[^/]%511s", host, path);
+    if (path[0] == '\0') strcpy(path, "/");
+    /* HTTP 连接 */
+    RHttpConn *conn = rhttp_connect(host, (uint16_t)port, tls, 30000);
+    if (!conn) return -1;
+    const char *headers[] = {
+        "Accept", "text/event-stream",
+        "Cache-Control", "no-cache",
+        NULL
+    };
+    if (rhttp_send(conn, "GET", path, headers, NULL, 0) != 0) {
+        rhttp_close(conn);
+        return -1;
+    }
+    RHttpResp resp;
+    if (rhttp_read_headers(conn, &resp, 30000) != 0) {
+        rhttp_close(conn);
+        return -1;
+    }
+    if (resp.status != 200) {
+        rhttp_close(conn);
+        return -1;
+    }
+    /* SSE 连接建立，用 fd_read 读事件流 */
+    /* 简化：SSE 连接用 HTTP 连接的 fd（需要暴露 fd） */
+    /* 简化实现：SSE 连接暂不支持（需要 HTTP 连接暴露 fd） */
+    rhttp_close(conn);
+    return -1; /* TODO: SSE 传输需要 HTTP 连接暴露 fd */
 }
 
 void rk_mcp_disconnect(RkMcpClient *c) {
