@@ -149,11 +149,18 @@ static void *cancel_runner(void *v) {
     int *result = ((void **)v)[3];
     (void)msgs;
     /* 直接测 provider 层：/slow 慢流 + pump_async_cancel */
+    Arena *arena = arena_create(0);
     RikkaStream out;
-    rstream_init(&out, arena_create(0), RIKKA_ROLE_ASSISTANT);
+    rstream_init(&out, arena, RIKKA_ROLE_ASSISTANT);
     Buf body;
     buf_init(&body);
-    if (rp_build_request(&cfg->provider, NULL, 0, 1, &body) != 0) { *result = -2; return NULL; }
+    if (rp_build_request(&cfg->provider, NULL, 0, 1, &body) != 0) {
+        *result = -2;
+        buf_free(&body);
+        rstream_destroy(&out);
+        arena_destroy(arena);
+        return NULL;
+    }
     RikkaStreamSession *ss = rp_session_create(&cfg->provider);
     int status = 0;
     int rc = rp_stream_start(ss, "/slow", (const char *)body.data, body.len,
@@ -165,6 +172,7 @@ static void *cancel_runner(void *v) {
     rp_session_destroy(ss);
     buf_free(&body);
     rstream_destroy(&out);
+    arena_destroy(arena);
     return NULL;
 }
 
