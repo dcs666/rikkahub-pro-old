@@ -24,9 +24,9 @@ data class ChatMsg(
 
 data class ChatSession(
     val id: String,
-    val title: String,
+    var title: String,
     val messages: MutableList<ChatMsg> = mutableListOf(),
-    val updatedAt: Long = System.currentTimeMillis(),
+    var updatedAt: Long = System.currentTimeMillis(),
 )
 
 class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback {
@@ -47,7 +47,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         private set
 
     val messages: MutableList<ChatMsg>
-        get() = currentSession?.messages ?: emptyList()
+        get() = currentSession?.messages ?: mutableListOf()
 
     private val currentSession: ChatSession?
         get() = sessions.firstOrNull { it.id == currentSessionId }

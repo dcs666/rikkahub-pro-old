@@ -29,7 +29,7 @@ static void append_decoded(Buf *out, const char *s, size_t n) {
             if (n - i >= 6 && memcmp(s + i, "&quot;", 6) == 0) { buf_append_byte(out, '"');  i += 6; continue; }
             if (n - i >= 6 && memcmp(s + i, "&apos;", 6) == 0) { buf_append_byte(out, '\''); i += 6; continue; }
         }
-        buf_append_byte(out, s[i++]);
+        buf_append_byte(out, (uint8_t)s[i++]);
     }
 }
 

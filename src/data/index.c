@@ -25,9 +25,9 @@ size_t rk_tokenize(const char *text, size_t len, RkTokenCb cb, void *ctx) {
             }
             if (chars >= 2) {
                 size_t k = i;
-                while (k + utf8_len(text[k]) < j) {
-                    size_t c1 = utf8_len(text[k]);
-                    size_t c2 = utf8_len(text[k + c1]);
+                while (k + utf8_len((unsigned char)text[k]) < j) {
+                    size_t c1 = utf8_len((unsigned char)text[k]);
+                    size_t c2 = utf8_len((unsigned char)text[k + c1]);
                     if (cb) cb(ctx, text + k, c1 + c2);
                     count++;
                     k += c1;
