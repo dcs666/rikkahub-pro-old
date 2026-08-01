@@ -19,6 +19,8 @@
 - [x] **P9 数据实体面**：rk_store 记录存储（Favorite/Folder/GenMedia/ManagedFile，字段槽位 + 唯一约束 + 紧凑二进制快照原子写 + get_copy 安全读写）；4 测试
 - [x] **P10 MCP Streamable HTTP + OAuth**：Streamable HTTP 传输（直答 JSON / 202 SSE 流 / mcp-session-id）；OAuth 2.1 全环节（RFC 9728/8414 发现、RFC 7591 注册、PKCE S256、授权码、刷新）；http 层 rhttp_resp_header 复制式 API；5 测试
 - [x] **P11 工具系统**：注册表 + 7 个内置工具（get_time_info/workspace 读写编辑/shell 超时/memory_tool/use_skill）+ 设备工具回调接口（日历/屏幕时间/剪贴板/TTS/JS/AskUser/搜索）；路径穿越防护；7 测试；**151 测试**
+- [x] **P12 提示词集 + 三级替换 + 搜索会话工具**：prompt 模块（6 模板 + 记忆注入块）；workspace_edit_file 升级为 JVM TextReplacers 三级策略（exact/line_trimmed/block_anchor + reindent）；search_web/recent_chats/conversation_search 工具（回调驱动）；6 测试
+- [x] **P13 OCR + 会话索引**：rk_ocr_image（provider 管线识别图片，mock 回放测试）；rk_chats 会话元数据索引（rk_store 新实体 + rk_index 全文，pinned/时间排序、snippet [kw] 高亮、快照）；rk_index 英文 token 小写化（FTS 大小写不敏感）；4 测试；**185 测试**
 
 ## M0 基础设施层（本轮）
 - [x] Makefile + 目录骨架
