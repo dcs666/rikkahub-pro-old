@@ -22,12 +22,20 @@ data class ChatMsg(
     val isError: Boolean = false,
 )
 
+data class ChatSession(
+    val id: String,
+    val title: String,
+    val messages: MutableList<ChatMsg> = mutableListOf(),
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
 class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback {
 
     private val prefs: SharedPreferences =
         appContext.getSharedPreferences("rikka_ce", Context.MODE_PRIVATE)
 
-    val messages = mutableStateListOf<ChatMsg>()
+    val sessions = mutableStateListOf<ChatSession>()
+    var currentSessionId by mutableStateOf("")
 
     var providerBaseUrl by mutableStateOf(
         prefs.getString("base_url", "https://api.openai.com/v1") ?: "https://api.openai.com/v1")
@@ -35,12 +43,48 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
     var providerModel by mutableStateOf(
         prefs.getString("model", "gpt-4o-mini") ?: "gpt-4o-mini")
 
-    init {
-        restoreSession()
-    }
-
     var busy by mutableStateOf(false)
         private set
+
+    val messages: MutableList<ChatMsg>
+        get() = currentSession?.messages ?: emptyList()
+
+    private val currentSession: ChatSession?
+        get() = sessions.firstOrNull { it.id == currentSessionId }
+
+    init {
+        restoreSessions()
+    }
+
+    fun newSession() {
+        if (busy) return
+        val s = ChatSession(
+            id = System.currentTimeMillis().toString(),
+            title = "新会话",
+        )
+        sessions.add(0, s)
+        currentSessionId = s.id
+        saveSessionMeta()
+    }
+
+    fun switchSession(id: String) {
+        if (busy) return
+        if (sessions.any { it.id == id }) {
+            currentSessionId = id
+        }
+    }
+
+    fun deleteSession(id: String) {
+        if (busy) return
+        val idx = sessions.indexOfFirst { it.id == id }
+        if (idx < 0) return
+        sessions.removeAt(idx)
+        prefs.edit().remove("session_$id").apply()
+        if (currentSessionId == id) {
+            currentSessionId = if (sessions.isNotEmpty()) sessions[0].id else ""
+            if (sessions.isEmpty()) newSession()
+        }
+    }
 
     private val streamingIndex: Int
         get() = messages.indexOfLast { it.role == "assistant" && it.streaming }
@@ -76,8 +120,16 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
     }
 
     fun send(text: String) {
+        val session = currentSession ?: run {
+            newSession()
+            return
+        }
         if (busy) return
-        messages.add(ChatMsg("user", text))
+        session.messages.add(ChatMsg("user", text))
+        if (session.title == "新会话") {
+            session.title = text.take(20)
+        }
+        session.updatedAt = System.currentTimeMillis()
         busy = true
         saveSession()
         viewModelScope.launch(Dispatchers.IO) {
@@ -86,7 +138,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
                 .put("api_key", providerApiKey)
                 .put("model", providerModel)
             val history = JSONArray()
-            for (m in messages) {
+            for (m in session.messages) {
                 if (m.role != "user" && m.role != "assistant") continue
                 if (m.isError || m.text.startsWith("⚙️")) continue
                 history.put(JSONObject().put("role", m.role).put("content", m.text))
@@ -108,35 +160,77 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
     }
 
     fun clearSession() {
-        messages.clear()
-        prefs.edit().remove("session").apply()
+        val s = currentSession ?: return
+        s.messages.clear()
+        s.title = "新会话"
+        prefs.edit().remove("session_${s.id}").apply()
     }
 
+    /* ---------- 持久化 ---------- */
+
     private fun saveSession() {
+        val s = currentSession ?: return
         val arr = JSONArray()
-        for (m in messages) {
+        for (m in s.messages) {
             arr.put(JSONObject()
                 .put("role", m.role)
                 .put("text", m.text)
                 .put("error", m.isError))
         }
-        prefs.edit().putString("session", arr.toString()).apply()
+        prefs.edit().putString("session_${s.id}", arr.toString()).apply()
+        saveSessionMeta()
     }
 
-    private fun restoreSession() {
-        val raw = prefs.getString("session", null) ?: return
-        try {
-            val arr = JSONArray(raw)
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                messages.add(ChatMsg(
-                    role = o.getString("role"),
-                    text = o.getString("text"),
-                    isError = o.optBoolean("error", false),
-                ))
+    private fun saveSessionMeta() {
+        val arr = JSONArray()
+        for (s in sessions) {
+            arr.put(JSONObject()
+                .put("id", s.id)
+                .put("title", s.title)
+                .put("updated", s.updatedAt))
+        }
+        prefs.edit().putString("sessions", arr.toString()).apply()
+    }
+
+    private fun restoreSessions() {
+        val raw = prefs.getString("sessions", null)
+        if (raw != null) {
+            try {
+                val arr = JSONArray(raw)
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val s = ChatSession(
+                        id = o.getString("id"),
+                        title = o.getString("title"),
+                        updatedAt = o.optLong("updated", 0L),
+                    )
+                    sessions.add(s)
+                }
+            } catch (_: Exception) {
+                sessions.clear()
             }
-        } catch (_: Exception) {
-            prefs.edit().remove("session").apply()
+        }
+        // 恢复各会话消息
+        for (s in sessions) {
+            val rawMsg = prefs.getString("session_${s.id}", null) ?: continue
+            try {
+                val arr = JSONArray(rawMsg)
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    s.messages.add(ChatMsg(
+                        role = o.getString("role"),
+                        text = o.getString("text"),
+                        isError = o.optBoolean("error", false),
+                    ))
+                }
+            } catch (_: Exception) {
+                prefs.edit().remove("session_${s.id}").apply()
+            }
+        }
+        if (sessions.isEmpty()) {
+            newSession()
+        } else {
+            currentSessionId = sessions[0].id
         }
     }
 }

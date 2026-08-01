@@ -33,12 +33,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
 fun ChatScreen(vm: ChatViewModel) {
     var showSettings by remember { mutableStateOf(false) }
+    var showSessions by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -46,7 +48,14 @@ fun ChatScreen(vm: ChatViewModel) {
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("RikkaHub CE", style = MaterialTheme.typography.titleMedium)
+            val cur = vm.sessions.firstOrNull { it.id == vm.currentSessionId }
+            TextButton(onClick = { showSessions = true }) {
+                Text(
+                    cur?.title ?: "会话",
+                    maxLines = 1,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { vm.clearSession() }) { Text("清空") }
             TextButton(onClick = { showSettings = true }) { Text("设置") }
@@ -57,6 +66,54 @@ fun ChatScreen(vm: ChatViewModel) {
     if (showSettings) {
         SettingsDialog(vm, onDismiss = { showSettings = false })
     }
+    if (showSessions) {
+        SessionsDialog(vm, onDismiss = { showSessions = false })
+    }
+}
+
+@Composable
+private fun SessionsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("会话") },
+        text = {
+            Column {
+                TextButton(onClick = {
+                    vm.newSession()
+                    onDismiss()
+                }) { Text("＋ 新建会话") }
+                for (s in vm.sessions) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                vm.switchSession(s.id)
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                s.title,
+                                maxLines = 1,
+                                fontWeight = if (s.id == vm.currentSessionId)
+                                    FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                        if (vm.sessions.size > 1) {
+                            TextButton(onClick = { vm.deleteSession(s.id) }) { Text("删除") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+    )
 }
 
 @Composable
