@@ -492,7 +492,7 @@ static int run_shell_cmd(const char *cmd, const char *cwd, int timeout_s,
     if (exit_code) *exit_code = code;
     char *res = (char *)malloc(outb.len + 1);
     if (res) {
-        memcpy(res, outb.data, outb.len);
+        if (outb.len > 0) memcpy(res, outb.data, outb.len); /* 空 Buf 保护（UBSan） */
         res[outb.len] = '\0';
     }
     buf_free(&outb);
