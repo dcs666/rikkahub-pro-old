@@ -48,6 +48,7 @@ fun ChatScreen(vm: ChatViewModel) {
         ) {
             Text("RikkaHub CE", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.weight(1f))
+            TextButton(onClick = { vm.clearSession() }) { Text("清空") }
             TextButton(onClick = { showSettings = true }) { Text("设置") }
         }
         MessageList(vm, Modifier.weight(1f))
@@ -187,6 +188,7 @@ private fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                 vm.providerBaseUrl = baseUrl.trim()
                 vm.providerApiKey = apiKey.trim()
                 vm.providerModel = model.trim()
+                vm.saveProviderSettings()
                 onDismiss()
             }) { Text("保存") }
         },

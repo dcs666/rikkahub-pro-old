@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ce.ui
 
+import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -20,12 +22,22 @@ data class ChatMsg(
     val isError: Boolean = false,
 )
 
-class ChatViewModel : ViewModel(), ChatCallback {
+class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback {
+
+    private val prefs: SharedPreferences =
+        appContext.getSharedPreferences("rikka_ce", Context.MODE_PRIVATE)
+
     val messages = mutableStateListOf<ChatMsg>()
 
-    var providerBaseUrl by mutableStateOf("https://api.openai.com/v1")
-    var providerApiKey by mutableStateOf("")
-    var providerModel by mutableStateOf("gpt-4o-mini")
+    var providerBaseUrl by mutableStateOf(
+        prefs.getString("base_url", "https://api.openai.com/v1") ?: "https://api.openai.com/v1")
+    var providerApiKey by mutableStateOf(prefs.getString("api_key", "") ?: "")
+    var providerModel by mutableStateOf(
+        prefs.getString("model", "gpt-4o-mini") ?: "gpt-4o-mini")
+
+    init {
+        restoreSession()
+    }
 
     var busy by mutableStateOf(false)
         private set
@@ -60,12 +72,14 @@ class ChatViewModel : ViewModel(), ChatCallback {
             messages.add(ChatMsg("assistant", error ?: "生成失败", streaming = false, isError = true))
         }
         busy = false
+        saveSession()
     }
 
     fun send(text: String) {
         if (busy) return
         messages.add(ChatMsg("user", text))
         busy = true
+        saveSession()
         viewModelScope.launch(Dispatchers.IO) {
             val provider = JSONObject()
                 .put("base_url", providerBaseUrl)
@@ -83,5 +97,46 @@ class ChatViewModel : ViewModel(), ChatCallback {
 
     fun cancel() {
         Engine.nativeSetCancel(true)
+    }
+
+    fun saveProviderSettings() {
+        prefs.edit()
+            .putString("base_url", providerBaseUrl)
+            .putString("api_key", providerApiKey)
+            .putString("model", providerModel)
+            .apply()
+    }
+
+    fun clearSession() {
+        messages.clear()
+        prefs.edit().remove("session").apply()
+    }
+
+    private fun saveSession() {
+        val arr = JSONArray()
+        for (m in messages) {
+            arr.put(JSONObject()
+                .put("role", m.role)
+                .put("text", m.text)
+                .put("error", m.isError))
+        }
+        prefs.edit().putString("session", arr.toString()).apply()
+    }
+
+    private fun restoreSession() {
+        val raw = prefs.getString("session", null) ?: return
+        try {
+            val arr = JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                messages.add(ChatMsg(
+                    role = o.getString("role"),
+                    text = o.getString("text"),
+                    isError = o.optBoolean("error", false),
+                ))
+            }
+        } catch (_: Exception) {
+            prefs.edit().remove("session").apply()
+        }
     }
 }

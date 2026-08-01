@@ -16,6 +16,13 @@
 #include "rikka/util/arena.h"
 
 static volatile int g_cancel = 0;
+static JavaVM *g_vm = NULL;
+
+JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+    (void)reserved;
+    g_vm = vm;
+    return JNI_VERSION_1_6;
+}
 
 /* ---------- 回调桥 ---------- */
 
@@ -94,6 +101,119 @@ static int parse_history(Arena *a, const char *history_json,
     return n == 0 ? -1 : 0;
 }
 
+/* ---------- 设备工具（JNI 反调 Kotlin DeviceTools） ---------- */
+
+static jclass g_dev_cls = NULL;
+static jmethodID g_dev_ask_user, g_dev_clip, g_dev_tts, g_dev_cal, g_dev_st, g_dev_js;
+
+static JNIEnv *env_of(void) {
+    JNIEnv *env = NULL;
+    if (!g_vm) return NULL;
+    if ((*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_6) != JNI_OK) return NULL;
+    return env;
+}
+
+static char *jstrdup_utf(JNIEnv *env, jstring s) {
+    if (!s) return NULL;
+    const char *c = (*env)->GetStringUTFChars(env, s, NULL);
+    if (!c) return NULL;
+    char *r = strdup(c);
+    (*env)->ReleaseStringUTFChars(env, s, c);
+    return r;
+}
+
+static void ensure_device_cls(JNIEnv *env) {
+    if (g_dev_cls) return;
+    jclass c = (*env)->FindClass(env, "me/rerere/rikkahub/ce/DeviceTools");
+    if (!c) return;
+    g_dev_cls = (jclass)(*env)->NewGlobalRef(env, c);
+    g_dev_ask_user = (*env)->GetStaticMethodID(env, g_dev_cls, "askUser",
+                                               "(Ljava/lang/String;)Ljava/lang/String;");
+    g_dev_clip = (*env)->GetStaticMethodID(env, g_dev_cls, "clipboardWrite",
+                                           "(Ljava/lang/String;)Z");
+    g_dev_tts = (*env)->GetStaticMethodID(env, g_dev_cls, "ttsSpeak",
+                                          "(Ljava/lang/String;)Z");
+    g_dev_cal = (*env)->GetStaticMethodID(env, g_dev_cls, "calendarQuery",
+                                          "(Ljava/lang/String;)Ljava/lang/String;");
+    g_dev_st = (*env)->GetStaticMethodID(env, g_dev_cls, "screenTimeQuery",
+                                         "(Ljava/lang/String;)Ljava/lang/String;");
+    g_dev_js = (*env)->GetStaticMethodID(env, g_dev_cls, "javascriptEval",
+                                         "(Ljava/lang/String;)Ljava/lang/String;");
+    (*env)->DeleteLocalRef(env, c);
+}
+
+static char *jni_ask_user(const char *question, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return NULL;
+    ensure_device_cls(env);
+    if (!g_dev_cls || !g_dev_ask_user) return NULL;
+    jstring q = (*env)->NewStringUTF(env, question);
+    jstring r = (jstring)(*env)->CallStaticObjectMethod(env, g_dev_cls, g_dev_ask_user, q);
+    (*env)->DeleteLocalRef(env, q);
+    return jstrdup_utf(env, r);
+}
+
+static int jni_clipboard_write(const char *text, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return 0;
+    ensure_device_cls(env);
+    if (!g_dev_cls || !g_dev_clip) return 0;
+    jstring t = (*env)->NewStringUTF(env, text);
+    jboolean ok = (*env)->CallStaticBooleanMethod(env, g_dev_cls, g_dev_clip, t);
+    (*env)->DeleteLocalRef(env, t);
+    return ok ? 1 : 0;
+}
+
+static int jni_tts_speak(const char *text, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return 0;
+    ensure_device_cls(env);
+    if (!g_dev_cls || !g_dev_tts) return 0;
+    jstring t = (*env)->NewStringUTF(env, text);
+    jboolean ok = (*env)->CallStaticBooleanMethod(env, g_dev_cls, g_dev_tts, t);
+    (*env)->DeleteLocalRef(env, t);
+    return ok ? 1 : 0;
+}
+
+static char *jni_calendar_query(const char *args, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return NULL;
+    ensure_device_cls(env);
+    if (!g_dev_cls || !g_dev_cal) return NULL;
+    jstring a = (*env)->NewStringUTF(env, args);
+    jstring r = (jstring)(*env)->CallStaticObjectMethod(env, g_dev_cls, g_dev_cal, a);
+    (*env)->DeleteLocalRef(env, a);
+    return jstrdup_utf(env, r);
+}
+
+static char *jni_screen_time_query(const char *args, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return NULL;
+    ensure_device_cls(env);
+    if (!g_dev_cls || !g_dev_st) return NULL;
+    jstring a = (*env)->NewStringUTF(env, args);
+    jstring r = (jstring)(*env)->CallStaticObjectMethod(env, g_dev_cls, g_dev_st, a);
+    (*env)->DeleteLocalRef(env, a);
+    return jstrdup_utf(env, r);
+}
+
+static char *jni_javascript_eval(const char *code, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return NULL;
+    ensure_device_cls(env);
+    if (!g_dev_cls || !g_dev_js) return NULL;
+    jstring c = (*env)->NewStringUTF(env, code);
+    jstring r = (jstring)(*env)->CallStaticObjectMethod(env, g_dev_cls, g_dev_js, c);
+    (*env)->DeleteLocalRef(env, c);
+    return jstrdup_utf(env, r);
+}
+
 /* ---------- JNI 入口 ---------- */
 
 JNIEXPORT jstring JNICALL
@@ -131,9 +251,15 @@ Java_me_rerere_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
         err = "history must be a non-empty JSON array";
     }
 
-    /* 工具（内置最小集；设备工具由壳层在 B3 接入） */
+    /* 工具（内置最小集 + 设备工具反调） */
     RkToolRegistry reg;
     RkToolEnv tenv = {0};
+    tenv.ask_user = jni_ask_user;
+    tenv.clipboard_write = jni_clipboard_write;
+    tenv.tts_speak = jni_tts_speak;
+    tenv.calendar_query = jni_calendar_query;
+    tenv.screen_time_query = jni_screen_time_query;
+    tenv.javascript_eval = jni_javascript_eval;
     rk_tools_init(&reg);
     rk_tools_register_builtin(&reg, &tenv);
 

@@ -14,10 +14,13 @@ import me.rerere.rikkahub.ce.ui.ChatViewModel
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DeviceTools.init(applicationContext)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    val vm: ChatViewModel = viewModel()
+                    val vm: ChatViewModel = viewModel {
+                        ChatViewModel(applicationContext)
+                    }
                     ChatScreen(vm)
                 }
             }
