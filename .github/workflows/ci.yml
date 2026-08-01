@@ -15,6 +15,7 @@ jobs:
       - name: Build & test (zero warnings)
         env:
           RIKKA_TEST_TLS: "1"
+          RIKKA_MCP_DEBUG: "1"   # TEMP: 排查 CI 上 mcp_sse_absolute_endpoint 失败
         run: |
           make clean
           make test 2>&1 | tee /tmp/test.log

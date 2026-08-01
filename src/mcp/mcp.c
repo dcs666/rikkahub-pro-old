@@ -16,6 +16,13 @@
 
 /* ---------- SSE 传输内部结构 ---------- */
 
+/* 调试：RIKKA_MCP_DEBUG=1 时打印 SSE 失败路径原因（CI 排查用） */
+static int mcp_debug(void) {
+    static int v = -1;
+    if (v < 0) v = getenv("RIKKA_MCP_DEBUG") != NULL;
+    return v;
+}
+
 /* 挂起请求节点（响应经 SSE 事件流异步到达） */
 struct PendingMcpResp {
     int id;
@@ -221,8 +228,14 @@ static void *sse_read_thread(void *arg) {
             if (st) break;
             continue;
         }
-        if (n == 0) break; /* EOF/断开 */
-        if (rsse_feed(p, buf, (size_t)n) != 0) break;
+        if (n == 0) {
+            if (mcp_debug()) fprintf(stderr, "[mcp-debug] read thread EOF/断开\n");
+            break; /* EOF/断开 */
+        }
+        if (rsse_feed(p, buf, (size_t)n) != 0) {
+            if (mcp_debug()) fprintf(stderr, "[mcp-debug] read thread rsse_feed error\n");
+            break;
+        }
         pthread_mutex_lock(&c->lock);
         int st = c->stopped;
         pthread_mutex_unlock(&c->lock);
@@ -264,6 +277,8 @@ static int rpc_call_sse(RkMcpClient *c, const char *method, const char *params_j
     pthread_mutex_lock(&c->lock);
     if (!c->sse_conn) {
         /* 传输已断开（读线程已退出）：响应不可能到达，立即失败 */
+        if (mcp_debug())
+            fprintf(stderr, "[mcp-debug] sse_conn==NULL (read thread dead) at rpc_call_sse\n");
         pthread_mutex_unlock(&c->lock);
         free(r);
         return -1;
@@ -285,7 +300,12 @@ static int rpc_call_sse(RkMcpClient *c, const char *method, const char *params_j
     int status = 0;
     size_t out_len = 0;
     char *body = rhttp_request_sync(url, hdrs, req, (size_t)n, 30000, &status, &out_len);
+    if (mcp_debug())
+        fprintf(stderr, "[mcp-debug] POST %s status=%d body=%s\n", url, status, body ? body : "(null)");
     if (!body || status < 200 || status >= 300) {
+        if (mcp_debug())
+            fprintf(stderr, "[mcp-debug] POST failed (rc=%d status=%d) -> mark error\n",
+                    body ? 0 : -1, status);
         /* POST 失败：响应不会到达，直接标 error（等路径立即返回） */
         pthread_mutex_lock(&c->lock);
         if (!r->done) { r->done = 1; r->error = 1; }
@@ -413,7 +433,12 @@ static int rpc_call(RkMcpClient *c, const char *method, const char *params_json,
 
 int rk_mcp_list_tools(RkMcpClient *c, RkMcpTool **tools, size_t *count) {
     char *result = NULL;
-    if (rpc_call(c, "tools/list", NULL, &result) != 0) return -1;
+    if (rpc_call(c, "tools/list", NULL, &result) != 0) {
+        if (mcp_debug()) fprintf(stderr, "[mcp-debug] list_tools rpc_call failed\n");
+        return -1;
+    }
+    if (mcp_debug()) fprintf(stderr, "[mcp-debug] list_tools result=%.200s\n", result ? result : "(null)");
+    if (!result) return -1;
     /* 解析 result.tools 数组 */
     Arena *a = arena_create(0);
     size_t err = 0;
