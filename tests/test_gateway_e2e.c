@@ -57,6 +57,7 @@ static void *req_thread(void *arg) {
         ssize_t r = read(fd, resp + resp_len, sizeof(resp) - resp_len - 1);
         if (r <= 0) break;
         resp_len += (size_t)r;
+        resp[resp_len] = '\0'; /* strstr 需要 NUL 结尾（防读未初始化） */
         if (strstr(resp, "\r\n\r\n") && strstr(resp, "Hello")) break;
     }
     resp[resp_len] = '\0';
@@ -145,10 +146,60 @@ TEST(gateway_chat_proxy) {
     stop_mock_server();
 }
 
+/* 慢客户端：请求头分片发送（间隔 200ms），必须正常处理（循环读头） */
+TEST(gateway_slow_client) {
+    start_mock_server();
+    RkGateway g;
+    int gport = 18000 + (getpid() % 700);
+    ASSERT_EQ_INT(0, rk_gateway_init(&g, gport));
+    char mock_base[128];
+    snprintf(mock_base, sizeof(mock_base), "http://127.0.0.1:%d", g_port);
+    ASSERT_EQ_INT(0, rk_gateway_add_provider(&g, "openai", "test-key", mock_base));
+    pthread_t tid;
+    pthread_create(&tid, NULL, gateway_thread, &g);
+    usleep(100000);
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT(fd >= 0);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)gport);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    ASSERT_EQ_INT(0, connect(fd, (struct sockaddr *)&addr, sizeof(addr)));
+    const char *body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    char req[2048];
+    int n = snprintf(req, sizeof(req),
+                     "POST /chat HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n"
+                     "Content-Length: %zu\r\n\r\n%s",
+                     strlen(body), body);
+    size_t half = (size_t)n / 2;
+    ASSERT(write(fd, req, half) > 0);
+    usleep(200000); /* 模拟慢客户端 */
+    ASSERT(write(fd, req + half, (size_t)n - half) > 0);
+    char resp[16384];
+    size_t resp_len = 0;
+    for (int i = 0; i < 10; i++) {
+        ssize_t r = read(fd, resp + resp_len, sizeof(resp) - resp_len - 1);
+        if (r <= 0) break;
+        resp_len += (size_t)r;
+        resp[resp_len] = '\0'; /* strstr 需要 NUL 结尾（防读未初始化） */
+        if (strstr(resp, "Hello")) break;
+    }
+    resp[resp_len] = '\0';
+    ASSERT(strstr(resp, "200") != NULL);
+    ASSERT(strstr(resp, "Hello") != NULL);
+    close(fd);
+    rk_gateway_stop(&g);
+    pthread_join(tid, NULL);
+    stop_mock_server();
+}
+
 int run_gateway_e2e_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(gateway_e2e, gateway_chat_proxy),
         RIKKA_TEST_REGISTER(gateway_e2e, gateway_multi_worker),
+        RIKKA_TEST_REGISTER(gateway_e2e, gateway_slow_client),
     };
     return run_suite("gateway_e2e", tests, sizeof(tests) / sizeof(tests[0]));
 }

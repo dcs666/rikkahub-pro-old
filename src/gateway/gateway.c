@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <signal.h>
@@ -121,8 +122,9 @@ static void pool_release_conn(RkGateway *g, RHttpConn *conn) {
     for (size_t i = 0; i < g->pool_count; i++) {
         if (g->pool[i].conn == conn) {
             if (rhttp_eof(conn)) {
-                /* 死连接：移出池（尾元素覆盖）并关闭，防止被复用/清理时二次释放 */
-                g->pool[i] = g->pool[g->pool_count - 1];
+                /* 死连接：移出池并关闭，防止被复用/清理时二次释放 */
+                if (i != g->pool_count - 1)
+                    g->pool[i] = g->pool[g->pool_count - 1]; /* 尾元素覆盖(防自赋值 memcpy 重叠) */
                 g->pool_count--;
                 pthread_mutex_unlock(&g->pool_mutex);
                 rhttp_close(conn);
@@ -144,7 +146,8 @@ static void pool_discard(RkGateway *g, RHttpConn *conn) {
     pthread_mutex_lock(&g->pool_mutex);
     for (size_t i = 0; i < g->pool_count; i++) {
         if (g->pool[i].conn == conn) {
-            g->pool[i] = g->pool[g->pool_count - 1];
+            if (i != g->pool_count - 1)
+                g->pool[i] = g->pool[g->pool_count - 1]; /* 防自赋值 memcpy 重叠 */
             g->pool_count--;
             break;
         }
@@ -182,25 +185,33 @@ static void *handle_request_thread(void *arg) {
 static void handle_request(RkGateway *g, int client_fd) {
     char req[65536];
     size_t req_len = 0;
-    /* 读取请求头 */
-    ssize_t n = read(client_fd, req + req_len, sizeof(req) - req_len - 1);
-    if (n <= 0) { close(client_fd); return; }
-    req_len += (size_t)n;
-    req[req_len] = '\0';
+    char *hdr_end = NULL;
+    /* 慢客户端保护：读头超时 5s（SO_RCVTIMEO） */
+    struct timeval tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    /* 循环读直到头完整（\r\n\r\n）或超时/断开 */
+    while (req_len < sizeof(req) - 1) {
+        ssize_t n = read(client_fd, req + req_len, sizeof(req) - req_len - 1);
+        if (n <= 0) { close(client_fd); return; } /* EOF/超时/错误 */
+        req_len += (size_t)n;
+        req[req_len] = '\0';
+        hdr_end = strstr(req, "\r\n\r\n");
+        if (hdr_end) break;
+    }
+    if (!hdr_end) { close(client_fd); return; } /* 头不完整 */
     /* 如果有 Content-Length，继续读 body 直到完整 */
-    char *hdr_end = strstr(req, "\r\n\r\n");
-    if (hdr_end) {
-        char *cl = strstr(req, "Content-Length:");
-        if (cl) {
-            long content_len = atol(cl + 15);
-            size_t hdr_total = (size_t)(hdr_end - req) + 4;
-            while (req_len < hdr_total + (size_t)content_len && req_len < sizeof(req) - 1) {
-                ssize_t r = read(client_fd, req + req_len, sizeof(req) - req_len - 1);
-                if (r <= 0) break;
-                req_len += (size_t)r;
-            }
-            req[req_len] = '\0';
+    char *cl = strstr(req, "Content-Length:");
+    if (cl) {
+        long content_len = atol(cl + 15);
+        size_t hdr_total = (size_t)(hdr_end - req) + 4;
+        while (req_len < hdr_total + (size_t)content_len && req_len < sizeof(req) - 1) {
+            ssize_t r = read(client_fd, req + req_len, sizeof(req) - req_len - 1);
+            if (r <= 0) break;
+            req_len += (size_t)r;
         }
+        req[req_len] = '\0';
     }
     /* 解析 HTTP 请求行 */
     char method[16], path[256];

@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "rikka/audio/audio.h"
+#include "rikka/core/buffer.h"
 #include "rikka/http/http.h"
 #include "rikka/json/json.h"
 #include "rikka/util/arena.h"
@@ -94,25 +95,34 @@ int rk_asr_openai(const char *api_key, const uint8_t *audio, size_t len,
             }
         }
     }
-    /* multipart/form-data 构建 */
+    /* multipart/form-data 构建（动态缓冲，支持大音频，无 64KB 上限） */
     char boundary[64] = "----RikkaBoundary123456";
-    char body[65536];
-    size_t off = 0;
+    Buf body;
+    buf_init(&body);
     /* file part */
-    off += (size_t)snprintf(body + off, sizeof(body) - off,
-                            "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.%s\"\r\n"
-                            "Content-Type: audio/%s\r\n\r\n",
-                            boundary, format ? format : "mp3", format ? format : "mp3");
-    if (len > sizeof(body) - off - 100) return -1; /* 溢出防护 */
-    memcpy(body + off, audio, len);
-    off += len;
-    off += (size_t)snprintf(body + off, sizeof(body) - off,
-                            "\r\n--%s\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n",
-                            boundary);
-    off += (size_t)snprintf(body + off, sizeof(body) - off, "\r\n--%s--\r\n", boundary);
+    {
+        char hdr[256];
+        int hn = snprintf(hdr, sizeof(hdr),
+                          "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.%s\"\r\n"
+                          "Content-Type: audio/%s\r\n\r\n",
+                          boundary, format ? format : "mp3", format ? format : "mp3");
+        if (hn <= 0 || (size_t)hn >= sizeof(hdr)) { buf_free(&body); return -1; }
+        buf_append(&body, hdr, (size_t)hn);
+    }
+    if (len > SIZE_MAX - body.len - 1024) { buf_free(&body); return -1; } /* 溢出防护 */
+    buf_append(&body, audio, len);
+    {
+        char tail[256];
+        int tn = snprintf(tail, sizeof(tail),
+                          "\r\n--%s\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n"
+                          "\r\n--%s--\r\n",
+                          boundary, boundary);
+        if (tn <= 0 || (size_t)tn >= sizeof(tail)) { buf_free(&body); return -1; }
+        buf_append(&body, tail, (size_t)tn);
+    }
     /* HTTP POST */
     RHttpConn *c = rhttp_connect("api.openai.com", 443, 1, 60000);
-    if (!c) return -1;
+    if (!c) { buf_free(&body); return -1; }
     char auth[512];
     snprintf(auth, sizeof(auth), "Bearer %s", api_key);
     char content_type[128];
@@ -122,10 +132,13 @@ int rk_asr_openai(const char *api_key, const uint8_t *audio, size_t len,
         "Content-Type", content_type,
         NULL
     };
-    if (rhttp_send(c, "POST", "/v1/audio/transcriptions", headers, body, off) != 0) {
+    if (rhttp_send(c, "POST", "/v1/audio/transcriptions", headers,
+                   (const char *)body.data, body.len) != 0) {
         rhttp_close(c);
+        buf_free(&body);
         return -1;
     }
+    buf_free(&body);
     RHttpResp resp;
     if (rhttp_read_headers(c, &resp, 60000) != 0) {
         rhttp_close(c);
