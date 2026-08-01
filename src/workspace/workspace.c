@@ -100,6 +100,7 @@ int rk_workspace_list(RkWorkspace *w, const char *path, char ***entries, size_t 
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
         if (n == cap) {
             size_t nc = cap ? cap * 2 : 16;
+            if (nc > SIZE_MAX / sizeof(char *)) break; /* 溢出防护 */
             char **nl = (char **)realloc(list, nc * sizeof(char *));
             if (!nl) break;
             list = nl;
