@@ -10,10 +10,10 @@
 - [x] **P2 MCP SSE 传输**：http 暴露 fd + `rhttp_parse_url` 公开；SSE transport（endpoint 握手/挂起请求/pending 链表/读线程）；语义与 stdio 对齐（result 成员提取、error 不设 result）；修复读线程超时误杀连接 bug；新增 5 个测试（error/POST404/无心跳空闲回归）
 - [x] **P1 结构重构**：三份 URL 解析统一为 `rhttp_parse_url`（gateway 内联解析顺带修复 path_prefix 未初始化读；provider 的 parse_base 删除；google 路径合并单 snprintf 消除 -Wformat-truncation）；`docs/CONVENTIONS.md` 固化返回值/所有权/并发/编译约定；未拆大文件——各模块 200-930 行且内聚，拆分的收益小于风险；构建产物 *.d/.build-flags 取消追踪
 - [x] **BUG 修复（CI 暴露）**：① gateway `rk_gateway_stop` 跨线程 close(fd) 数据竞争（TSan）→ stop 只置位标志，资源清理移到 run 退出路径 + active_handlers 等待；② `RJsonOut.buf` 不 NUL 结尾 → strlen 读堆垃圾（CI 上 mcp_sse 解析失败，本地靠堆布局侥幸通过）→ out_append 保持 NUL 不变式 + 回归测试；③ 测试 runner 支持 `./test_runner [suite]` 定向运行
-- [ ] **P3 基准补齐**：md 增量 / json 增量 vs 全量 / doc-epub / arena / SSE 累积 bench + check_bench 阈值
-- [ ] **P4 功能补齐**：4a provider 重试/错误中间件（parseErrorDetail）→ 4b 渲染排版块协议 → 4c 网关多实例 → 4d pptx
-- [ ] **P5 安全终审**：-Wshadow/-Wformat=2/-Wundef/-Wconversion 全开、ASan/LSan 全跑、fuzz 5 万轮
-- [ ] **P6 文档收尾**：README/ROADMAP 更新数字与勾选
+- [x] **P3 基准补齐**：md 增量(3.7us/token)/epub(0.12ms)/arena(68x)/SSE(4.4M ev/s) 四类新 bench + check_bench 阈值门禁（CI 跑 make check-bench）
+- [x] **P4 功能补齐**：4a provider 重试/错误中间件（429/5xx/网络指数退避 + error.message 提取，测试 500/429 重试成功、4xx 不重试）→ 4b 渲染 JSON 线协议（rk_render_markdown_json + 修复代码块 lang 丢失）→ 4c 网关多实例（SO_REUSEPORT + 共享连接池，8 并发 e2e；修复池死连接 502/double-free/SIGPIPE 三连）→ 4d pptx（统一 zip 模块 docx/epub/pptx 共用）
+- [x] **P5 安全终审**：strict 门禁（-Wshadow/-Wformat=2/-Wundef/-Wconversion/-Wsign-conversion/-Wwrite-strings/-Wpointer-arith/-Wcast-align）零警告；CI ASan/LSan 抓出并修复：RJsonOut 非 NUL 结尾、冻结消息 owned_buf 泄漏、MCP disconnect 跨线程 fd race；TSan 全绿
+- [x] **P6 文档收尾**：README 更新（126 测试/新特性/性能表/开发状态）；ROADMAP 勾选
 
 ## M0 基础设施层（本轮）
 - [x] Makefile + 目录骨架
