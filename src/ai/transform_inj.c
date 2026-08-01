@@ -42,7 +42,7 @@ static char *msg_to_text(Arena *a, const RikkaMessage *m) {
     }
     char *r = arena_alloc(a, 1, out.len + 1);
     if (r) {
-        memcpy(r, out.data, out.len);
+        if (out.len > 0) memcpy(r, out.data, out.len); /* 空 Buf 保护（UBSan） */
         r[out.len] = '\0';
     }
     buf_free(&out);
@@ -67,7 +67,7 @@ static char *extract_context(Arena *a, const RkMsgList *l, int scan_depth) {
     }
     char *r = arena_alloc(a, 1, out.len + 1);
     if (r) {
-        memcpy(r, out.data, out.len);
+        if (out.len > 0) memcpy(r, out.data, out.len); /* 空 Buf 保护（UBSan） */
         r[out.len] = '\0';
     }
     buf_free(&out);
@@ -205,7 +205,7 @@ static char *join_contents(Arena *a, const RkInjItem *items, size_t n) {
     }
     char *r = arena_alloc(a, 1, out.len + 1);
     if (r) {
-        memcpy(r, out.data, out.len);
+        if (out.len > 0) memcpy(r, out.data, out.len); /* 空 Buf 保护（UBSan） */
         r[out.len] = '\0';
     }
     buf_free(&out);

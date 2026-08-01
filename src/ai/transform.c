@@ -122,7 +122,7 @@ void rk_msgl_append_text(RkMsgList *l, RikkaMessage *m, const char *text) {
 static char *arena_strndup(Arena *a, const char *s, size_t n) {
     char *p = (char *)arena_alloc(a, 1, n + 1);
     if (!p) return NULL;
-    memcpy(p, s, n);
+    if (n > 0) memcpy(p, s, n); /* 空 Buf（data=NULL, len=0）时跳过拷贝（UBSan） */
     p[n] = '\0';
     return p;
 }
