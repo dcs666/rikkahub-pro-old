@@ -358,85 +358,42 @@ static int tool_ws_edit(const RkTool *t, const char *args_json, const RkToolEnv 
         buf_append(&content, buf, (size_t)r);
     }
     close(fd);
-    /* 先统计出现次数（决定是否替换/报错） */
-    size_t olen = strlen(old_text);
-    size_t nlen = strlen(new_text);
-    size_t total = 0;
-    {
-        const char *end0 = (const char *)content.data + content.len;
-        if (olen > 0) {
-            for (const char *q = (const char *)content.data; q + olen <= end0; q++) {
-                if (memcmp(q, old_text, olen) == 0) total++;
-            }
-        }
-    }
-    if (total == 0) {
-        buf_free(&content);
-        free(full);
-        if (result) *result = rk_tool_result_error("old_text not found");
-        return -1;
-    }
-    if (!replace_all && total > 1) {
-        buf_free(&content);
-        free(full);
-        if (result) *result = rk_tool_result_error(
-            "old_text occurs more than once; set replace_all=true");
-        return -1;
-    }
-    /* 替换（replace_all 全部，否则仅第一次） */
-    size_t count = 0;
-    Buf out;
-    buf_init(&out);
-    const char *p = (const char *)content.data;
-    const char *end = p + content.len;
-    for (;;) {
-        const char *hit = NULL;
-        if (olen > 0) {
-            for (const char *q = p; q + olen <= end; q++) {
-                if (memcmp(q, old_text, olen) == 0) { hit = q; break; }
-            }
-        }
-        if (!hit) break;
-        buf_append(&out, p, (size_t)(hit - p));
-        buf_append(&out, new_text, nlen);
-        p = hit + olen;
-        count++;
-        if (!replace_all) break;
-    }
-    buf_append(&out, p, (size_t)(end - p));
+    /* 三级替换（exact → line_trimmed → block_anchor，对标 JVM TextReplacers） */
+    RkTextReplaceResult tr;
+    rk_text_replace((const char *)content.data, content.len, old_text, new_text,
+                    replace_all, &tr);
     buf_free(&content);
-    /* 写回 */
-    char *tmp = (char *)malloc(strlen(path) + 8);
-    if (!tmp) { buf_free(&out); return -1; }
-    snprintf(tmp, strlen(path) + 8, "%s.tmp", path);
-    char *tmp_full = resolve_path(env->workspace_root, tmp);
-    free(tmp);
-    if (!tmp_full) { buf_free(&out); return -1; }
+    if (tr.error != 0) {
+        if (result) *result = rk_tool_result_error(tr.errmsg);
+        free(tr.updated);
+        free(full);
+        return -1;
+    }
+    /* 写回（先写临时文件再 rename，原子替换） */
+    char *tmp_full = resolve_path(env->workspace_root, ".edit_tmp");
+    if (!tmp_full) { free(tr.updated); return -1; }
     int wfd = open(tmp_full, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    free(tmp_full);
-    if (wfd < 0) { buf_free(&out); return -1; }
+    if (wfd < 0) { free(tmp_full); free(tr.updated); return -1; }
+    size_t ulen = strlen(tr.updated);
     size_t off = 0;
-    while (off < out.len) {
-        ssize_t w = write(wfd, out.data + off, out.len - off);
+    while (off < ulen) {
+        ssize_t w = write(wfd, tr.updated + off, ulen - off);
         if (w <= 0) break;
         off += (size_t)w;
     }
     close(wfd);
-    buf_free(&out);
-    /* rename（临时路径 → 目标） */
-    char *t2 = (char *)malloc(strlen(full) + 8);
-    if (!t2) return -1;
-    snprintf(t2, strlen(full) + 8, "%s.tmp", full);
-    rename(t2, full);
-    free(t2);
+    rename(tmp_full, full);
+    free(tmp_full);
     free(full);
     if (result) {
-        char msg[64];
-        int mn = snprintf(msg, sizeof(msg), "{\"ok\":true,\"count\":%zu}", count);
+        char msg[96];
+        int mn = snprintf(msg, sizeof(msg), "{\"ok\":true,\"count\":%zu,\"strategy\":\"%s\"}",
+                          tr.replacements, tr.strategy ? tr.strategy : "exact");
         if (mn > 0 && (size_t)mn < sizeof(msg)) {
             *result = strdup(msg); /* malloc，调用方 free */
         }
     }
+    free(tr.updated);
     return 0;
 }
 
@@ -691,6 +648,94 @@ static int tool_use_skill(const RkTool *t, const char *args_json, const RkToolEn
     return 0;
 }
 
+/* ================= search_web / conversation 工具 ================= */
+
+static int tool_search_web(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                           char **result) {
+    (void)t;
+    char query[2048];
+    if (rk_tool_arg_str(args_json, "query", query, sizeof(query)) != 0) {
+        if (result) *result = rk_tool_result_error("query is required");
+        return -1;
+    }
+    if (!env || !env->web_search) {
+        if (result) *result = rk_tool_result_error("web search unavailable");
+        return -1;
+    }
+    char *r = env->web_search(query, env->ud);
+    if (!r) {
+        if (result) *result = rk_tool_result_error("search failed");
+        return -1;
+    }
+    *result = r; /* 回调返回的 JSON 字符串（items[]/images[]） */
+    return 0;
+}
+
+static int tool_recent_chats(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                             char **result) {
+    (void)t;
+    if (!env || !env->recent_chats) {
+        if (result) *result = rk_tool_result_error("conversation store unavailable");
+        return -1;
+    }
+    int64_t limit = rk_tool_arg_i64(args_json, "limit", 10);
+    if (limit < 1) limit = 1;
+    if (limit > 30) limit = 30;
+    char *r = env->recent_chats((int)limit, env->ud);
+    if (!r) {
+        if (result) *result = rk_tool_result_error("query failed");
+        return -1;
+    }
+    *result = r;
+    return 0;
+}
+
+static int tool_conversation_search(const RkTool *t, const char *args_json,
+                                    const RkToolEnv *env, char **result) {
+    (void)t;
+    char query[1024];
+    if (rk_tool_arg_str(args_json, "query", query, sizeof(query)) != 0) {
+        if (result) *result = rk_tool_result_error("query is required");
+        return -1;
+    }
+    if (!env || !env->conversation_search) {
+        if (result) *result = rk_tool_result_error("conversation store unavailable");
+        return -1;
+    }
+    char *r = env->conversation_search(query, env->ud);
+    if (!r) {
+        if (result) *result = rk_tool_result_error("search failed");
+        return -1;
+    }
+    *result = r;
+    return 0;
+}
+
+static const RkTool TOOL_SEARCH_WEB = {
+    "search_web",
+    "Search the web for up-to-date or specific information. "
+    "Use this when the user asks for the latest news, current facts, or needs verification. "
+    "Generate focused keywords and run multiple searches if needed.",
+    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Search keywords\"}},\"required\":[\"query\"]}",
+    tool_search_web,
+};
+
+static const RkTool TOOL_RECENT_CHATS = {
+    "recent_chats",
+    "List the user's recent conversations with you to understand their preferences and ongoing topics. "
+    "Returns conversation titles and the date of last activity, ordered by pinned first then most recently updated.",
+    "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\",\"description\":\"Max conversations (default 10, max 30)\"}}}",
+    tool_recent_chats,
+};
+
+static const RkTool TOOL_CONVERSATION_SEARCH = {
+    "conversation_search",
+    "Full-text search across the user's past conversations to recall specific information they mentioned before. "
+    "Use focused keywords. Each result includes the conversation title, a snippet, and the date.",
+    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Keywords to search for\"}},\"required\":[\"query\"]}",
+    tool_conversation_search,
+};
+
 /* ================= 注册 ================= */
 
 static const RkTool TOOL_WS_READ = {
@@ -738,7 +783,6 @@ static const RkTool TOOL_USE_SKILL = {
 };
 
 void rk_tools_register_builtin(RkToolRegistry *r, const RkToolEnv *env) {
-    (void)env;
     rk_tools_add(r, &TOOL_TIME_INFO);
     if (env && env->workspace_root) {
         rk_tools_add(r, &TOOL_WS_READ);
@@ -748,4 +792,9 @@ void rk_tools_register_builtin(RkToolRegistry *r, const RkToolEnv *env) {
     }
     rk_tools_add(r, &TOOL_MEMORY);
     rk_tools_add(r, &TOOL_USE_SKILL);
+    if (env) {
+        if (env->web_search) rk_tools_add(r, &TOOL_SEARCH_WEB);
+        if (env->recent_chats) rk_tools_add(r, &TOOL_RECENT_CHATS);
+        if (env->conversation_search) rk_tools_add(r, &TOOL_CONVERSATION_SEARCH);
+    }
 }

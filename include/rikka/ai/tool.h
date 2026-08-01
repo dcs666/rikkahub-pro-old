@@ -40,6 +40,9 @@ struct RkToolEnv {
     int (*tts_speak)(const char *text, void *ud);
     char *(*javascript_eval)(const char *code, void *ud);
     char *(*web_search)(const char *query, void *ud);
+    /* 会话查询（壳层实现；NULL = 工具不可注册） */
+    char *(*recent_chats)(int limit, void *ud);                 /* JSON 数组（malloc） */
+    char *(*conversation_search)(const char *query, void *ud);  /* JSON 数组（malloc） */
     void *ud;
 };
 
@@ -81,5 +84,22 @@ int rk_tool_arg_bool(const char *args_json, const char *key, int dflt);
 /* 工具结果 JSON 字符串构造（malloc）：{"key":"value"} 等 */
 char *rk_tool_result_json(const char *key, const char *value);
 char *rk_tool_result_error(const char *message);
+
+/* ---------- 文本替换（三级策略，对标 JVM TextReplacers） ---------- */
+
+typedef struct {
+    char *updated;        /* malloc 结果（error 时为 NULL） */
+    size_t replacements;  /* 实际替换数 */
+    size_t occurrences;   /* 匹配位置数 */
+    const char *strategy; /* "exact" | "line_trimmed" | "block_anchor" */
+    int error;            /* 0 成功；1 无匹配；2 多匹配且非 replace_all */
+    char errmsg[256];     /* error 时的人类可读信息 */
+} RkTextReplaceResult;
+
+/* 三级替换：精确 → 行 trim 窗口 → 块锚点（首尾行）。
+ * 结果 malloc，调用方 free out->updated。 */
+void rk_text_replace(const char *content, size_t content_len,
+                     const char *old_text, const char *new_text, int replace_all,
+                     RkTextReplaceResult *out);
 
 #endif /* RIKKA_AI_TOOL_H */

@@ -234,6 +234,146 @@ TEST(tool_arg_helpers) {
     free(r);
 }
 
+/* ---------- 三级替换（rk_text_replace 直接测试） ---------- */
+
+TEST(tool_text_replace_exact) {
+    RkTextReplaceResult tr;
+    /* 精确单次 */
+    rk_text_replace("hello world hello", 17, "world", "there", 0, &tr);
+    ASSERT_EQ_INT(0, tr.error);
+    ASSERT(strcmp(tr.strategy, "exact") == 0);
+    ASSERT_EQ_INT(1, (int)tr.replacements);
+    ASSERT(strcmp(tr.updated, "hello there hello") == 0);
+    free(tr.updated);
+    /* 多次出现无 replace_all → 错误 */
+    rk_text_replace("aa aa", 5, "aa", "b", 0, &tr);
+    ASSERT_EQ_INT(2, tr.error);
+    ASSERT(strstr(tr.errmsg, "2 locations") != NULL);
+    ASSERT(strstr(tr.errmsg, "replace_all") != NULL);
+    /* replace_all */
+    rk_text_replace("aa aa", 5, "aa", "b", 1, &tr);
+    ASSERT_EQ_INT(0, tr.error);
+    ASSERT_EQ_INT(2, (int)tr.replacements);
+    ASSERT(strcmp(tr.updated, "b b") == 0);
+    free(tr.updated);
+    /* 无匹配 → not found */
+    rk_text_replace("abc", 3, "xyz", "q", 0, &tr);
+    ASSERT_EQ_INT(1, tr.error);
+    ASSERT(strstr(tr.errmsg, "whitespace-tolerant") != NULL);
+    /* 空 old_text */
+    rk_text_replace("abc", 3, "", "q", 0, &tr);
+    ASSERT_EQ_INT(1, tr.error);
+}
+
+TEST(tool_text_replace_line_trimmed) {
+    RkTextReplaceResult tr;
+    /* 单行子串：exact 命中（JVM 同语义：indexOf 子串匹配） */
+    const char *content = "line1\n    foo  \nline3\n";
+    rk_text_replace(content, strlen(content), "foo", "bar", 0, &tr);
+    ASSERT_EQ_INT(0, tr.error);
+    ASSERT(strcmp(tr.strategy, "exact") == 0);
+    ASSERT(strstr(tr.updated, "    bar  ") != NULL); /* 保留行内空白 */
+    free(tr.updated);
+    /* line_trimmed：多行 old，行内含空白差异使 exact 不中 */
+    const char *content2 = "a\nX  \nY\t\nb\n";
+    const char *old2 = "X\nY\n";
+    rk_text_replace(content2, strlen(content2), old2, "Z", 0, &tr);
+    ASSERT_EQ_INT(0, tr.error);
+    ASSERT(strcmp(tr.strategy, "line_trimmed") == 0);
+    ASSERT(strstr(tr.updated, "a\nZ\nb\n") != NULL);
+    free(tr.updated);
+}
+
+TEST(tool_text_replace_block_anchor) {
+    RkTextReplaceResult tr;
+    /* ≥3 行：中间行差异容忍（block_anchor） */
+    const char *content =
+        "start\n"
+        "keep\n"
+        "DIFFERENT\n"
+        "end\n";
+    const char *old =
+        "start\n"
+        "something else\n"
+        "x\n"
+        "end\n";
+    rk_text_replace(content, strlen(content), old, "REPLACED", 0, &tr);
+    ASSERT_EQ_INT(0, tr.error);
+    ASSERT(strcmp(tr.strategy, "block_anchor") == 0);
+    ASSERT(strstr(tr.updated, "REPLACED") != NULL);
+    ASSERT(strstr(tr.updated, "DIFFERENT") == NULL);
+    free(tr.updated);
+    /* 2 行 old 不能用 block_anchor（降级 not found） */
+    rk_text_replace(content, strlen(content), "start\nend\n", "X", 0, &tr);
+    ASSERT_EQ_INT(1, tr.error);
+}
+
+/* ---------- search / conversation 工具（回调桩） ---------- */
+
+static char *stub_search(const char *query, void *ud) {
+    (void)ud;
+    char *r = (char *)malloc(256);
+    snprintf(r, 256,
+             "{\"items\":[{\"title\":\"result for %s\",\"url\":\"http://x/1\"}]}",
+             query);
+    return r;
+}
+
+static char *stub_recent_chats(int limit, void *ud) {
+    (void)ud;
+    char *r = (char *)malloc(128);
+    snprintf(r, 128, "[{\"id\":\"c1\",\"title\":\"t1\",\"limit\":%d}]", limit);
+    return r;
+}
+
+static char *stub_conv_search(const char *query, void *ud) {
+    (void)ud;
+    char *r = (char *)malloc(128);
+    snprintf(r, 128, "[{\"title\":\"found [%s]\",\"date\":\"2026-08-01\"}]", query);
+    return r;
+}
+
+TEST(tool_search_and_conversation) {
+    RkToolRegistry r;
+    rk_tools_init(&r);
+    RkToolEnv env = {0};
+    env.web_search = stub_search;
+    env.recent_chats = stub_recent_chats;
+    env.conversation_search = stub_conv_search;
+    rk_tools_register_builtin(&r, &env);
+    char *result = NULL;
+    /* search_web */
+    const RkTool *sw = rk_tools_find(&r, "search_web");
+    ASSERT_NOT_NULL(sw);
+    ASSERT_EQ_INT(0, rk_tool_call(sw, "{\"query\":\"news\"}", &env, &result));
+    ASSERT(strstr(result, "result for news") != NULL);
+    free(result);
+    result = NULL;
+    /* recent_chats */
+    const RkTool *rc = rk_tools_find(&r, "recent_chats");
+    ASSERT_NOT_NULL(rc);
+    ASSERT_EQ_INT(0, rk_tool_call(rc, "{\"limit\":5}", &env, &result));
+    ASSERT(strstr(result, "\"limit\":5") != NULL);
+    free(result);
+    result = NULL;
+    /* conversation_search */
+    const RkTool *cs = rk_tools_find(&r, "conversation_search");
+    ASSERT_NOT_NULL(cs);
+    ASSERT_EQ_INT(0, rk_tool_call(cs, "{\"query\":\"apk\"}", &env, &result));
+    ASSERT(strstr(result, "found [apk]") != NULL);
+    free(result);
+    result = NULL;
+    /* 无回调 → 不注册 */
+    RkToolRegistry r2;
+    rk_tools_init(&r2);
+    RkToolEnv env2 = {0};
+    rk_tools_register_builtin(&r2, &env2);
+    ASSERT_NULL(rk_tools_find(&r2, "search_web"));
+    ASSERT_NULL(rk_tools_find(&r2, "recent_chats"));
+    rk_tools_destroy(&r2);
+    rk_tools_destroy(&r);
+}
+
 int run_tool_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(tool, tool_registry),
@@ -243,6 +383,10 @@ int run_tool_suite(void) {
         RIKKA_TEST_REGISTER(tool, tool_memory),
         RIKKA_TEST_REGISTER(tool, tool_use_skill),
         RIKKA_TEST_REGISTER(tool, tool_arg_helpers),
+        RIKKA_TEST_REGISTER(tool, tool_text_replace_exact),
+        RIKKA_TEST_REGISTER(tool, tool_text_replace_line_trimmed),
+        RIKKA_TEST_REGISTER(tool, tool_text_replace_block_anchor),
+        RIKKA_TEST_REGISTER(tool, tool_search_and_conversation),
     };
     return run_suite("tool", tests, sizeof(tests) / sizeof(tests[0]));
 }

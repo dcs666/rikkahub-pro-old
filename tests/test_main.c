@@ -25,6 +25,7 @@ int run_epub_suite(void);
 int run_transform_suite(void);
 int run_store_suite(void);
 int run_tool_suite(void);
+int run_prompt_suite(void);
 int run_docx_suite(void);
 int run_pptx_suite(void);
 int run_trace_suite(void);
@@ -62,6 +63,7 @@ int main(int argc, char **argv) {
         {"transform", run_transform_suite},
         {"store", run_store_suite},
         {"tool", run_tool_suite},
+        {"prompt", run_prompt_suite},
         {"workspace", run_workspace_suite},
         {"audio", run_audio_suite},
         {"render", run_render_suite},
