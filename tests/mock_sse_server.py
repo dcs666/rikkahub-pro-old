@@ -16,6 +16,7 @@ streams = {}  # id(self.wfile) -> wfile
 
 # 重试中间件测试钩子：/flaky 前 2 次 500，之后成功；/flaky429 同理
 flaky_hits = 0
+toolcall_hits = 0
 flaky429_hits = 0
 
 
@@ -163,7 +164,9 @@ class H(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get('Content-Length', 0) or 0)
         if length:
-            self.rfile.read(length)
+            self._body = self.rfile.read(length)
+        else:
+            self._body = b''
         self.do_GET()
 
     def _oauth_meta(self):
@@ -321,9 +324,78 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 pass
         elif self.path == '/chat/completions':
-            # 与 /openai 相同的 SSE 回放（CLI 默认路径）
-            self.path = '/openai'
-            self.do_GET()
+            # 请求体含 tools → 工具循环回放（首轮 tool_calls，后续最终文本）；
+            # 否则与 /openai 相同文本回放（OCR 等无工具场景）。
+            # body 由 do_POST 预先读取并缓存（避免二次读 rfile 死锁）。
+            global toolcall_hits
+            _body = getattr(self, '_body', b'')
+            if b'"tools"' not in _body:
+                self.path = '/openai'
+                self.do_GET()
+            else:
+                toolcall_hits += 1
+                if toolcall_hits == 1:
+                    evs = [
+                        'data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_time_info","arguments":""}}]},"finish_reason":null}]}\n\n',
+                        'data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":null}]}\n\n',
+                        'data: {"id":"1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+                        'data: [DONE]\n\n',
+                    ]
+                else:
+                    evs = [
+                        'data: {"id":"2","choices":[{"index":0,"delta":{"content":"Final "},"finish_reason":null}]}\n\n',
+                        'data: {"id":"2","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n',
+                        'data: [DONE]\n\n',
+                    ]
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.send_header('Transfer-Encoding', 'chunked')
+                self.end_headers()
+                for e in evs:
+                    try:
+                        b = e.encode()
+                        self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, ValueError):
+                        break
+                try:
+                    self.wfile.write(b'0\r\n\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    pass
+        elif self.path == '/toolcall':
+            toolcall_hits += 1
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            if toolcall_hits == 1:
+                # 第一轮：请求工具调用 get_time_info
+                evs = [
+                    'data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_time_info","arguments":""}}]},"finish_reason":null}]}\n\n',
+                    'data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":null}]}\n\n',
+                    'data: {"id":"1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+                    'data: [DONE]\n\n',
+                ]
+            else:
+                # 后续轮：最终文本
+                evs = [
+                    'data: {"id":"2","choices":[{"index":0,"delta":{"content":"Final "},"finish_reason":null}]}\n\n',
+                    'data: {"id":"2","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n',
+                    'data: [DONE]\n\n',
+                ]
+            for e in evs:
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+            try:
+                self.wfile.write(b'0\r\n\r\n')
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         elif self.path == '/fail500':
             body = json.dumps({'error': {'message': 'boom 500'}}).encode('utf-8')
             self.send_response(500)

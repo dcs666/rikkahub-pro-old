@@ -233,6 +233,10 @@ int rp_build_request(const RikkaProviderCfg *cfg,
             openai_msg(out, msgs[i]);
         }
         buf_append_str(out, "]}");
+        if (cfg->tools_json && cfg->tools_json[0]) {
+            buf_append_str(out, ",\"tools\":");
+            buf_append_str(out, cfg->tools_json);
+        }
         break;
     }
     case RIKKA_PROVIDER_CLAUDE: {
@@ -317,10 +321,18 @@ struct RikkaStreamSession {
     RJsonStream *js_type;    /* Claude delta.type → type_buf */
     RJsonStream *js_text;    /* content/text → text part */
     RJsonStream *js_reason;  /* reasoning/thinking → reasoning part */
+    RJsonStream *js_tc_name; /* OpenAI tool_calls[0].function.name */
+    RJsonStream *js_tc_args; /* OpenAI tool_calls[0].function.arguments */
+    RJsonStream *js_tc_id;   /* OpenAI tool_calls[0].id */
     RikkaStream *out;
     RikkaSessionStats stats;
     Buf type_buf;
+    Buf tc_name_buf;
+    Buf tc_args_buf;
+    Buf tc_id_buf;
     char *last_error;        /* 最近一次非 2xx 错误详情（malloc，take 转移所有权） */
+    RkStreamDeltaCb delta_cb; /* 增量回调（rp_chat_stream_cb 用，可 NULL） */
+    void *delta_ud;
 };
 
 /* 提取路径表 */
@@ -337,22 +349,54 @@ static const RJsonStreamPathElem P_CLAUDE_THINK[] = {
 static const RJsonStreamPathElem P_GOOG_TEXT[] = {
     {0, {.key = "candidates"}}, {1, {.index = 0}}, {0, {.key = "content"}},
     {0, {.key = "parts"}}, {1, {.index = 0}}, {0, {.key = "text"}}, {-2, {0}}};
+/* OpenAI tool_calls delta（index 0 单调用；并行多 index 打磨期扩展） */
+static const RJsonStreamPathElem P_OAI_TC_NAME[] = {
+    {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}},
+    {0, {.key = "tool_calls"}}, {1, {.index = 0}}, {0, {.key = "function"}},
+    {0, {.key = "name"}}, {-2, {0}}};
+static const RJsonStreamPathElem P_OAI_TC_ARGS[] = {
+    {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}},
+    {0, {.key = "tool_calls"}}, {1, {.index = 0}}, {0, {.key = "function"}},
+    {0, {.key = "arguments"}}, {-2, {0}}};
+static const RJsonStreamPathElem P_OAI_TC_ID[] = {
+    {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}},
+    {0, {.key = "tool_calls"}}, {1, {.index = 0}}, {0, {.key = "id"}}, {-2, {0}}};
 
 static void sink_text(void *ctx, const char *data, size_t len) {
     RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
     rstream_append_text(ss->out, data, len);
     ss->stats.text_chunks++;
+    if (ss->delta_cb) ss->delta_cb(ss->delta_ud, 0, data, len);
 }
 
 static void sink_reason(void *ctx, const char *data, size_t len) {
     RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
     rstream_append_reasoning(ss->out, data, len);
     ss->stats.reasoning_chunks++;
+    if (ss->delta_cb) ss->delta_cb(ss->delta_ud, 1, data, len);
 }
 
 static void sink_type(void *ctx, const char *data, size_t len) {
     RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
     buf_append(&ss->type_buf, data, len);
+}
+
+/* tool_calls delta：name/id 每次新块覆盖（index 0），arguments 累积拼接 */
+static void sink_tc_name(void *ctx, const char *data, size_t len) {
+    RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
+    buf_reset(&ss->tc_name_buf);
+    buf_append(&ss->tc_name_buf, data, len);
+}
+
+static void sink_tc_args(void *ctx, const char *data, size_t len) {
+    RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
+    buf_append(&ss->tc_args_buf, data, len);
+}
+
+static void sink_tc_id(void *ctx, const char *data, size_t len) {
+    RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
+    buf_reset(&ss->tc_id_buf);
+    buf_append(&ss->tc_id_buf, data, len);
 }
 
 static void run_extract(RJsonStream *js, const char *data, size_t len) {
@@ -374,6 +418,16 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
             /* 双提取：content 与 reasoning_content 各进各的 part（零拷贝分流） */
             run_extract(ss->js_text, data, len);
             run_extract(ss->js_reason, data, len);
+            /* tool_calls delta（index 0 单调用） */
+            { /* 直接对比路径: 手工 reset+feed */
+                rjson_stream_reset(ss->js_tc_name);
+                rjson_stream_feed(ss->js_tc_name, data, len);
+                rjson_stream_finish(ss->js_tc_name);
+                    rjson_stream_reset(ss->js_tc_name);
+            }
+            run_extract(ss->js_tc_name, data, len);
+            run_extract(ss->js_tc_args, data, len);
+            run_extract(ss->js_tc_id, data, len);
         }
         break;
     case RIKKA_PROVIDER_CLAUDE:
@@ -410,6 +464,9 @@ RikkaStreamSession *rp_session_create(const RikkaProviderCfg *cfg) {
     if (!ss) return NULL;
     ss->cfg = *cfg;
     buf_init(&ss->type_buf);
+    buf_init(&ss->tc_name_buf);
+    buf_init(&ss->tc_args_buf);
+    buf_init(&ss->tc_id_buf);
     return ss;
 }
 
@@ -420,7 +477,13 @@ void rp_session_destroy(RikkaStreamSession *ss) {
     if (ss->js_type) rjson_stream_destroy(ss->js_type);
     if (ss->js_text) rjson_stream_destroy(ss->js_text);
     if (ss->js_reason) rjson_stream_destroy(ss->js_reason);
+    if (ss->js_tc_name) rjson_stream_destroy(ss->js_tc_name);
+    if (ss->js_tc_args) rjson_stream_destroy(ss->js_tc_args);
+    if (ss->js_tc_id) rjson_stream_destroy(ss->js_tc_id);
     buf_free(&ss->type_buf);
+    buf_free(&ss->tc_name_buf);
+    buf_free(&ss->tc_args_buf);
+    buf_free(&ss->tc_id_buf);
     free(ss->last_error);
     free(ss);
 }
@@ -557,11 +620,18 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
     ss->js_type = rjson_stream_create(P_CLAUDE_TYPE, sink_type, ss);
     ss->js_text = rjson_stream_create(P_OAI_CONTENT, sink_text, ss);
     ss->js_reason = rjson_stream_create(P_OAI_REASON, sink_reason, ss);
-    if (!ss->sse || !ss->js_type || !ss->js_text || !ss->js_reason) return -1; /* OOM 防御 */
+    ss->js_tc_name = rjson_stream_create(P_OAI_TC_NAME, sink_tc_name, ss);
+    ss->js_tc_args = rjson_stream_create(P_OAI_TC_ARGS, sink_tc_args, ss);
+    ss->js_tc_id = rjson_stream_create(P_OAI_TC_ID, sink_tc_id, ss);
+    if (!ss->sse || !ss->js_type || !ss->js_text || !ss->js_reason ||
+        !ss->js_tc_name || !ss->js_tc_args || !ss->js_tc_id) return -1; /* OOM 防御 */
     switch (ss->cfg.id) {
         case RIKKA_PROVIDER_OPENAI:
             rjson_stream_set_path(ss->js_text, P_OAI_CONTENT);
             rjson_stream_set_path(ss->js_reason, P_OAI_REASON);
+            rjson_stream_set_path(ss->js_tc_name, P_OAI_TC_NAME);
+            rjson_stream_set_path(ss->js_tc_args, P_OAI_TC_ARGS);
+            rjson_stream_set_path(ss->js_tc_id, P_OAI_TC_ID);
             break;
         case RIKKA_PROVIDER_CLAUDE:
             rjson_stream_set_path(ss->js_type, P_CLAUDE_TYPE);
@@ -582,6 +652,32 @@ char *rp_take_error_detail(RikkaStreamSession *ss) {
     return e;
 }
 
+/* 流结束后：解析到 tool_calls delta 则构造 TOOL_CALL part（index 0 单调用） */
+static void finalize_tool_calls(RikkaStreamSession *ss) {
+    if (!ss->out || !ss->out->msg || ss->tc_name_buf.len == 0) return;
+    Arena *a = ss->out->arena;
+    RikkaPart *p = rmsg_add_part(a, ss->out->msg, RIKKA_PART_TOOL_CALL);
+    if (!p) return;
+    p->tool_name = (const char *)arena_alloc(a, 1, ss->tc_name_buf.len + 1);
+    if (p->tool_name && ss->tc_name_buf.len > 0) {
+        memcpy((void *)p->tool_name, ss->tc_name_buf.data, ss->tc_name_buf.len);
+        ((char *)p->tool_name)[ss->tc_name_buf.len] = '\0';
+    }
+    if (ss->tc_id_buf.len > 0) {
+        p->tool_id = (const char *)arena_alloc(a, 1, ss->tc_id_buf.len + 1);
+        if (p->tool_id) {
+            memcpy((void *)p->tool_id, ss->tc_id_buf.data, ss->tc_id_buf.len);
+            ((char *)p->tool_id)[ss->tc_id_buf.len] = '\0';
+        }
+    }
+    p->data = (const char *)arena_alloc(a, 1, ss->tc_args_buf.len + 1);
+    if (p->data && ss->tc_args_buf.len > 0) {
+        memcpy((void *)p->data, ss->tc_args_buf.data, ss->tc_args_buf.len);
+        ((char *)p->data)[ss->tc_args_buf.len] = '\0';
+    }
+    p->len = ss->tc_args_buf.len;
+}
+
 int rp_stream_pump(RikkaStreamSession *ss, int timeout_ms) {
     if (!ss || !ss->conn) return -1;
     char buf[16384];
@@ -592,6 +688,7 @@ int rp_stream_pump(RikkaStreamSession *ss, int timeout_ms) {
         if (rsse_feed(ss->sse, buf, (size_t)n) != 0) return -1;
     }
     rsse_finish(ss->sse);
+    finalize_tool_calls(ss);
     return 0;
 }
 
@@ -649,6 +746,7 @@ int rp_stream_pump_async(RikkaStreamSession *ss, int timeout_ms) {
     pthread_join(rt, NULL);
     pthread_join(pt, NULL);
     rk_spsc_destroy(&io.q);
+    finalize_tool_calls(ss);
     return io.reader_rc != 0 ? io.reader_rc : io.proc_rc;
 }
 
@@ -659,10 +757,11 @@ const RikkaSessionStats *rp_session_stats(const RikkaStreamSession *ss) {
 /* B3 重试中间件：仅对"连接失败/5xx"重试（start 阶段，未开始累积无重复风险）；
  * 4xx 与 pump 中途失败不重试（部分内容已累积）。 */
 #define RIKKA_MAX_RETRIES 3
-int rp_chat_stream(const RikkaProviderCfg *cfg,
-                   const RikkaMessage *const *msgs, size_t n,
-                   RikkaStream *out, int timeout_ms,
-                   RikkaSessionStats *stats_out) {
+int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
+                      const RikkaMessage *const *msgs, size_t n,
+                      RikkaStream *out, int timeout_ms,
+                      RkStreamDeltaCb delta_cb, void *delta_ud,
+                      RikkaSessionStats *stats_out) {
     Buf body;
     buf_init(&body);
     if (rp_build_request(cfg, msgs, n, 1, &body) != 0) { buf_free(&body); return -1; }
@@ -671,6 +770,8 @@ int rp_chat_stream(const RikkaProviderCfg *cfg,
     for (int attempt = 0; attempt < RIKKA_MAX_RETRIES; attempt++) {
         RikkaStreamSession *ss = rp_session_create(cfg);
         if (!ss) break;
+        ss->delta_cb = delta_cb;
+        ss->delta_ud = delta_ud;
         rc = rp_stream_start(ss, NULL, (const char *)body.data, body.len, out,
                              timeout_ms, &status);
         if (rc == 0) {
@@ -685,4 +786,11 @@ int rp_chat_stream(const RikkaProviderCfg *cfg,
     }
     buf_free(&body);
     return rc;
+}
+
+int rp_chat_stream(const RikkaProviderCfg *cfg,
+                   const RikkaMessage *const *msgs, size_t n,
+                   RikkaStream *out, int timeout_ms,
+                   RikkaSessionStats *stats_out) {
+    return rp_chat_stream_cb(cfg, msgs, n, out, timeout_ms, NULL, NULL, stats_out);
 }
