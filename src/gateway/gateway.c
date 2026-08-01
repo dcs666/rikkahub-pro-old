@@ -114,9 +114,27 @@ static void *handle_request_thread(void *arg) {
 /* 处理 HTTP 请求 */
 static void handle_request(RkGateway *g, int client_fd) {
     char req[65536];
-    ssize_t n = read(client_fd, req, sizeof(req) - 1);
+    size_t req_len = 0;
+    /* 读取请求头 */
+    ssize_t n = read(client_fd, req + req_len, sizeof(req) - req_len - 1);
     if (n <= 0) { close(client_fd); return; }
-    req[n] = '\0';
+    req_len += (size_t)n;
+    req[req_len] = '\0';
+    /* 如果有 Content-Length，继续读 body 直到完整 */
+    char *hdr_end = strstr(req, "\r\n\r\n");
+    if (hdr_end) {
+        char *cl = strstr(req, "Content-Length:");
+        if (cl) {
+            long content_len = atol(cl + 15);
+            size_t hdr_total = (size_t)(hdr_end - req) + 4;
+            while (req_len < hdr_total + (size_t)content_len && req_len < sizeof(req) - 1) {
+                ssize_t r = read(client_fd, req + req_len, sizeof(req) - req_len - 1);
+                if (r <= 0) break;
+                req_len += (size_t)r;
+            }
+            req[req_len] = '\0';
+        }
+    }
     /* 解析 HTTP 请求行 */
     char method[16], path[256];
     if (sscanf(req, "%15s %255s", method, path) != 2) {
