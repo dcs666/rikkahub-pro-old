@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #include "test.h"
 #include "rikka/gateway/gateway.h"
 #include <stdio.h>
@@ -7,6 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <unistd.h>
 
 static void *gateway_thread(void *arg) {
     RkGateway *g = (RkGateway *)arg;
@@ -33,7 +35,8 @@ TEST(gateway_init_and_404) {
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
     ASSERT_EQ_INT(0, connect(fd, (struct sockaddr *)&addr, sizeof(addr)));
     const char *req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
-    write(fd, req, strlen(req));
+    ssize_t w = write(fd, req, strlen(req));
+    ASSERT(w > 0);
     char resp[1024];
     ssize_t n = read(fd, resp, sizeof(resp) - 1);
     ASSERT(n > 0);

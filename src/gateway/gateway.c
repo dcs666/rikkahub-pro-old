@@ -73,7 +73,7 @@ static void handle_request(RkGateway *g, int client_fd) {
         RJson *v = rjson_parse(a, body, strlen(body), &err);
         if (!v) {
             const char *resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
-            write(client_fd, resp, strlen(resp));
+            ssize_t _w = write(client_fd, resp, strlen(resp)); (void)_w;
             arena_destroy(a);
             close(client_fd);
             return;
@@ -81,7 +81,7 @@ static void handle_request(RkGateway *g, int client_fd) {
         const RJson *model = rjson_obj_get(v, "model");
         if (!model || model->type != RJSON_STRING) {
             const char *resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
-            write(client_fd, resp, strlen(resp));
+            ssize_t _w = write(client_fd, resp, strlen(resp)); (void)_w;
             arena_destroy(a);
             close(client_fd);
             return;
@@ -99,7 +99,7 @@ static void handle_request(RkGateway *g, int client_fd) {
         }
         if (!provider) {
             const char *resp = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
-            write(client_fd, resp, strlen(resp));
+            ssize_t _w = write(client_fd, resp, strlen(resp)); (void)_w;
             arena_destroy(a);
             close(client_fd);
             return;
@@ -117,7 +117,7 @@ static void handle_request(RkGateway *g, int client_fd) {
         RHttpConn *conn = rhttp_connect(host, (uint16_t)port, tls, 30000);
         if (!conn) {
             const char *resp = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n";
-            write(client_fd, resp, strlen(resp));
+            ssize_t _w = write(client_fd, resp, strlen(resp)); (void)_w;
             arena_destroy(a);
             close(client_fd);
             return;
@@ -134,7 +134,7 @@ static void handle_request(RkGateway *g, int client_fd) {
         if (rhttp_send(conn, "POST", full_path, headers, body, strlen(body)) != 0) {
             rhttp_close(conn);
             const char *resp = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n";
-            write(client_fd, resp, strlen(resp));
+            ssize_t _w = write(client_fd, resp, strlen(resp)); (void)_w;
             arena_destroy(a);
             close(client_fd);
             return;
@@ -143,7 +143,7 @@ static void handle_request(RkGateway *g, int client_fd) {
         if (rhttp_read_headers(conn, &resp, 30000) != 0) {
             rhttp_close(conn);
             const char *resp_str = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n";
-            write(client_fd, resp_str, strlen(resp_str));
+            ssize_t _w = write(client_fd, resp_str, strlen(resp_str)); (void)_w;
             arena_destroy(a);
             close(client_fd);
             return;
@@ -153,19 +153,19 @@ static void handle_request(RkGateway *g, int client_fd) {
         int hn = snprintf(resp_header, sizeof(resp_header),
                           "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n\r\n",
                           resp.status, resp.reason);
-        write(client_fd, resp_header, (size_t)hn);
+        ssize_t _w = write(client_fd, resp_header, (size_t)hn); (void)_w;
         /* 转发 body */
         char buf[16384];
         for (;;) {
             ssize_t r = rhttp_read_body(conn, buf, sizeof(buf), 30000);
             if (r <= 0) break;
-            write(client_fd, buf, (size_t)r);
+            ssize_t _w = write(client_fd, buf, (size_t)r); (void)_w;
         }
         rhttp_close(conn);
         arena_destroy(a);
     } else {
         const char *resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-        write(client_fd, resp, strlen(resp));
+        ssize_t _w = write(client_fd, resp, strlen(resp)); (void)_w;
     }
     close(client_fd);
 }

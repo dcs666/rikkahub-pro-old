@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #include "test.h"
 #include "rikka/trace/trace.h"
 #include "rikka/data/rbin.h"
@@ -5,6 +6,7 @@
 #include "rikka/util/arena.h"
 #include <string.h>
 #include <unistd.h>
+
 
 TEST(trace_basic) {
     RkTracer t;
