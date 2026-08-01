@@ -58,7 +58,7 @@ static uint64_t rd_u64(Rd *r) {
 }
 static const char *rd_bytes(Rd *r, size_t *n) {
     uint32_t l = rd_u32(r);
-    if (r->err || r->off + l > r->len) { r->err = 1; *n = 0; return NULL; }
+    if (r->err || l > r->len - r->off) { r->err = 1; *n = 0; return NULL; }
     const char *s = (const char *)r->p + r->off;
     r->off += l;
     *n = l;
