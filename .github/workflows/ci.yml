@@ -38,4 +38,4 @@ jobs:
       - name: TSan (SPSC/pipeline)
         run: |
           make clean
-          make test CFLAGS="-O1 -g -fsanitize=thread -Wall -Wextra -Wpedantic -std=c11" LDFLAGS="-lpthread -lssl -lcrypto -fsanitize=thread"
+          make test CFLAGS="-O1 -g -fsanitize=thread -Wall -Wextra -Wpedantic -std=c11" LDFLAGS="-lpthread -lssl -lcrypto -lz -fsanitize=thread"
