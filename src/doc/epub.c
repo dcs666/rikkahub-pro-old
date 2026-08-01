@@ -19,9 +19,12 @@ static size_t zip_find_all_central(const uint8_t *data, size_t len, const char *
                                     ZipEntry *entries, size_t max_entries) {
     /* 找 EOCD */
     size_t eocd_off = 0;
-    for (size_t i = len - 22; i > 0 && i < len; i--) {
-        uint32_t sig = data[i] | (data[i+1] << 8) | (data[i+2] << 16) | (data[i+3] << 24);
-        if (sig == ZIP_EOCD_SIG) { eocd_off = i; break; }
+    if (len >= 22) {
+        for (size_t i = len - 22; i > 0; i--) {
+            if (i + 3 >= len) continue;
+            uint32_t sig = data[i] | (data[i+1] << 8) | (data[i+2] << 16) | (data[i+3] << 24);
+            if (sig == ZIP_EOCD_SIG) { eocd_off = i; break; }
+        }
     }
     if (eocd_off == 0) return 0;
     uint16_t total_entries = data[eocd_off+10] | (data[eocd_off+11] << 8);
