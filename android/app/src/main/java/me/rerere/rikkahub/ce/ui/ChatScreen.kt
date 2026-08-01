@@ -97,11 +97,16 @@ private fun MessageBubble(msg: ChatMsg) {
             shape = RoundedCornerShape(12.dp),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Text(
-                    msg.text,
-                    fontFamily = if (msg.text.startsWith("⚙️")) FontFamily.Monospace else FontFamily.Default,
-                    fontSize = 15.sp,
-                )
+                if (msg.text.startsWith("⚙️")) {
+                    Text(
+                        msg.text,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    MarkdownText(msg.text)
+                }
                 if (msg.streaming) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
