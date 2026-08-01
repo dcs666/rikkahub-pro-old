@@ -1,1 +1,0 @@
--O2 -g -Wall -Wextra -Wpedantic -std=c11 -Iinclude -MMD -MP
