@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <time.h>
 
 struct RkChatIndex {
@@ -158,11 +159,11 @@ static void make_snippet(const char *content, const char *query, Buf *out) {
     const char *end = hit + qlen;
     for (size_t i = 0; i < 60 && *end; i++) end++;
     if (start > content) buf_append_str(out, "...");
-    buf_append(out, start, (size_t)(hit - start));
+    buf_append(out, start, (size_t)((uintptr_t)hit - (uintptr_t)start));
     buf_append_byte(out, '[');
     buf_append(out, hit, qlen);
     buf_append_byte(out, ']');
-    buf_append(out, hit + qlen, (size_t)(end - hit - qlen));
+    buf_append(out, hit + qlen, (size_t)((uintptr_t)end - (uintptr_t)hit - qlen));
     if (*end) buf_append_str(out, "...");
 }
 
