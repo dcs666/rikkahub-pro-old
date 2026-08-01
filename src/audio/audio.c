@@ -89,7 +89,7 @@ int rk_asr_openai(const char *api_key, const uint8_t *audio, size_t len,
                     "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.%s\"\r\n"
                     "Content-Type: audio/%s\r\n\r\n",
                     boundary, format ? format : "mp3", format ? format : "mp3");
-    if (off + len + 100 > sizeof(body)) return -1;
+    if (len > sizeof(body) - off - 100) return -1; /* 溢出防护 */
     memcpy(body + off, audio, len);
     off += len;
     off += snprintf(body + off, sizeof(body) - off,
