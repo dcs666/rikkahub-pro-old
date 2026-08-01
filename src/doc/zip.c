@@ -29,7 +29,7 @@ static size_t walk_central(const uint8_t *data, size_t len, ZipWalkCb cb, const 
                            ZipEntry *entries, size_t max_entries) {
     size_t eocd_off = find_eocd(data, len);
     if (eocd_off == 0) return 0;
-    uint16_t total_entries = data[eocd_off+10] | ((uint16_t)data[eocd_off+11] << 8);
+    uint16_t total_entries = (uint16_t)(data[eocd_off+10] | ((uint16_t)data[eocd_off+11] << 8));
     uint32_t cd_offset = data[eocd_off+16] | ((uint32_t)data[eocd_off+17] << 8) |
                          ((uint32_t)data[eocd_off+18] << 16) | ((uint32_t)data[eocd_off+19] << 24);
     if (cd_offset >= len) return 0;
@@ -38,14 +38,14 @@ static size_t walk_central(const uint8_t *data, size_t len, ZipWalkCb cb, const 
         uint32_t sig = data[off] | ((uint32_t)data[off+1] << 8) |
                        ((uint32_t)data[off+2] << 16) | ((uint32_t)data[off+3] << 24);
         if (sig != ZIP_CENTRAL_SIG) break;
-        uint16_t comp_method = data[off+10] | ((uint16_t)data[off+11] << 8);
+        uint16_t comp_method = (uint16_t)(data[off+10] | ((uint16_t)data[off+11] << 8));
         uint32_t comp_sz = data[off+20] | ((uint32_t)data[off+21] << 8) |
                            ((uint32_t)data[off+22] << 16) | ((uint32_t)data[off+23] << 24);
         uint32_t uncomp_sz = data[off+24] | ((uint32_t)data[off+25] << 8) |
                              ((uint32_t)data[off+26] << 16) | ((uint32_t)data[off+27] << 24);
-        uint16_t fname_len = data[off+28] | ((uint16_t)data[off+29] << 8);
-        uint16_t extra_len = data[off+30] | ((uint16_t)data[off+31] << 8);
-        uint16_t comment_len = data[off+32] | ((uint16_t)data[off+33] << 8);
+        uint16_t fname_len = (uint16_t)(data[off+28] | ((uint16_t)data[off+29] << 8));
+        uint16_t extra_len = (uint16_t)(data[off+30] | ((uint16_t)data[off+31] << 8));
+        uint16_t comment_len = (uint16_t)(data[off+32] | ((uint16_t)data[off+33] << 8));
         uint32_t local_off = data[off+42] | ((uint32_t)data[off+43] << 8) |
                              ((uint32_t)data[off+44] << 16) | ((uint32_t)data[off+45] << 24);
         if (fname_len > len - off - 46) break; /* 溢出防护 */
@@ -61,8 +61,8 @@ static size_t walk_central(const uint8_t *data, size_t len, ZipWalkCb cb, const 
             e->data = NULL;
             /* 从 local header 定位压缩数据偏移 */
             if (local_off + 30 <= len) {
-                uint16_t l_fn = data[local_off+26] | ((uint16_t)data[local_off+27] << 8);
-                uint16_t l_ex = data[local_off+28] | ((uint16_t)data[local_off+29] << 8);
+                uint16_t l_fn = (uint16_t)(data[local_off+26] | ((uint16_t)data[local_off+27] << 8));
+                uint16_t l_ex = (uint16_t)(data[local_off+28] | ((uint16_t)data[local_off+29] << 8));
                 size_t d = local_off + 30 + l_fn + l_ex;
                 if (d <= len && comp_sz <= len - d) e->data = data + d;
             }

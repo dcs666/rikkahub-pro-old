@@ -28,10 +28,17 @@ static jmethodID g_m_delta, g_m_tool_call, g_m_tool_result, g_m_finish;
 
 static void jni_delta(void *ud, int kind, const char *data, size_t len) {
     JniCb *jc = (JniCb *)ud;
-    jstring s = (*jc->env)->NewString(jc->env, data, (jsize)len);
-    if (s) {
-        (*jc->env)->CallVoidMethod(jc->env, jc->cb, g_m_delta, (jint)kind, s);
-        (*jc->env)->DeleteLocalRef(jc->env, s);
+    /* NewStringUTF 需要 NUL 结尾：临时拷贝（增量块通常 <4KB） */
+    char tmp[4096];
+    const char *s = data;
+    if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
+    memcpy(tmp, data, len);
+    tmp[len] = '\0';
+    s = tmp;
+    jstring js = (*jc->env)->NewStringUTF(jc->env, s);
+    if (js) {
+        (*jc->env)->CallVoidMethod(jc->env, jc->cb, g_m_delta, (jint)kind, js);
+        (*jc->env)->DeleteLocalRef(jc->env, js);
     }
 }
 
@@ -55,14 +62,12 @@ static void jni_tool_result(void *ud, const char *name, const char *result) {
 
 /* ---------- JSON 辅助 ---------- */
 
-static const char *jstr(RJson *o, const char *key) {
+static const char *jstr(const RJson *o, const char *key) {
     if (!o) return NULL;
     const RJson *v = rjson_obj_get(o, key);
     if (v && v->type == RJSON_STRING) return v->u.str.ptr;
     return NULL;
-}
-
-/* ---------- 消息解析 ---------- */
+}/* ---------- 消息解析 ---------- */
 
 static int parse_history(Arena *a, const char *history_json,
                          const RikkaMessage **out, size_t cap, size_t *n_out) {

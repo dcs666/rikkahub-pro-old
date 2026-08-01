@@ -150,7 +150,7 @@ static void claude_content(Buf *out, const RikkaMessage *m) {
         if (!first) buf_append_str(out, ",");
         switch (p->type) {
             case RIKKA_PART_TEXT:
-                if (p->len == 0) { first = first; continue; }
+                if (p->len == 0) continue;
                 buf_append_str(out, "{\"type\":\"text\",\"text\":");
                 part_text(out, p);
                 buf_append_str(out, "}");
