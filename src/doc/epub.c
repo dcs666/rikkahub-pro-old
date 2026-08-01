@@ -1,117 +1,17 @@
 #define _POSIX_C_SOURCE 200809L
 #include "rikka/doc/epub.h"
+#include "zip.h"
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
 
-#define ZIP_LOCAL_SIG 0x04034b50
-#define ZIP_CENTRAL_SIG 0x02014b50
-#define ZIP_EOCD_SIG 0x06054b50
-
-/* 从 central directory 找所有匹配后缀的文件 */
-typedef struct {
-    char name[256];
-    const uint8_t *data;
-    size_t comp_size, uncomp_size;
-    int method;
-} ZipEntry;
-static size_t zip_find_all_central(const uint8_t *data, size_t len, const char *suffix,
-                                    ZipEntry *entries, size_t max_entries) {
-    /* 找 EOCD */
-    size_t eocd_off = 0;
-    if (len >= 22) {
-        for (size_t i = len - 22; i > 0; i--) {
-            if (i + 3 >= len) continue;
-            uint32_t sig = data[i] | (data[i+1] << 8) | (data[i+2] << 16) | (data[i+3] << 24);
-            if (sig == ZIP_EOCD_SIG) { eocd_off = i; break; }
-        }
-    }
-    if (eocd_off == 0) return 0;
-    uint16_t total_entries = data[eocd_off+10] | (data[eocd_off+11] << 8);
-    uint32_t cd_offset = data[eocd_off+16] | (data[eocd_off+17] << 8) |
-                         (data[eocd_off+18] << 16) | (data[eocd_off+19] << 24);
-    if (cd_offset >= len) return 0;
-    size_t off = cd_offset, count = 0;
-    size_t suffix_len = strlen(suffix);
-    for (uint16_t i = 0; i < total_entries && off + 46 <= len && count < max_entries; i++) {
-        uint32_t sig = data[off] | (data[off+1] << 8) | (data[off+2] << 16) | (data[off+3] << 24);
-        if (sig != ZIP_CENTRAL_SIG) break;
-        uint16_t comp_method = data[off+10] | (data[off+11] << 8);
-        uint32_t comp_sz = data[off+20] | (data[off+21] << 8) | (data[off+22] << 16) | (data[off+23] << 24);
-        uint32_t uncomp_sz = data[off+24] | (data[off+25] << 8) | (data[off+26] << 16) | (data[off+27] << 24);
-        uint16_t fname_len = data[off+28] | (data[off+29] << 8);
-        uint16_t extra_len = data[off+30] | (data[off+31] << 8);
-        uint16_t comment_len = data[off+32] | (data[off+33] << 8);
-        uint32_t local_off = data[off+42] | (data[off+43] << 8) | (data[off+44] << 16) | (data[off+45] << 24);
-        if (fname_len > len - off - 46) break; /* 溢出防护 */
-        const char *fname = (const char *)data + off + 46;
-        if (fname_len >= suffix_len &&
-            memcmp(fname + fname_len - suffix_len, suffix, suffix_len) == 0) {
-            ZipEntry *e = &entries[count++];
-            size_t copy_len = fname_len < 255 ? fname_len : 255;
-            memcpy(e->name, fname, copy_len);
-            e->name[copy_len] = '\0';
-            e->comp_size = comp_sz;
-            e->uncomp_size = uncomp_sz;
-            e->method = comp_method;
-            /* 从 local header 找数据偏移 */
-            if (local_off + 30 <= len) {
-                uint16_t l_fname_len = data[local_off+26] | (data[local_off+27] << 8);
-                uint16_t l_extra_len = data[local_off+28] | (data[local_off+29] << 8);
-                size_t data_off = local_off + 30 + l_fname_len + l_extra_len;
-                e->data = (data_off <= len) ? data + data_off : NULL;
-            } else {
-                e->data = NULL;
-            }
-        }
-        size_t next_off = off + 46 + fname_len + extra_len + comment_len;
-        if (next_off <= off) break; /* 溢出防护 */
-        off = next_off;
-    }
-    return count;
+/* 文件名后缀匹配（.xhtml / .html） */
+static int epub_suffix_match(const char *name, size_t name_len, void *ctx) {
+    const char *suffix = (const char *)ctx;
+    size_t slen = strlen(suffix);
+    return name_len >= slen && memcmp(name + name_len - slen, suffix, slen) == 0;
 }
 
-/* 从 zip 中找所有匹配后缀的文件，返回文件名列表 + 数据指针 */
-
-static size_t zip_find_all(const uint8_t *data, size_t len, const char *suffix,
-                           ZipEntry *entries, size_t max_entries) {
-    /* 优先用 central directory */
-    size_t count = zip_find_all_central(data, len, suffix, entries, max_entries);
-    if (count > 0) return count;
-    /* 回退：扫描 local file header */
-    size_t off = 0;
-    count = 0;
-    size_t suffix_len = strlen(suffix);
-    while (off + 30 <= len && count < max_entries) {
-        uint32_t sig = data[off] | (data[off+1] << 8) | (data[off+2] << 16) | (data[off+3] << 24);
-        if (sig != ZIP_LOCAL_SIG) break;
-        uint16_t comp_method = data[off+8] | (data[off+9] << 8);
-        uint32_t comp_sz = data[off+18] | (data[off+19] << 8) | (data[off+20] << 16) | (data[off+21] << 24);
-        uint32_t uncomp_sz = data[off+22] | (data[off+23] << 8) | (data[off+24] << 16) | (data[off+25] << 24);
-        uint16_t fname_len = data[off+26] | (data[off+27] << 8);
-        uint16_t extra_len = data[off+28] | (data[off+29] << 8);
-        if (fname_len > len - off - 30) break; /* 溢出防护 */
-        const char *fname = (const char *)data + off + 30;
-        size_t data_off = off + 30 + fname_len + extra_len;
-        if (data_off > len) break;
-        /* 检查后缀 */
-        if (fname_len >= suffix_len &&
-            memcmp(fname + fname_len - suffix_len, suffix, suffix_len) == 0) {
-            ZipEntry *e = &entries[count++];
-            size_t copy_len = fname_len < 255 ? fname_len : 255;
-            memcpy(e->name, fname, copy_len);
-            e->name[copy_len] = '\0';
-            e->data = data + data_off;
-            e->comp_size = comp_sz;
-            e->uncomp_size = uncomp_sz;
-            e->method = comp_method;
-        }
-        off = data_off + comp_sz;
-    }
-    return count;
-}
-
-/* XHTML 标签剥离：提取文本 */
+/* XHTML 标签剥离：提取文本（script/style 内容丢弃，块级标签换行，实体解码） */
 static char *xhtml_extract_text(const char *html, size_t len, size_t *out_len) {
     char *out = (char *)malloc(len + 1);
     if (!out) return NULL;
@@ -158,52 +58,15 @@ static char *xhtml_extract_text(const char *html, size_t len, size_t *out_len) {
     return out;
 }
 
-/* 解压 zip entry */
-static char *inflate_entry(const ZipEntry *e, size_t *out_len) {
-    char *out = NULL;
-    if (e->method == 0) {
-        out = (char *)malloc(e->comp_size + 1);
-        if (!out) return NULL;
-        memcpy(out, e->data, e->comp_size);
-        out[e->comp_size] = '\0';
-        *out_len = e->comp_size;
-    } else if (e->method == 8) {
-        out = (char *)malloc(e->uncomp_size + 1);
-        if (!out) return NULL;
-        z_stream strm;
-        memset(&strm, 0, sizeof(strm));
-        strm.next_in = (Bytef *)e->data;
-        strm.avail_in = e->comp_size;
-        strm.next_out = (Bytef *)out;
-        strm.avail_out = e->uncomp_size;
-        if (inflateInit2(&strm, -15) != Z_OK) {
-            free(out);
-            return NULL;
-        }
-        int ret = inflate(&strm, Z_FINISH);
-        inflateEnd(&strm);
-        if (ret != Z_STREAM_END && ret != Z_OK) {
-            free(out);
-            return NULL;
-        }
-        *out_len = strm.total_out;
-        if (*out_len > e->uncomp_size) { /* 解压大小异常 */
-            free(out);
-            return NULL;
-        }
-        out[*out_len] = '\0';
-    }
-    return out;
-}
-
 int epub_parse(const uint8_t *data, size_t len, EpubContent *out) {
     if (!data || !out) return -1;
     out->text = NULL;
     out->len = 0;
-    /* 找所有 .xhtml 和 .html 文件 */
+    /* 找所有 .xhtml 和 .html 文件（共享 zip 读取，central directory） */
     ZipEntry entries[64];
-    size_t count_xhtml = zip_find_all(data, len, ".xhtml", entries, 64);
-    size_t count_html = zip_find_all(data, len, ".html", entries + count_xhtml, 64 - count_xhtml);
+    size_t count_xhtml = zip_find_matching(data, len, epub_suffix_match, ".xhtml", entries, 64);
+    size_t count_html = zip_find_matching(data, len, epub_suffix_match, ".html",
+                                          entries + count_xhtml, 64 - count_xhtml);
     size_t total = count_xhtml + count_html;
     if (total == 0) return -1;
     /* 合并所有文件的文本 */
@@ -213,7 +76,7 @@ int epub_parse(const uint8_t *data, size_t len, EpubContent *out) {
     size_t merged_cap = 1024 * 1024;
     for (size_t i = 0; i < total; i++) {
         size_t html_len = 0;
-        char *html = inflate_entry(&entries[i], &html_len);
+        char *html = zip_inflate(&entries[i], &html_len);
         if (!html) continue;
         size_t text_len = 0;
         char *text = xhtml_extract_text(html, html_len, &text_len);
