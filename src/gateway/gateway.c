@@ -36,7 +36,7 @@ int rk_gateway_init(RkGateway *g, int port) {
         g->fd = -1;
         return -1;
     }
-    g->running = 1;
+    __atomic_store_n(&g->running, 1, __ATOMIC_RELAXED);
     g->pool_count = 0;
     pthread_mutex_init(&g->pool_mutex, NULL);
     return 0;
@@ -244,7 +244,7 @@ int rk_gateway_run(RkGateway *g) {
         return -1;
     }
     struct epoll_event events[64];
-    while (g->running) {
+    while (__atomic_load_n(&g->running, __ATOMIC_RELAXED)) {
         int n = epoll_wait(epfd, events, 64, 1000);
         if (n < 0) {
             if (errno == EINTR) continue;
@@ -281,7 +281,7 @@ int rk_gateway_run(RkGateway *g) {
 
 void rk_gateway_stop(RkGateway *g) {
     if (!g) return;
-    g->running = 0;
+    __atomic_store_n(&g->running, 0, __ATOMIC_RELAXED);
     if (g->fd >= 0) {
         close(g->fd);
         g->fd = -1;
