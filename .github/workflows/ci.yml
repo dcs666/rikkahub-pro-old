@@ -66,5 +66,6 @@ jobs:
           gradle-version: 8.7
       - name: Assemble debug APK
         run: |
-          gradle -p android :app:assembleDebug --no-daemon 2>&1 | tail -5
+          gradle -p android :app:assembleDebug --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -80 /tmp/gradle.log; exit 1; }
+          tail -5 /tmp/gradle.log
           ls -la android/app/build/outputs/apk/debug/*.apk
