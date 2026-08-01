@@ -86,10 +86,13 @@ static void pool_release_conn(RkGateway *g, RHttpConn *conn) {
     for (size_t i = 0; i < g->pool_count; i++) {
         if (g->pool[i].conn == conn) {
             g->pool[i].in_use = 0;
-            break;
+            pthread_mutex_unlock(&g->pool_mutex);
+            return;
         }
     }
     pthread_mutex_unlock(&g->pool_mutex);
+    /* 不在池中（池满时新建的连接），直接释放 */
+    rhttp_close(conn);
 }
 
 /* 处理 HTTP 请求 */
