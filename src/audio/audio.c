@@ -55,8 +55,9 @@ int rk_tts_openai(const char *api_key, const char *text, const char *voice, RkAu
         ssize_t r = rhttp_read_body(c, (char *)buf, sizeof(buf), 30000);
         if (r < 0) break;
         if (r == 0) break;
-        if (len + (size_t)r > cap) {
+        if ((size_t)r > cap - len) {
             size_t nc = cap ? cap * 2 : 65536;
+            if (nc < len + (size_t)r) nc = len + (size_t)r;
             uint8_t *nd = (uint8_t *)realloc(data, nc);
             if (!nd) break;
             data = nd;
