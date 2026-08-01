@@ -83,6 +83,12 @@ void rstream_append_reasoning(RikkaStream *s, const char *data, size_t len) {
     p->len = s->reasoning_buf.len;
 }
 
+void rmsg_free_bufs(RikkaMessage *m) {
+    if (!m) return;
+    if (m->owned_buf) { buf_free(m->owned_buf); m->owned_buf = NULL; }
+    if (m->reasoning_owned) { buf_free(m->reasoning_owned); m->reasoning_owned = NULL; }
+}
+
 void rstream_freeze(RikkaStream *s) {
     if (!s->active) return;
     /* 空文本/reasoning 不需要 part：清理所有空 part（可能 text/reasoning 交替） */
@@ -187,6 +193,8 @@ RNode *rconv_regenerate(RConversation *c, RNode *at) {
 static void rnode_free_tree(RNode *n) {
     if (!n) return;
     for (size_t i = 0; i < n->child_count; i++) rnode_free_tree(n->children[i]);
+    /* 冻结消息持有的 malloc 缓冲在此释放（消息结构本身归 arena） */
+    if (n->msg) rmsg_free_bufs((RikkaMessage *)n->msg);
     if (n->stream) {
         rstream_destroy(n->stream);
         free(n->stream);

@@ -208,6 +208,7 @@ static void run_stream_test(RikkaProviderId id, const char *mock_path,
     if (expect_reason) ASSERT(strcmp(reason, expect_reason) == 0);
 
     rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
     buf_free(&body);
     rp_session_destroy(ss);
     arena_destroy(a);
@@ -303,6 +304,7 @@ TEST(stream_retry_on_500) {
     ASSERT(strstr(detail, "boom 500") != NULL);
     free(detail);
     rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
     buf_free(&body);
     rp_session_destroy(ss);
     arena_destroy(a);
@@ -340,6 +342,7 @@ TEST(stream_retry_success_after_500) {
     char *detail = rp_take_error_detail(ss);
     ASSERT_NULL(detail);
     rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
     buf_free(&body);
     rp_session_destroy(ss);
     arena_destroy(a);
@@ -374,6 +377,7 @@ TEST(stream_retry_429_then_success) {
     text_of(&out, text, sizeof(text), 0);
     ASSERT(strstr(text, "Hello") != NULL);
     rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
     buf_free(&body);
     rp_session_destroy(ss);
     arena_destroy(a);
@@ -405,6 +409,7 @@ TEST(stream_retry_4xx_no_retry) {
     char *detail = rp_take_error_detail(ss);
     ASSERT_NULL(detail); /* 404 无 JSON 错误体 */
     rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
     buf_free(&body);
     rp_session_destroy(ss);
     arena_destroy(a);
@@ -446,6 +451,7 @@ TEST(stream_bad_sse_no_deadlock) {
     int rc = rp_stream_pump_async(ss, 3000);
     ASSERT_EQ_INT(-1, rc);
     rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
     buf_free(&body);
     rp_session_destroy(ss);
     arena_destroy(a);

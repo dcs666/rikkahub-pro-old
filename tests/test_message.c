@@ -30,6 +30,7 @@ TEST(stream_text_accumulate) {
     ASSERT(s.msg->frozen);
     ASSERT_EQ_SIZE(11, s.msg->parts[0].len);
     rstream_destroy(&s);
+    rmsg_free_bufs(s.msg);
     arena_destroy(a);
 }
 
@@ -51,6 +52,7 @@ TEST(stream_text_reasoning_mix) {
     ASSERT(memcmp(s.msg->parts[2].data, "thinkmore", 9) == 0);
     rstream_freeze(&s);
     rstream_destroy(&s);
+    rmsg_free_bufs(s.msg);
     arena_destroy(a);
 }
 
@@ -71,6 +73,7 @@ TEST(stream_large_correctness) {
     ASSERT_EQ_SIZE(3200000, s.msg->parts[0].len);
     ASSERT(s.msg->parts[0].data[100] == token[100 % 32]);
     rstream_destroy(&s);
+    rmsg_free_bufs(s.msg);
     arena_destroy(a);
 }
 
@@ -149,6 +152,7 @@ TEST(freeze_reasoning_survives_destroy) {
         }
     }
     ASSERT(found);
+    rmsg_free_bufs(s.msg); /* 断言结束后再释放 owned 缓冲 */
     arena_destroy(a);
 }
 
@@ -161,6 +165,7 @@ TEST(freeze_empty_text_removed) {
     /* 非空保留 */
     ASSERT_EQ_SIZE(1, s.msg->part_count);
     rstream_destroy(&s);
+    rmsg_free_bufs(s.msg);
 
     RikkaStream s2;
     rstream_init(&s2, a, RIKKA_ROLE_ASSISTANT);
@@ -168,6 +173,7 @@ TEST(freeze_empty_text_removed) {
     rstream_freeze(&s2);
     ASSERT_EQ_SIZE(0, s2.msg->part_count);
     rstream_destroy(&s2);
+    rmsg_free_bufs(s2.msg);
     arena_destroy(a);
 }
 

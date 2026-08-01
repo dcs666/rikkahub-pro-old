@@ -57,6 +57,14 @@ typedef struct {
 RikkaMessage *rmsg_new(Arena *arena, RikkaRole role);
 RikkaPart *rmsg_add_part(Arena *arena, RikkaMessage *m, RikkaPartType type);
 
+/*
+ * 释放冻结消息持有的流式累积缓冲（owned_buf / reasoning_owned）。
+ * 消息结构本身是 arena 分配的（随 arena 释放），但 freeze 转移来的
+ * 文本缓冲是 malloc 的——会话树销毁（rconv_destroy）会自动调用；
+ * 独立持有冻结消息的调用方必须手动调用，否则泄漏。
+ */
+void rmsg_free_bufs(RikkaMessage *m);
+
 /* ---------- 流式累积（S2 核心） ---------- */
 
 typedef struct {
