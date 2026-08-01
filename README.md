@@ -93,4 +93,4 @@ rikkahub --trace "explain this"
 
 - M0-M7 全部完成（基础设施→JSON→消息→Provider→增量解析→数据层→无锁管道→trace/文档/MCP/workspace/音频/渲染/网关）
 - 八轮 deep-review，修复 40+ 问题
-- 剩余 TODO：audio TTS/ASR 网络测试（需 API key）、MCP SSE 完整实现
+- 剩余 TODO：audio TTS/ASR 网络测试（需 API key）、MCP SSE 完整实现（stdio 已覆盖本地场景，SSE 需 HTTP fd 暴露 + 事件循环）

@@ -14,6 +14,7 @@ int run_suite(const char *suite_name, const RikkaTest *tests, size_t count) {
 }
 
 int run_pipe_suite(void);
+int run_gateway_e2e_suite(void);
 int run_gateway_suite(void);
 int run_render_suite(void);
 int run_audio_suite(void);
@@ -54,6 +55,7 @@ int main(void) {
     failed |= run_audio_suite();
     failed |= run_render_suite();
     failed |= run_gateway_suite();
+    failed |= run_gateway_e2e_suite();
     failed |= run_pipe_suite();
     if (failed == 0) {
         printf("\nALL SUITES PASSED\n");

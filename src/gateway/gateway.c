@@ -185,14 +185,29 @@ static void handle_request(RkGateway *g, int client_fd) {
             return;
         }
         /* 代理请求到 provider（简化：直接转发 body） */
-        /* 解析 base_url */
+        /* 解析 base_url（支持 host:port） */
         char host[256], path_prefix[256];
         int tls = 0;
         int port = 80;
         const char *url = provider->base_url;
         if (strncmp(url, "https://", 8) == 0) { tls = 1; port = 443; url += 8; }
         else if (strncmp(url, "http://", 7) == 0) { url += 7; }
-        sscanf(url, "%255[^/]%255s", host, path_prefix);
+        {
+            const char *colon = strchr(url, ':');
+            const char *slash = strchr(url, '/');
+            if (colon && (!slash || colon < slash)) {
+                size_t hn = (size_t)(colon - url);
+                if (hn >= sizeof(host)) hn = sizeof(host) - 1;
+                memcpy(host, url, hn);
+                host[hn] = '\0';
+                int p = atoi(colon + 1);
+                if (p > 0 && p < 65536) port = p;
+                if (slash) snprintf(path_prefix, sizeof(path_prefix), "%s", slash);
+                else path_prefix[0] = '\0';
+            } else {
+                sscanf(url, "%255[^/]%255s", host, path_prefix);
+            }
+        }
         /* 连接 provider（连接池） */
         RHttpConn *conn = pool_get_conn(g, host, port, tls);
         if (!conn) {
