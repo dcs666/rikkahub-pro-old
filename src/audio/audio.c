@@ -17,11 +17,16 @@ void rk_audio_free(RkAudio *a) {
 
 int rk_tts_openai(const char *api_key, const char *text, const char *voice, RkAudio *out) {
     if (!api_key || !text || !out) return -1;
-    /* 构建请求 JSON */
+    /* 构建请求 JSON（text 转义防 JSON 注入） */
     char body[8192];
+    RJsonOut jo;
+    rjson_out_init(&jo);
+    rjson_write_string(&jo, text, strlen(text)); /* 转义后的 text */
     int n = snprintf(body, sizeof(body),
-                     "{\"model\":\"tts-1\",\"input\":\"%s\",\"voice\":\"%s\"}",
-                     text, voice ? voice : "alloy");
+                     "{\"model\":\"tts-1\",\"input\":%s,\"voice\":\"%s\"}",
+                     jo.buf ? jo.buf : "\"\"",
+                     voice ? voice : "alloy");
+    rjson_out_free(&jo);
     if (n < 0 || (size_t)n >= sizeof(body)) return -1;
     /* HTTP POST */
     RHttpConn *c = rhttp_connect("api.openai.com", 443, 1, 30000);
