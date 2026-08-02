@@ -570,6 +570,59 @@ TEST(stream_google_tool) {
     stop_mock_server();
 }
 
+TEST(stream_parallel_tools) {
+    if (getenv("CI")) {
+        printf("  [skip: CI environment]\n");
+        return;
+    }
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key",
+                            "gpt-4o", 100, 0, NULL, {0}};
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "run both");
+    RikkaStream out;
+    rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+    RikkaStreamSession *ss = rp_session_create(&cfg);
+    Buf body;
+    buf_init(&body);
+    ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 1, 1, &body));
+    int status = 0;
+    ASSERT_EQ_INT(0, rp_stream_start(ss, "/parallel", (const char *)body.data,
+                                     body.len, &out, 15000, &status));
+    ASSERT_EQ_INT(0, rp_stream_pump(ss, 15000));
+    rstream_freeze(&out);
+    /* 两个并行 TOOL_CALL parts（index 0/1） */
+    int n_tc = 0;
+    int got_time = 0, got_mem = 0;
+    for (size_t i = 0; i < out.msg->part_count; i++) {
+        const RikkaPart *p = &out.msg->parts[i];
+        if (p->type == RIKKA_PART_TOOL_CALL) {
+            n_tc++;
+            if (strcmp(p->tool_name, "get_time_info") == 0 && p->tool_id &&
+                strcmp(p->tool_id, "call_a") == 0 && p->data && strcmp(p->data, "{}") == 0) {
+                got_time = 1;
+            }
+            if (strcmp(p->tool_name, "memory_tool") == 0 && p->tool_id &&
+                strcmp(p->tool_id, "call_b") == 0 && p->data &&
+                strstr(p->data, "\"create\"") != NULL) {
+                got_mem = 1;
+            }
+        }
+    }
+    ASSERT_EQ_INT(2, n_tc);
+    ASSERT_EQ_INT(1, got_time);
+    ASSERT_EQ_INT(1, got_mem);
+    rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
+    buf_free(&body);
+    rp_session_destroy(ss);
+    arena_destroy(a);
+    stop_mock_server();
+}
+
 int run_provider_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(provider, build_openai),
@@ -589,6 +642,7 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, ocr_via_provider),
         RIKKA_TEST_REGISTER(provider, stream_claude_tool),
         RIKKA_TEST_REGISTER(provider, stream_google_tool),
+        RIKKA_TEST_REGISTER(provider, stream_parallel_tools),
     };
     return run_suite("provider", tests, sizeof(tests) / sizeof(tests[0]));
 }

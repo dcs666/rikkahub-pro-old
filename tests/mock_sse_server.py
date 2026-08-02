@@ -450,6 +450,32 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, ValueError):
                 pass
+        elif self.path == '/parallel':
+            # OpenAI 并行工具调用回放（index 0 + index 1）
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            evs = [
+                'data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"get_time_info","arguments":""}}]},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"memory_tool","arguments":"{\\"action\\":"}}]},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"\\"create\\",\\"content\\":\\"hi\\"}"}}]},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+                'data: [DONE]\n\n',
+            ]
+            for e in evs:
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+            try:
+                self.wfile.write(b'0\r\n\r\n')
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         elif self.path == '/openai':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')

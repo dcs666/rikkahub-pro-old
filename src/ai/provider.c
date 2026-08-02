@@ -314,6 +314,12 @@ int rp_build_request(const RikkaProviderCfg *cfg,
 
 /* ================= 统一流式管线 ================= */
 
+typedef struct {
+    char name[128];
+    char id[64];
+    Buf args;
+} RkTcCall;
+
 struct RikkaStreamSession {
     RikkaProviderCfg cfg;
     RHttpConn *conn;
@@ -321,15 +327,18 @@ struct RikkaStreamSession {
     RJsonStream *js_type;    /* Claude delta.type → type_buf */
     RJsonStream *js_text;    /* content/text → text part */
     RJsonStream *js_reason;  /* reasoning/thinking → reasoning part */
-    RJsonStream *js_tc_name; /* OpenAI tool_calls[0].function.name */
-    RJsonStream *js_tc_args; /* OpenAI tool_calls[0].function.arguments */
-    RJsonStream *js_tc_id;   /* OpenAI tool_calls[0].id */
+    RJsonStream *js_tc_name; /* Claude tool_use name（单槽） */
+    RJsonStream *js_tc_id;   /* Claude tool_use id */
+    RJsonStream *js_tc_args; /* OpenAI args / Claude partial_json / Google functionCall */
     RikkaStream *out;
     RikkaSessionStats stats;
     Buf type_buf;
     Buf tc_name_buf;
     Buf tc_args_buf;
     Buf tc_id_buf;
+    /* OpenAI 并行工具调用（按 index 槽位累积） */
+    RkTcCall tc_calls[8];
+    size_t tc_count;
     char *last_error;        /* 最近一次非 2xx 错误详情（malloc，take 转移所有权） */
     RkStreamDeltaCb delta_cb; /* 增量回调（rp_chat_stream_cb 用，可 NULL） */
     void *delta_ud;
@@ -402,18 +411,59 @@ static void google_finalize_tool_call(RikkaStreamSession *ss) {
     arena_destroy(a);
     buf_reset(&ss->tc_args_buf);
 }
-/* OpenAI tool_calls delta（index 0 单调用；并行多 index 打磨期扩展） */
-static const RJsonStreamPathElem P_OAI_TC_NAME[] = {
-    {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}},
-    {0, {.key = "tool_calls"}}, {1, {.index = 0}}, {0, {.key = "function"}},
-    {0, {.key = "name"}}, {-2, {0}}};
-static const RJsonStreamPathElem P_OAI_TC_ARGS[] = {
-    {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}},
-    {0, {.key = "tool_calls"}}, {1, {.index = 0}}, {0, {.key = "function"}},
-    {0, {.key = "arguments"}}, {-2, {0}}};
-static const RJsonStreamPathElem P_OAI_TC_ID[] = {
-    {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}},
-    {0, {.key = "tool_calls"}}, {1, {.index = 0}}, {0, {.key = "id"}}, {-2, {0}}};
+/* OpenAI tool_calls 专用解析（并行多 index；每事件完整解析增量字段） */
+static void oai_parse_tool_calls(RikkaStreamSession *ss, const char *data, size_t len) {
+    if (len < 10) return;
+    int has = 0;
+    for (size_t i = 0; i + 9 <= len; i++) {
+        if (memcmp(data + i, "tool_calls", 9) == 0) { has = 1; break; }
+    }
+    if (!has) return;
+    Arena *a = arena_create(0);
+    size_t err = 0;
+    RJson *v = rjson_parse(a, data, len, &err);
+    if (v) {
+        const RJson *choices = rjson_obj_get(v, "choices");
+        if (choices && choices->type == RJSON_ARRAY && choices->u.arr.count > 0) {
+            const RJson *delta = rjson_obj_get(choices->u.arr.items[0], "delta");
+            const RJson *tcs = delta ? rjson_obj_get(delta, "tool_calls") : NULL;
+            if (tcs && tcs->type == RJSON_ARRAY) {
+                for (size_t i = 0; i < tcs->u.arr.count && i < 8; i++) {
+                    const RJson *tc = tcs->u.arr.items[i];
+                    if (tc->type != RJSON_OBJECT) continue;
+                    int idx = 0;
+                    const RJson *ix = rjson_obj_get(tc, "index");
+                    if (ix && ix->type == RJSON_NUMBER) idx = (int)ix->u.number;
+                    if (idx < 0 || idx >= 8) idx = 0;
+                    if ((size_t)idx + 1 > ss->tc_count) ss->tc_count = (size_t)idx + 1;
+                    RkTcCall *c = &ss->tc_calls[idx];
+                    const RJson *id = rjson_obj_get(tc, "id");
+                    if (id && id->type == RJSON_STRING) {
+                        size_t il = id->u.str.len < sizeof(c->id) - 1 ? id->u.str.len
+                                                                      : sizeof(c->id) - 1;
+                        memcpy(c->id, id->u.str.ptr, il);
+                        c->id[il] = '\0';
+                    }
+                    const RJson *fn = rjson_obj_get(tc, "function");
+                    if (fn && fn->type == RJSON_OBJECT) {
+                        const RJson *nm = rjson_obj_get(fn, "name");
+                        if (nm && nm->type == RJSON_STRING) {
+                            size_t nl = nm->u.str.len < sizeof(c->name) - 1 ? nm->u.str.len
+                                                                             : sizeof(c->name) - 1;
+                            memcpy(c->name, nm->u.str.ptr, nl);
+                            c->name[nl] = '\0';
+                        }
+                        const RJson *ar = rjson_obj_get(fn, "arguments");
+                        if (ar && ar->type == RJSON_STRING) {
+                            buf_append(&c->args, ar->u.str.ptr, ar->u.str.len);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    arena_destroy(a);
+}
 /* Claude tool_calls: content_block_start 的 content_block.name/id;
  * content_block_delta 的 delta.partial_json（流式累积） */
 static const RJsonStreamPathElem P_CLAUDE_TC_NAME[] = {
@@ -479,26 +529,16 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
             /* 双提取：content 与 reasoning_content 各进各的 part（零拷贝分流） */
             run_extract(ss->js_text, data, len);
             run_extract(ss->js_reason, data, len);
-            /* tool_calls delta（index 0 单调用） */
-            { /* 直接对比路径: 手工 reset+feed */
-                rjson_stream_reset(ss->js_tc_name);
-                rjson_stream_feed(ss->js_tc_name, data, len);
-                rjson_stream_finish(ss->js_tc_name);
-                    rjson_stream_reset(ss->js_tc_name);
-            }
-            run_extract(ss->js_tc_name, data, len);
-            run_extract(ss->js_tc_args, data, len);
-            run_extract(ss->js_tc_id, data, len);
+            /* tool_calls delta（并行多 index 专用解析） */
+            oai_parse_tool_calls(ss, data, len);
+
         }
         break;
     case RIKKA_PROVIDER_CLAUDE:
         if (strcmp(event, "content_block_start") == 0) {
             /* 新块：若为 tool_use 则重置调用缓冲（sink 仅覆盖 name/id） */
-            fprintf(stderr, "DBG cbs: id_len=%zu name_len=%zu\n", ss->tc_id_buf.len, ss->tc_name_buf.len);
             run_extract(ss->js_tc_name, data, len);
-            fprintf(stderr, "DBG cbs after name: id_len=%zu name_len=%zu\n", ss->tc_id_buf.len, ss->tc_name_buf.len);
             run_extract(ss->js_tc_id, data, len);
-            fprintf(stderr, "DBG cbs after id: id_len=%zu name_len=%zu\n", ss->tc_id_buf.len, ss->tc_name_buf.len);
         } else if (strcmp(event, "content_block_delta") == 0) {
             buf_reset(&ss->type_buf);
             run_extract(ss->js_type, data, len);
@@ -547,6 +587,7 @@ RikkaStreamSession *rp_session_create(const RikkaProviderCfg *cfg) {
     buf_init(&ss->tc_name_buf);
     buf_init(&ss->tc_args_buf);
     buf_init(&ss->tc_id_buf);
+    for (int i = 0; i < 8; i++) buf_init(&ss->tc_calls[i].args);
     return ss;
 }
 
@@ -564,6 +605,7 @@ void rp_session_destroy(RikkaStreamSession *ss) {
     buf_free(&ss->tc_name_buf);
     buf_free(&ss->tc_args_buf);
     buf_free(&ss->tc_id_buf);
+    for (int i = 0; i < 8; i++) buf_free(&ss->tc_calls[i].args);
     free(ss->last_error);
     free(ss);
 }
@@ -700,18 +742,15 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
     ss->js_type = rjson_stream_create(P_CLAUDE_TYPE, sink_type, ss);
     ss->js_text = rjson_stream_create(P_OAI_CONTENT, sink_text, ss);
     ss->js_reason = rjson_stream_create(P_OAI_REASON, sink_reason, ss);
-    ss->js_tc_name = rjson_stream_create(P_OAI_TC_NAME, sink_tc_name, ss);
-    ss->js_tc_args = rjson_stream_create(P_OAI_TC_ARGS, sink_tc_args, ss);
-    ss->js_tc_id = rjson_stream_create(P_OAI_TC_ID, sink_tc_id, ss);
+    ss->js_tc_name = rjson_stream_create(P_CLAUDE_TC_NAME, sink_tc_name, ss);
+    ss->js_tc_args = rjson_stream_create(P_CLAUDE_TC_JSON, sink_tc_args, ss);
+    ss->js_tc_id = rjson_stream_create(P_CLAUDE_TC_ID, sink_tc_id, ss);
     if (!ss->sse || !ss->js_type || !ss->js_text || !ss->js_reason ||
         !ss->js_tc_name || !ss->js_tc_args || !ss->js_tc_id) return -1; /* OOM 防御 */
     switch (ss->cfg.id) {
         case RIKKA_PROVIDER_OPENAI:
             rjson_stream_set_path(ss->js_text, P_OAI_CONTENT);
             rjson_stream_set_path(ss->js_reason, P_OAI_REASON);
-            rjson_stream_set_path(ss->js_tc_name, P_OAI_TC_NAME);
-            rjson_stream_set_path(ss->js_tc_args, P_OAI_TC_ARGS);
-            rjson_stream_set_path(ss->js_tc_id, P_OAI_TC_ID);
             break;
         case RIKKA_PROVIDER_CLAUDE:
             rjson_stream_set_path(ss->js_type, P_CLAUDE_TYPE);
@@ -736,10 +775,33 @@ char *rp_take_error_detail(RikkaStreamSession *ss) {
     return e;
 }
 
-/* 流结束后：解析到 tool_calls delta 则构造 TOOL_CALL part（index 0 单调用） */
+/* 流结束后：构造 TOOL_CALL parts。
+ * OpenAI：tc_calls 数组（并行多 index）；Claude/Google：tc_name_buf 单槽。 */
 static void finalize_tool_calls(RikkaStreamSession *ss) {
-    if (!ss->out || !ss->out->msg || ss->tc_name_buf.len == 0) return;
+    if (!ss->out || !ss->out->msg) return;
     Arena *a = ss->out->arena;
+    if (ss->tc_count > 0) {
+        for (size_t i = 0; i < ss->tc_count; i++) {
+            RkTcCall *c = &ss->tc_calls[i];
+            if (!c->name[0]) continue;
+            RikkaPart *p = rmsg_add_part(a, ss->out->msg, RIKKA_PART_TOOL_CALL);
+            if (!p) continue;
+            p->tool_name = (const char *)arena_alloc(a, 1, strlen(c->name) + 1);
+            if (p->tool_name) strcpy((char *)p->tool_name, c->name);
+            if (c->id[0]) {
+                p->tool_id = (const char *)arena_alloc(a, 1, strlen(c->id) + 1);
+                if (p->tool_id) strcpy((char *)p->tool_id, c->id);
+            }
+            p->data = (const char *)arena_alloc(a, 1, c->args.len + 1);
+            if (p->data && c->args.len > 0) {
+                memcpy((void *)p->data, c->args.data, c->args.len);
+                ((char *)p->data)[c->args.len] = '\0';
+            }
+            p->len = c->args.len;
+        }
+        return;
+    }
+    if (ss->tc_name_buf.len == 0) return;
     RikkaPart *p = rmsg_add_part(a, ss->out->msg, RIKKA_PART_TOOL_CALL);
     if (!p) return;
     p->tool_name = (const char *)arena_alloc(a, 1, ss->tc_name_buf.len + 1);
