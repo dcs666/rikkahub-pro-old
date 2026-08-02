@@ -34,6 +34,7 @@ android {
         targetSdk = 34
         versionCode = 3
         versionName = "0.3.0"
+        buildConfigField("String", "VERSION_NAME", "\"${versionName}\"")
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
