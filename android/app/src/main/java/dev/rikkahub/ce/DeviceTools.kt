@@ -132,7 +132,29 @@ object DeviceTools {
             val cols = arrayOf(
                 "title", "description", "eventLocation",
                 "dtstart", "dtend", "allDay")
-            val cursor = resolver.query(uri, cols, null, null,
+            // 对齐 turbo: range 预设(today/week/month)或 begin/end 自定义
+            val zone = java.time.ZoneId.systemDefault()
+            val now = System.currentTimeMillis()
+            val todayStart = java.time.LocalDate.now(zone)
+                .atStartOfDay(zone).toInstant().toEpochMilli()
+            var begin = todayStart
+            var end = now + 30L * 24 * 3600_000L
+            when (req.optString("range")) {
+                "today" -> end = now
+                "week" -> end = now
+                "month" -> end = now
+                else -> {}
+            }
+            req.optString("begin").takeIf { it.isNotBlank() }?.let {
+                parseCalendarTime(it)?.let { b -> begin = b }
+            }
+            req.optString("end").takeIf { it.isNotBlank() }?.let {
+                parseCalendarTime(it)?.let { e -> end = e }
+            }
+            if (end <= begin) return err("end must be after begin")
+            val selection = "dtstart >= ? AND dtstart <= ?"
+            val selArgs = arrayOf(begin.toString(), end.toString())
+            val cursor = resolver.query(uri, cols, selection, selArgs,
                 "dtstart ASC LIMIT 50")
             cursor?.use { c ->
                 while (c.moveToNext() && out.length() < 50) {
@@ -160,10 +182,27 @@ object DeviceTools {
             val um = ctx.getSystemService(Context.USAGE_STATS_SERVICE)
                     as android.app.usage.UsageStatsManager
             val now = System.currentTimeMillis()
-            val begin = now - (req.optLong("hours", 24) * 3600_000L)
+            val zone = java.time.ZoneId.systemDefault()
+            val todayStart = java.time.LocalDate.now(zone)
+                .atStartOfDay(zone).toInstant().toEpochMilli()
+            // 对齐 turbo: range 预设(today/week)或 begin/end 自定义(ISO/epoch)
+            var begin = todayStart
+            var end = now
+            when (req.optString("range")) {
+                "week" -> begin = todayStart - 6L * 24 * 3600_000L
+                "month" -> begin = todayStart - 29L * 24 * 3600_000L
+                else -> {}
+            }
+            req.optString("begin").takeIf { it.isNotBlank() }?.let {
+                parseCalendarTime(it)?.let { b -> begin = b }
+            }
+            req.optString("end").takeIf { it.isNotBlank() }?.let {
+                parseCalendarTime(it)?.let { e -> end = e }
+            }
+            if (end <= begin) return err("end must be after begin")
             val stats = um.queryUsageStats(
                 android.app.usage.UsageStatsManager.INTERVAL_DAILY,
-                begin, now)
+                begin, end)
             val out = JSONArray()
             stats?.forEach { s ->
                 if (s.totalTimeInForeground > 0) {
