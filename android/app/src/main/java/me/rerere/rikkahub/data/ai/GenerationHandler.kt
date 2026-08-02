@@ -135,6 +135,8 @@ class GenerationHandler(
             "skills_root",
             java.io.File(context.filesDir, "skills").absolutePath,
         )
+        // 工具白名单(对齐 turbo 的 localTools/enableMemory/enabledSkills 开关)
+        providerJson.put("tool_whitelist", buildToolWhitelist(assistant))
         // 记忆库目标(对齐 turbo: enableMemory 时 memory_tool 反调落库)
         if (assistant.enableMemory) {
             providerJson.put(
@@ -450,6 +452,38 @@ class GenerationHandler(
         return GenerationChunk.Messages(
             base + UIMessage(role = MessageRole.ASSISTANT, parts = parts.toList(), usage = usage),
         )
+    }
+
+    /** 工具白名单(对齐 turbo: assistant.localTools + enableMemory + enabledSkills)。
+     * 引擎按白名单条件注册本地工具; web_search/recent_chats 有独立 env 开关。 */
+    private fun buildToolWhitelist(assistant: Assistant): JSONArray {
+        val wl = JSONArray()
+        val opts = assistant.localTools
+        if (me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.JavascriptEngine in opts) {
+            wl.put("eval_javascript")
+        }
+        if (me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.TimeInfo in opts) {
+            wl.put("get_time_info")
+        }
+        if (me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.Clipboard in opts) {
+            wl.put("clipboard_tool")
+        }
+        if (me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.Tts in opts) {
+            wl.put("text_to_speech")
+        }
+        if (me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.AskUser in opts) {
+            wl.put("ask_user")
+        }
+        if (me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.ScreenTime in opts) {
+            wl.put("get_screen_time")
+        }
+        if (me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.Calendar in opts) {
+            wl.put("calendar_query")
+            wl.put("calendar_create")
+        }
+        if (assistant.enableMemory) wl.put("memory_tool")
+        if (assistant.enabledSkills.isNotEmpty()) wl.put("use_skill")
+        return wl
     }
 
     /** 思考模式参数(与 turbo ai 模块的 ChatCompletionsAPI 分派对齐)。

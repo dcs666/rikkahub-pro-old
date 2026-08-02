@@ -1017,27 +1017,52 @@ static const RkTool TOOL_USE_SKILL = {
     tool_use_skill,
 };
 
+/* 本地工具白名单检查（JSON 数组字符串；NULL/空 = 全开） */
+static int whitelisted(const RkToolEnv *env, const char *name) {
+    if (!env || !env->tool_whitelist || !env->tool_whitelist[0]) return 1;
+    const char *p = env->tool_whitelist;
+    size_t nl = strlen(name);
+    for (;;) {
+        while (*p && *p != '"') p++;
+        if (!*p) break;
+        p++;
+        const char *s = p;
+        while (*p && *p != '"') p++;
+        size_t n = (size_t)(p - s);
+        if (n == nl && memcmp(s, name, nl) == 0) return 1;
+        if (!*p) break;
+        p++;
+    }
+    return 0;
+}
+
 void rk_tools_register_builtin(RkToolRegistry *r, const RkToolEnv *env) {
-    rk_tools_add(r, &TOOL_TIME_INFO);
+    if (whitelisted(env, "get_time_info")) rk_tools_add(r, &TOOL_TIME_INFO);
     if (env && env->workspace_root) {
         rk_tools_add(r, &TOOL_WS_READ);
         rk_tools_add(r, &TOOL_WS_WRITE);
         rk_tools_add(r, &TOOL_WS_EDIT);
         rk_tools_add(r, &TOOL_WS_SHELL);
     }
-    rk_tools_add(r, &TOOL_MEMORY);
-    rk_tools_add(r, &TOOL_USE_SKILL);
+    /* memory/use_skill 也走白名单（默认全开；Android 由 enableMemory/enabledSkills 决定） */
+    if (whitelisted(env, "memory_tool")) rk_tools_add(r, &TOOL_MEMORY);
+    if (whitelisted(env, "use_skill")) rk_tools_add(r, &TOOL_USE_SKILL);
     if (env) {
         if (env->web_search) rk_tools_add(r, &TOOL_SEARCH_WEB);
         if (env->recent_chats) rk_tools_add(r, &TOOL_RECENT_CHATS);
         if (env->conversation_search) rk_tools_add(r, &TOOL_CONVERSATION_SEARCH);
-        /* 设备工具（对齐 JVM local tools 名称） */
-        if (env->ask_user) rk_tools_add(r, &TOOL_ASK_USER);
-        if (env->clipboard_write) rk_tools_add(r, &TOOL_CLIPBOARD);
-        if (env->tts_speak) rk_tools_add(r, &TOOL_TTS);
-        if (env->calendar_query) rk_tools_add(r, &TOOL_CALENDAR);
-        if (env->calendar_create) rk_tools_add(r, &TOOL_CALENDAR_CREATE);
-        if (env->screen_time_query) rk_tools_add(r, &TOOL_SCREEN_TIME);
-        if (env->javascript_eval) rk_tools_add(r, &TOOL_JAVASCRIPT);
+        /* 设备工具（对齐 JVM local tools 名称；白名单过滤） */
+        if (env->ask_user && whitelisted(env, "ask_user")) rk_tools_add(r, &TOOL_ASK_USER);
+        if (env->clipboard_write && whitelisted(env, "clipboard_tool"))
+            rk_tools_add(r, &TOOL_CLIPBOARD);
+        if (env->tts_speak && whitelisted(env, "text_to_speech")) rk_tools_add(r, &TOOL_TTS);
+        if (env->calendar_query && whitelisted(env, "calendar_query"))
+            rk_tools_add(r, &TOOL_CALENDAR);
+        if (env->calendar_create && whitelisted(env, "calendar_create"))
+            rk_tools_add(r, &TOOL_CALENDAR_CREATE);
+        if (env->screen_time_query && whitelisted(env, "get_screen_time"))
+            rk_tools_add(r, &TOOL_SCREEN_TIME);
+        if (env->javascript_eval && whitelisted(env, "eval_javascript"))
+            rk_tools_add(r, &TOOL_JAVASCRIPT);
     }
 }

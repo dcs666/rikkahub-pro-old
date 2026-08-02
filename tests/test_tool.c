@@ -50,6 +50,27 @@ TEST(tool_registry) {
     rk_tools_destroy(&r);
 }
 
+static char *stub_ask_user(const char *questions, void *ud) {
+    (void)questions;
+    (void)ud;
+    return strdup("{\"ok\":true,\"answer\":\"test\"}");
+}
+
+TEST(tool_whitelist) {
+    RkToolRegistry r;
+    rk_tools_init(&r);
+    RkToolEnv env = {0};
+    env.tool_whitelist = "[\"get_time_info\",\"ask_user\",\"memory_tool\"]";
+    env.ask_user = stub_ask_user;
+    rk_tools_register_builtin(&r, &env);
+    ASSERT_NOT_NULL(rk_tools_find(&r, "get_time_info"));
+    ASSERT_NOT_NULL(rk_tools_find(&r, "ask_user"));
+    ASSERT_NOT_NULL(rk_tools_find(&r, "memory_tool"));
+    ASSERT_NULL(rk_tools_find(&r, "use_skill"));        /* 不在白名单 */
+    ASSERT_NULL(rk_tools_find(&r, "eval_javascript"));  /* 不在白名单 */
+    rk_tools_destroy(&r);
+}
+
 TEST(tool_time_info) {
     RkToolRegistry r;
     rk_tools_init(&r);
@@ -377,6 +398,7 @@ TEST(tool_search_and_conversation) {
 int run_tool_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(tool, tool_registry),
+        RIKKA_TEST_REGISTER(tool, tool_whitelist),
         RIKKA_TEST_REGISTER(tool, tool_time_info),
         RIKKA_TEST_REGISTER(tool, tool_workspace_files),
         RIKKA_TEST_REGISTER(tool, tool_workspace_shell),

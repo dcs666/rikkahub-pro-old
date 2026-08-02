@@ -44,6 +44,8 @@ struct RkToolEnv {
     char *(*web_search)(const char *query, void *ud);
     /* skills 根目录（use_skill 读取；NULL = 默认 /skills） */
     const char *skills_root;
+    /* 本地工具白名单（JSON 数组字符串；NULL/空 = 全部注册，仅过滤设备工具） */
+    const char *tool_whitelist;
     /* 会话查询（壳层实现；NULL = 工具不可注册） */
     char *(*recent_chats)(int limit, void *ud);                 /* JSON 数组（malloc） */
     char *(*conversation_search)(const char *query, void *ud);  /* JSON 数组（malloc） */
