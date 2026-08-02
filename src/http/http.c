@@ -56,6 +56,7 @@ struct RHttpConn {
     int fd;
     SSL *ssl;
     int tls;
+    uint16_t port;   /* 原始端口(Host 头非默认端口需要) */
     char host[256];
     int eof;
     RHttpResp resp;
@@ -127,6 +128,7 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
     if (!c) { close(fd); return NULL; }
     c->fd = fd;
     c->tls = use_tls;
+    c->port = port;
     snprintf(c->host, sizeof(c->host), "%s", host);
     c->resp.content_length = -1;
 
