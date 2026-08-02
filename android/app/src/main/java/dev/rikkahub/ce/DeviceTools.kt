@@ -34,6 +34,10 @@ object DeviceTools {
     @Volatile
     var appContext: Context? = null
 
+    /** 当前前台 Activity(Dialog 需要窗口 token; RikkaHubApp 生命周期回调维护) */
+    @Volatile
+    var currentActivity: android.app.Activity? = null
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
@@ -46,7 +50,7 @@ object DeviceTools {
     /** 向用户提问（模态对话框，阻塞等待回答；支持 questions 数组：多问题 + options 快捷选择） */
     @JvmStatic
     fun askUser(question: String): String? {
-        val ctx = appContext ?: return err("no context")
+        val ctx = currentActivity ?: appContext ?: return err("no context")
         val latch = CountDownLatch(1)
         val answer = AtomicReference<String?>(null)
         // 解析 questions 数组（引擎传入 JSON）；失败则当单问题纯文本

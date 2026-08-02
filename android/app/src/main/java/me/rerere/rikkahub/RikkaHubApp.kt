@@ -72,6 +72,22 @@ class RikkaHubApp : Application() {
 
         // [CE] 设备工具桥初始化(ask_user/clipboard/calendar/TTS/屏幕时间反调需要 context)
         dev.rikkahub.ce.DeviceTools.init(this)
+        // [CE] 跟踪前台 Activity(askUser 对话框需要窗口 token)
+        registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(a: android.app.Activity) {
+                dev.rikkahub.ce.DeviceTools.currentActivity = a
+            }
+            override fun onActivityPaused(a: android.app.Activity) {
+                if (dev.rikkahub.ce.DeviceTools.currentActivity === a) {
+                    dev.rikkahub.ce.DeviceTools.currentActivity = null
+                }
+            }
+            override fun onActivityCreated(a: android.app.Activity, s: android.os.Bundle?) {}
+            override fun onActivityStarted(a: android.app.Activity) {}
+            override fun onActivityStopped(a: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(a: android.app.Activity, s: android.os.Bundle) {}
+            override fun onActivityDestroyed(a: android.app.Activity) {}
+        })
 
         // [PERF] 重 IO 的后台维护任务（删 temp、扫 workspace/upload 目录、FTS 同步等）
         // 不在 Application.onCreate 立即触发，而是延后到首个 Activity onResume 之后。
