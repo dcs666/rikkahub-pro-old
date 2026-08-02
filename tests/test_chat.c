@@ -62,7 +62,7 @@ TEST(chat_tool_loop) {
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
     RikkaProviderCfg pcfg = {RIKKA_PROVIDER_OPENAI, base, "test-key",
-                             "mock-model", 100, 0, NULL, {0}, NULL, 0};
+                             "mock-model", 100, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
 
     /* 工具集：get_time_info 可用 */
     RkToolRegistry reg;
@@ -115,7 +115,7 @@ TEST(chat_plain_stream) {
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
     RikkaProviderCfg pcfg = {RIKKA_PROVIDER_OPENAI, base, "test-key",
-                             "mock-model", 100, 0, NULL, {0}, NULL, 0};
+                             "mock-model", 100, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
     RkChatConfig cfg = {0};
     cfg.provider = pcfg;
     cfg.timeout_ms = 15000;
@@ -185,7 +185,7 @@ TEST(chat_cancel_mid_stream) {
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
     RikkaProviderCfg pcfg = {RIKKA_PROVIDER_OPENAI, base, "test-key",
-                             "mock-model", 100, 0, NULL, {0}, NULL, 0};
+                             "mock-model", 100, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
     RkChatConfig cfg = {0};
     cfg.provider = pcfg;
     cfg.timeout_ms = 30000;
