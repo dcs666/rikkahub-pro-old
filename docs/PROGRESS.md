@@ -81,3 +81,12 @@
 - 踩坑补充: arena_alloc 是 3 参 (a, align, size) 不是 2 参；import 换行粘连（BuildConfigimport）；DropdownMenu 需 material3 import
 
 - **release v0.5.0-ce 发布成功** (2026-08-02): UI 全面打磨版 — 主题三态/Markdown增强/工具卡片/侧滑抽屉/全屏设置/附件预览/流式光标/空状态/图片直发多模态/图片持久化/顶栏⋮菜单
+
+
+## 🔄 UI 复刻 turbo（用户指示"UI 要和 rikkahub-turbo 一模一样，可以移植"）
+- 已整体移植 turbo 多模块工程到 android/（app/ai/search/speech/highlight，AGP 9.3.1/Kotlin 2.4.10/KSP/gradle 9.5.0 wrapper/compose BOM 2026.06.01/material3 1.5.0-alpha25）
+- applicationId=dev.rikkahub.ce（与 turbo dev.nebula.turbo 区分），签名走 RIKKA_CE_* secrets
+- 纯 C 引擎已集成：CMakeLists/ndk-include/engine_jni.c + JNI 桥（dev.rikkahub.ce.Engine/DeviceTools/ChatStore）+ proguard keep
+- **替换点（进行中）**: data/ai/GenerationHandler.kt（629 行 Kotlin 生成循环）→ 内部改 JNI 调 C 引擎（rk_chat 编排循环）
+- 旧壳备份: /workspace/android_backup/android_old
+- 踩坑: AGP 9.3.1 需 gradle 9.5.0（CI 已改 wrapper）；R8 需 keep JNI 类
