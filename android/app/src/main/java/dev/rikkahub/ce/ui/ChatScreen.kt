@@ -2,6 +2,7 @@ package dev.rikkahub.ce.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -139,21 +140,22 @@ private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
         items(vm.messages) { msg ->
             MessageBubble(
                 msg,
-                onCopy = {
-                    val ctx = LocalContext.current
-                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                            as android.content.ClipboardManager
-                    cm.setPrimaryClip(android.content.ClipData.newPlainText("rikka", msg.text))
-                },
                 onRetry = { vm.retryLast() },
             )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(msg: ChatMsg, onCopy: () -> Unit, onRetry: () -> Unit) {
+private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit) {
     val isUser = msg.role == "user"
+    val ctx = LocalContext.current
+    val onCopy = {
+        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("rikka", msg.text))
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,

@@ -9,10 +9,91 @@
 #include <string.h>
 #include <time.h>
 
-/* 增量回调桥：rk_chat 的 cb → provider delta */
+static const char *TAG_OPEN = "<think>";
+static const char *TAG_CLOSE = "</think>";
+
+void rk_chat_think_feed(RkThinkState *st, const char *data, size_t len,
+                        void (*out)(void *ud, int kind, const char *data, size_t len),
+                        void *ud) {
+    Buf out_text, out_reason;
+    buf_init(&out_text);
+    buf_init(&out_reason);
+    for (size_t i = 0; i < len; i++) {
+        char ch = data[i];
+        const char *target = st->in_think ? TAG_CLOSE : TAG_OPEN;
+        size_t tlen = strlen(target);
+        /* 前缀匹配推进 */
+        if (st->tag_len < tlen && ch == target[st->tag_len]) {
+            st->tag_buf[st->tag_len++] = ch;
+            if (st->tag_len == tlen) {
+                st->in_think = !st->in_think;
+                st->tag_len = 0;
+            }
+            continue; /* 标签字符不进入输出 */
+        }
+        /* 不匹配：先把已积累的标签前缀作为普通字符输出 */
+        if (st->tag_len > 0) {
+            if (st->in_think) {
+                buf_append(&out_reason, st->tag_buf, st->tag_len);
+            } else {
+                buf_append(&out_text, st->tag_buf, st->tag_len);
+            }
+            st->tag_len = 0;
+            /* 重新处理当前字符（可能开始新前缀） */
+            i--;
+            continue;
+        }
+        if (st->in_think) {
+            buf_append(&out_reason, &ch, 1);
+        } else {
+            buf_append(&out_text, &ch, 1);
+        }
+    }
+    if (out) {
+        if (out_text.len > 0) out(ud, 0, (const char *)out_text.data, out_text.len);
+        if (out_reason.len > 0) out(ud, 1, (const char *)out_reason.data, out_reason.len);
+    }
+    buf_free(&out_text);
+    buf_free(&out_reason);
+}
+
+/* 增量回调桥：rk_chat 的 cb → provider delta（含流式 think_tag 状态机） */
+typedef struct {
+    RkChatCallbacks *cb;
+    const RkChatConfig *cfg;
+    RkThinkState th;        /* think_tag 流式状态 */
+    Buf out_text;           /* 本块分流的 text 段 */
+    Buf out_reason;         /* 本块分流的 reasoning 段 */
+} ChatBridge;
+
+static void bridge_emit(void *ud, int kind, const char *data, size_t len) {
+    ChatBridge *b = (ChatBridge *)ud;
+    if (kind == 1) {
+        buf_append(&b->out_reason, data, len);
+    } else {
+        buf_append(&b->out_text, data, len);
+    }
+}
+
+static void bridge_flush(ChatBridge *b) {
+    if (b->out_text.len > 0 && b->cb->on_delta) {
+        b->cb->on_delta(b->cb->ud, 0, (const char *)b->out_text.data, b->out_text.len);
+        buf_reset(&b->out_text);
+    }
+    if (b->out_reason.len > 0 && b->cb->on_delta) {
+        b->cb->on_delta(b->cb->ud, 1, (const char *)b->out_reason.data, b->out_reason.len);
+        buf_reset(&b->out_reason);
+    }
+}
+
 static void delta_bridge(void *ud, int kind, const char *data, size_t len) {
-    RkChatCallbacks *cb = (RkChatCallbacks *)ud;
-    if (cb && cb->on_delta) cb->on_delta(cb->ud, kind, data, len);
+    ChatBridge *b = (ChatBridge *)ud;
+    if (!b->cfg->use_visual_think_tag || kind != 0) {
+        if (b->cb->on_delta) b->cb->on_delta(b->cb->ud, kind, data, len);
+        return;
+    }
+    rk_chat_think_feed(&b->th, data, len, bridge_emit, b);
+    bridge_flush(b);
 }/* 追加工具结果消息（TOOL part + TOOL_RESULT part） */
 static void append_tool_result(RkMsgList *work, Arena *a, const char *tool_name,
                                const char *tool_id, const char *result) {
@@ -153,8 +234,16 @@ int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
 
         RikkaStream out;
         rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+        ChatBridge br;
+        memset(&br, 0, sizeof(br));
+        br.cb = cb;
+        br.cfg = cfg;
+        buf_init(&br.out_text);
+        buf_init(&br.out_reason);
         rc = rp_chat_stream_cb(&pcfg, arr, work.count, &out, timeout,
-                               delta_bridge, cb, cfg->cancel_flag, NULL);
+                               delta_bridge, &br, cfg->cancel_flag, NULL);
+        buf_free(&br.out_text);
+        buf_free(&br.out_reason);
         if (rc != 0) {
             rstream_destroy(&out);
             err = strdup("provider request failed");

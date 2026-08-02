@@ -37,6 +37,10 @@ typedef struct RkChatConfig {
     void (*transform_input)(RkMsgList *work, void *ud);
     void (*transform_output)(RkMsgList *work, RikkaMessage *assistant, void *ud);
     void *transform_ud;
+    /* 流式 think_tag（对标 JVM ThinkTagTransformer visual）：
+     * 把流式输出中的 <think>...</think> 路由为 reasoning（kind=1），
+     * 其余为 text。开启后 transform_output 不应再调 think_tag（避免重复）。 */
+    int use_visual_think_tag;
     const RkToolRegistry *tools;  /* 工具集（NULL = 无工具） */
     const RkToolEnv *tool_env;    /* 工具环境（tools 非 NULL 时必填） */
     int max_tool_rounds;          /* 0 = 默认 8 */
@@ -44,6 +48,18 @@ typedef struct RkChatConfig {
     /* 取消标志（volatile int*；非 NULL 时生成期间周期检查，置 1 则中断返回 -1）。 */
     volatile int *cancel_flag;
 } RkChatConfig;
+
+/* 流式 think_tag 状态机（visual）：把 <think>...</think> 路由为 reasoning。
+ * feed 输出经 out 回调（kind: 0=text, 1=reasoning）。标签可跨块切分。 */
+typedef struct {
+    int in_think;
+    char tag_buf[16];   /* 部分匹配 "<think>"/"</think>" 前缀 */
+    size_t tag_len;
+} RkThinkState;
+
+void rk_chat_think_feed(RkThinkState *st, const char *data, size_t len,
+                        void (*out)(void *ud, int kind, const char *data, size_t len),
+                        void *ud);
 
 /* 运行一轮对话。msgs 为冻结历史（COW 列表或数组）。
  * 返回 0 成功（final_text_out 为最终文本 malloc，可能为空串）；

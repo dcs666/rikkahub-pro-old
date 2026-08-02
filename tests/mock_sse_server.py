@@ -476,6 +476,32 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, ValueError):
                 pass
+        elif self.path == '/think':
+            # 流式 think_tag: 标签跨块切分（测试状态机前缀匹配）
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            evs = [
+                'data: {"id":"1","choices":[{"index":0,"delta":{"content":"<th"},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"content":"ink>deep rea"},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"content":"soning</th"},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"content":"ink>Final "},"finish_reason":null}]}\n\n',
+                'data: {"id":"1","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n',
+                'data: [DONE]\n\n',
+            ]
+            for e in evs:
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+            try:
+                self.wfile.write(b'0\r\n\r\n')
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         elif self.path == '/openai':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')

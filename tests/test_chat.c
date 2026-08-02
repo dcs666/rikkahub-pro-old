@@ -210,11 +210,57 @@ TEST(chat_cancel_mid_stream) {
     stop_mock_server();
 }
 
+/* ---------- 流式 think_tag visual ---------- */
+
+typedef struct {
+    char text[512];
+    char reason[512];
+    size_t text_len, reason_len;
+} ThinkRec;
+
+static void think_delta(void *ud, int kind, const char *data, size_t len) {
+    ThinkRec *r = (ThinkRec *)ud;
+    char *dst = kind == 1 ? r->reason : r->text;
+    size_t *dl = kind == 1 ? &r->reason_len : &r->text_len;
+    size_t room = 511 - *dl;
+    if (room > len) room = len;
+    memcpy(dst + *dl, data, room);
+    *dl += room;
+    dst[*dl] = '\0';
+}
+
+TEST(chat_visual_think_tag) {
+    RkThinkState st = {0};
+    ThinkRec rec = {0};
+    /* 标签跨块切分 + 中途误匹配（"<thx" 应输出原文） */
+    rk_chat_think_feed(&st, "<th", 3, think_delta, &rec);
+    rk_chat_think_feed(&st, "ink>deep rea", 12, think_delta, &rec);
+    rk_chat_think_feed(&st, "soning</th", 10, think_delta, &rec);
+    rk_chat_think_feed(&st, "ink>Final ", 10, think_delta, &rec);
+    rk_chat_think_feed(&st, "answer", 6, think_delta, &rec);
+    ASSERT(strcmp(rec.reason, "deep reasoning") == 0);
+    ASSERT(strcmp(rec.text, "Final answer") == 0);
+    /* 误匹配：未闭合前缀按原文输出 */
+    RkThinkState st2 = {0};
+    ThinkRec rec2 = {0};
+    rk_chat_think_feed(&st2, "<thx", 4, think_delta, &rec2);
+    rk_chat_think_feed(&st2, "ello", 4, think_delta, &rec2);
+    ASSERT(strcmp(rec2.text, "<thxello") == 0);
+    ASSERT(rec2.reason_len == 0);
+    /* 流结束未闭合：前缀输出为文本 */
+    RkThinkState st3 = {0};
+    ThinkRec rec3 = {0};
+    rk_chat_think_feed(&st3, "a<thi", 5, think_delta, &rec3);
+    rk_chat_think_feed(&st3, "b", 1, think_delta, &rec3);
+    ASSERT(strcmp(rec3.text, "a<thib") == 0);
+}
+
 int run_chat_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(chat, chat_tool_loop),
         RIKKA_TEST_REGISTER(chat, chat_plain_stream),
         RIKKA_TEST_REGISTER(chat, chat_cancel_mid_stream),
+        RIKKA_TEST_REGISTER(chat, chat_visual_think_tag),
     };
     return run_suite("chat", tests, sizeof(tests) / sizeof(tests[0]));
 }

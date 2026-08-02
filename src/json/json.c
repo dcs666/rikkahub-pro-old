@@ -515,7 +515,6 @@ static void compute_match(RJsonStream *s) {
     if (f->kind == 1) { /* array */
         m = e->is_index && e->u.index == f->index;
     } else {
-        fprintf(stderr, "path_key=[%s] strcmp=%d key_ready=%d\n", e->u.key, strcmp(f->key, e->u.key), f->key_ready);
         m = (!e->is_index) && f->key_ready && strcmp(f->key, e->u.key) == 0;
     }
     s->pending_match = m ? d : 0;
