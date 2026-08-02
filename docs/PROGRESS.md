@@ -106,3 +106,9 @@
   - generateText/translateText 内部走 JNI → C 引擎 rk_chat
   - turbo UI(5.9万行) + C 引擎完整构建成功
   - v0.6.0-ce 的 Release 失败待重发 (签名流程已改为 local.properties)
+
+- **73a2db8: CI 全绿 — OCR/标题生成 C 化完成** (2026-08-02)
+  - OcrTransformer.performOcr → Engine.nativeOcr (rk_ocr_image)
+  - ChatService 会话标题 → Engine.nativeGenerateTitle
+  - ProviderExt.kt 公共 baseUrlOr/apiKeyOr 扩展
+  - v0.7.0-ce 发布中 (turbo UI + C 引擎全链路)
