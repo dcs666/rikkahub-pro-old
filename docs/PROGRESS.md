@@ -235,3 +235,15 @@
 - MCP Android 接线待办(引擎 mcp.c 完备, engine_jni 未接线)
 - 建议生成/ProviderConnectionTester 仍走 JVM 路径(C 化待办)
 - IPv6 URL 不支持(罕见)
+
+### 25轮深度优化(发布前第四批) — 提交中
+- calendar_create 工具回归(DeviceTools.calendarCreate 桥: ISO/epoch 时间解析 +
+  WRITE_CALENDAR 检查 + ContentResolver.insert)
+- ask_user 参数对齐 turbo(questions 数组含 options; 兼容旧单 question;
+  多问题完整 UI 待办)
+- calendarQuery/screenTimeQuery 参数对齐(begin/end/range 解析; 原忽略参数)
+- clipboard_tool 支持 read(env->clipboard_read + DeviceTools.clipboardRead)
+- 停止按钮真正生效: 协程取消 → nativeSetCancel(true)(原阻塞 nativeChat 不响应取消)
+- 事件消费滚动超时(130s 无事件保护; 多轮工具循环不再中断)
+- 确认: get_time_info 输出对齐 / ChatCallback 签名一致 / 注入管线不重复 /
+  workspaceCwd 链路一致 / timeout 每轮 120s 语义
