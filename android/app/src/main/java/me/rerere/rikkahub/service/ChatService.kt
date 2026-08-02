@@ -786,6 +786,8 @@ class ChatService(
             }
         }.onFailure {
             it.printStackTrace()
+            Logging.log(TAG, "generateTitle failed: " + it)
+            Logging.log(TAG, it.stackTraceToString())
             addError(
                 error = it,
                 conversationId = conversationId,
