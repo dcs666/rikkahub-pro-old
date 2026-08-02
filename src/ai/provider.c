@@ -523,6 +523,17 @@ static void run_extract(RJsonStream *js, const char *data, size_t len) {
     rjson_stream_finish(js);
 }
 
+/* 长度限定的 ""usage"" 子串查找(SSE data 非 NUL 结尾, 不能 strstr) */
+static int contains_usage(const char *data, size_t len) {
+    static const char needle[] = "\"usage\"";
+    const size_t nlen = sizeof(needle) - 1;
+    if (!data || len < nlen) return 0;
+    for (size_t i = 0; i + nlen <= len; i++) {
+        if (memcmp(data + i, needle, nlen) == 0) return 1;
+    }
+    return 0;
+}
+
 /* 解析流式 usage(OpenAI 顶层 usage / Anthropic message_delta.usage) */
 static void parse_usage(RikkaStreamSession *ss, const char *data, size_t len,
                         int openai_style) {
@@ -566,7 +577,7 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
             /* tool_calls delta（并行多 index 专用解析） */
             oai_parse_tool_calls(ss, data, len);
             /* 流式 usage（DeepSeek/OpenAI 在最后一条 message 的顶层 usage 字段） */
-            if (strstr(data, "\"usage\"")) {
+            if (contains_usage(data, len)) {
                 parse_usage(ss, data, len, 1);
             }
         }
@@ -593,7 +604,7 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
             }
         } else if (strcmp(event, "message_delta") == 0) {
             /* Anthropic 流式 usage: {"type":"message_delta","usage":{"output_tokens":N}} */
-            if (strstr(data, "\"usage\"")) {
+            if (contains_usage(data, len)) {
                 parse_usage(ss, data, len, 0);
             }
         } else if (strcmp(event, "error") == 0) {
