@@ -55,6 +55,7 @@ static void jni_delta(void *ud, int kind, const char *data, size_t len) {
     int attached = 0;
     JNIEnv *env = jni_thread_env(&attached);
     if (!env) return;
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env); /* 防上次异常污染 */
     /* NewStringUTF 需要 NUL 结尾：临时拷贝（增量块通常 <4KB） */
     char tmp[4096];
     const char *s = data;
@@ -75,6 +76,7 @@ static void jni_tool_call(void *ud, const char *name, const char *args) {
     int attached = 0;
     JNIEnv *env = jni_thread_env(&attached);
     if (!env) return;
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env); /* 防上次异常污染 */
     jstring n = (*env)->NewStringUTF(env, name);
     jstring a = (*env)->NewStringUTF(env, args);
     if (n && a) (*env)->CallVoidMethod(env, jc->cb, g_m_tool_call, n, a);
@@ -88,6 +90,7 @@ static void jni_tool_result(void *ud, const char *name, const char *result) {
     int attached = 0;
     JNIEnv *env = jni_thread_env(&attached);
     if (!env) return;
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env); /* 防上次异常污染 */
     jstring n = (*env)->NewStringUTF(env, name);
     jstring r = (*env)->NewStringUTF(env, result);
     if (n && r) (*env)->CallVoidMethod(env, jc->cb, g_m_tool_result, n, r);
