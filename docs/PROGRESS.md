@@ -132,3 +132,7 @@
 - **v0.7.2-ce 发布成功!** (2026-08-02) 助手无回复诊断版
   - provider 日志/返回校验/90s 超时/空配置提前报错
   - 等待用户安装复测 + logcat
+
+- **v0.7.3-ce 发布成功!** (2026-08-02) 诊断日志入 App 内日志页
+  - GenerationHandler 日志双写 (android.util.Log + turbo Logging)
+  - 用户免 adb: 设置 → 日志 直接查看诊断信息
