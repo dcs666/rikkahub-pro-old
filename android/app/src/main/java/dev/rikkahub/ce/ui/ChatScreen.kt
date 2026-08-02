@@ -35,6 +35,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
+import kotlinx.coroutines.launch
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
@@ -59,82 +65,100 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun ChatScreen(vm: ChatViewModel) {
     var showSettings by remember { mutableStateOf(false) }
-    var showSessions by remember { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val cur = vm.sessions.firstOrNull { it.id == vm.currentSessionId }
-            TextButton(onClick = { showSessions = true }) {
-                Text(
-                    cur?.title ?: "会话",
-                    maxLines = 1,
-                    style = MaterialTheme.typography.titleMedium,
-                )
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            SessionDrawer(
+                vm,
+                onClose = { scope.launch { drawerState.close() } },
+            )
+        },
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val cur = vm.sessions.firstOrNull { it.id == vm.currentSessionId }
+                TextButton(onClick = { scope.launch { drawerState.open() } }) {
+                    Text(
+                        cur?.title ?: "会话",
+                        maxLines = 1,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { vm.clearSession() }) { Text("清空") }
+                TextButton(onClick = { showSettings = true }) { Text("设置") }
             }
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { vm.clearSession() }) { Text("清空") }
-            TextButton(onClick = { showSettings = true }) { Text("设置") }
+            MessageList(vm, Modifier.weight(1f))
+            InputBar(vm)
         }
-        MessageList(vm, Modifier.weight(1f))
-        InputBar(vm)
     }
     if (showSettings) {
         SettingsDialog(vm, onDismiss = { showSettings = false })
     }
-    if (showSessions) {
-        SessionsDialog(vm, onDismiss = { showSessions = false })
-    }
 }
 
 @Composable
-private fun SessionsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
+private fun SessionDrawer(vm: ChatViewModel, onClose: () -> Unit) {
     var editing by remember { mutableStateOf<ChatSession?>(null) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("会话") },
-        text = {
-            Column {
-                TextButton(onClick = {
-                    vm.newSession()
-                    onDismiss()
-                }) { Text("＋ 新建会话") }
-                for (s in vm.sessions) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextButton(
-                            onClick = {
-                                vm.switchSession(s.id)
-                                onDismiss()
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(
-                                s.title,
-                                maxLines = 1,
-                                fontWeight = if (s.id == vm.currentSessionId)
-                                    FontWeight.Bold else FontWeight.Normal,
-                            )
+    ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
+        Text(
+            "会话",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+        )
+        TextButton(
+            onClick = {
+                vm.newSession()
+                onClose()
+            },
+            modifier = Modifier.padding(start = 8.dp),
+        ) { Text("＋ 新建会话") }
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(vm.sessions, key = { it.id }) { s ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            vm.switchSession(s.id)
+                            onClose()
                         }
-                        if (vm.sessions.size > 1) {
-                            TextButton(onClick = { editing = s }) { Text("改名") }
-                            TextButton(onClick = { vm.deleteSession(s.id) }) { Text("删除") }
+                        .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            s.title,
+                            maxLines = 1,
+                            fontSize = 14.sp,
+                            fontWeight = if (s.id == vm.currentSessionId)
+                                FontWeight.Bold else FontWeight.Normal,
+                        )
+                        Text(
+                            formatDate(s.updatedAt),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                    if (vm.sessions.size > 1) {
+                        IconButton(onClick = { editing = s }) {
+                            Text("✏️", fontSize = 12.sp)
+                        }
+                        IconButton(onClick = { vm.deleteSession(s.id) }) {
+                            Text("🗑", fontSize = 12.sp)
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-    )
+        }
+    }
     editing?.let { s ->
         var title by remember(s.id) { mutableStateOf(s.title) }
         AlertDialog(
@@ -158,6 +182,16 @@ private fun SessionsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
             },
         )
     }
+}
+
+private fun formatDate(ts: Long): String {
+    val now = System.currentTimeMillis()
+    val fmt = if (now - ts < 24 * 3600_000L) {
+        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+    } else {
+        java.text.SimpleDateFormat("MM-dd", java.util.Locale.getDefault())
+    }
+    return fmt.format(java.util.Date(ts))
 }
 
 @Composable
