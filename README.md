@@ -2,6 +2,19 @@
 
 RikkaHub AI 客户端核心运行时的 **纯 C 重写**。目标不是"C 版 Android 应用"，而是**零依赖的高性能 AI 运行时引擎 + 薄 UI 壳**。
 
+## Android APK（RikkaHub CE）
+
+C 引擎的 Android 壳层（`android/` 目录，NDK + Kotlin/Compose）：
+
+- **下载**：GitHub Releases（tag `v*-ce`，如 [v0.1.0-ce](https://github.com/dcs666/rikkahub-pro-old/releases)）
+- **功能**：聊天（流式 + 取消）、多会话（自动命名/切换/删除/持久化）、Markdown 渲染、
+  工具系统（时间/workspace 文件/记忆/会话查询/日历/屏幕时间/剪贴板/TTS/AskUser）、
+  暗色主题、Provider 设置（Base URL/Key/模型）
+- **权限**：日历读取 / 屏幕时间（需系统设置授予「使用情况访问」）按需授予，
+  未授予时对应工具返回错误（优雅降级）
+- **API 26+**（Android 8.0+），arm64-v8a / x86_64
+- 当前 Release 为 debug 签名（正式签名待 keystore 提供后替换）
+
 ## 特性
 
 - **零依赖**：仅系统 C 库 + OpenSSL + zlib（无 libcurl/cmake/第三方框架）
