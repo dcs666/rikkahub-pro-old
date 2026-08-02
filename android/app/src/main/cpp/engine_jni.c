@@ -38,8 +38,23 @@ typedef struct {
 
 static jmethodID g_m_delta, g_m_tool_call, g_m_tool_result, g_m_finish;
 
+/* 获取当前线程 JNIEnv: Java 线程直接取; 引擎读/处理线程(异步流水线)先 attach。
+ * 返回 1 表示本调用 attach 的(调用方负责 detach)。 */
+static JNIEnv *jni_thread_env(int *attached) {
+    JNIEnv *env = NULL;
+    *attached = 0;
+    if (!g_vm) return NULL;
+    if ((*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_6) == JNI_OK) return env;
+    if ((*g_vm)->AttachCurrentThread(g_vm, &env, NULL) != JNI_OK) return NULL;
+    *attached = 1;
+    return env;
+}
+
 static void jni_delta(void *ud, int kind, const char *data, size_t len) {
     JniCb *jc = (JniCb *)ud;
+    int attached = 0;
+    JNIEnv *env = jni_thread_env(&attached);
+    if (!env) return;
     /* NewStringUTF 需要 NUL 结尾：临时拷贝（增量块通常 <4KB） */
     char tmp[4096];
     const char *s = data;
@@ -47,29 +62,38 @@ static void jni_delta(void *ud, int kind, const char *data, size_t len) {
     memcpy(tmp, data, len);
     tmp[len] = '\0';
     s = tmp;
-    jstring js = (*jc->env)->NewStringUTF(jc->env, s);
+    jstring js = (*env)->NewStringUTF(env, s);
     if (js) {
-        (*jc->env)->CallVoidMethod(jc->env, jc->cb, g_m_delta, (jint)kind, js);
-        (*jc->env)->DeleteLocalRef(jc->env, js);
+        (*env)->CallVoidMethod(env, jc->cb, g_m_delta, (jint)kind, js);
+        (*env)->DeleteLocalRef(env, js);
     }
+    if (attached) (*g_vm)->DetachCurrentThread(g_vm);
 }
 
 static void jni_tool_call(void *ud, const char *name, const char *args) {
     JniCb *jc = (JniCb *)ud;
-    jstring n = (*jc->env)->NewStringUTF(jc->env, name);
-    jstring a = (*jc->env)->NewStringUTF(jc->env, args);
-    if (n && a) (*jc->env)->CallVoidMethod(jc->env, jc->cb, g_m_tool_call, n, a);
-    if (n) (*jc->env)->DeleteLocalRef(jc->env, n);
-    if (a) (*jc->env)->DeleteLocalRef(jc->env, a);
+    int attached = 0;
+    JNIEnv *env = jni_thread_env(&attached);
+    if (!env) return;
+    jstring n = (*env)->NewStringUTF(env, name);
+    jstring a = (*env)->NewStringUTF(env, args);
+    if (n && a) (*env)->CallVoidMethod(env, jc->cb, g_m_tool_call, n, a);
+    if (n) (*env)->DeleteLocalRef(env, n);
+    if (a) (*env)->DeleteLocalRef(env, a);
+    if (attached) (*g_vm)->DetachCurrentThread(g_vm);
 }
 
 static void jni_tool_result(void *ud, const char *name, const char *result) {
     JniCb *jc = (JniCb *)ud;
-    jstring n = (*jc->env)->NewStringUTF(jc->env, name);
-    jstring r = (*jc->env)->NewStringUTF(jc->env, result);
-    if (n && r) (*jc->env)->CallVoidMethod(jc->env, jc->cb, g_m_tool_result, n, r);
-    if (n) (*jc->env)->DeleteLocalRef(jc->env, n);
-    if (r) (*jc->env)->DeleteLocalRef(jc->env, r);
+    int attached = 0;
+    JNIEnv *env = jni_thread_env(&attached);
+    if (!env) return;
+    jstring n = (*env)->NewStringUTF(env, name);
+    jstring r = (*env)->NewStringUTF(env, result);
+    if (n && r) (*env)->CallVoidMethod(env, jc->cb, g_m_tool_result, n, r);
+    if (n) (*env)->DeleteLocalRef(env, n);
+    if (r) (*env)->DeleteLocalRef(env, r);
+    if (attached) (*g_vm)->DetachCurrentThread(g_vm);
 }
 
 /* ---------- JSON 辅助 ---------- */
