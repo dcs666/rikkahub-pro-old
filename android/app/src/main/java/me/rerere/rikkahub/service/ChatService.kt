@@ -46,6 +46,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.baseUrlOr
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
@@ -754,25 +755,31 @@ class ChatService(
             val model = settings.findModelById(settings.titleModelId, fallback = settings.fastModelId) ?: return
             val provider = model.findProvider(settings.providers) ?: return
 
-            val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        prompt = settings.titlePrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
-                            "content" to conversation.currentMessages
-                                .takeLast(4).joinToString("\n\n") { it.summaryAsText(maxLength = 500) })
-                    ),
-                ),
-                params = backgroundTextGenerationParams(model),
-            )
+            // [CE] 走 C 引擎 rk_prompt_title（JNI）
+            val content = conversation.currentMessages
+                .takeLast(4).joinToString("\n\n") { it.summaryAsText(maxLength = 500) }
+            val result = withContext(Dispatchers.IO) {
+                dev.rikkahub.ce.Engine.nativeGenerateTitle(
+                    org.json.JSONObject()
+                        .put("base_url", provider.baseUrlOr().trimEnd('/'))
+                        .put("api_key", provider.apiKeyOr())
+                        .put("model", model.modelId)
+                        .toString(),
+                    content,
+                )
+            }
+            val title = try {
+                val parsed = org.json.JSONObject(result)
+                if (parsed.optBoolean("ok")) parsed.optString("title").trim() else ""
+            } catch (_: Exception) {
+                ""
+            }
 
             // 生成完，conversation可能不是最新了，因此需要重新获取
             conversationRepo.getConversationById(conversation.id)?.let {
                 saveConversation(
                     conversationId,
-                    it.copy(title = result.choices[0].message?.toText()?.trim() ?: "")
+                    it.copy(title = title),
                 )
             }
         }.onFailure {
