@@ -76,7 +76,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rikkahub.ce.BuildConfigimport kotlinx.coroutines.launch
+import dev.rikkahub.ce.BuildConfig
+import kotlinx.coroutines.launch
 
 
 
