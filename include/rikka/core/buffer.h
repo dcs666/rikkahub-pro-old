@@ -17,7 +17,7 @@ typedef struct {
 } Buf;
 
 void  buf_init(Buf *b);
-void  buf_reserve(Buf *b, size_t extra);          /* 保证至少可再写 extra 字节 */
+int   buf_reserve(Buf *b, size_t extra);          /* 0=成功; -1=OOM(保持原状) */
 void  buf_append(Buf *b, const void *src, size_t n);
 void  buf_append_str(Buf *b, const char *s);       /* 不含 NUL */
 void  buf_append_byte(Buf *b, uint8_t c);
