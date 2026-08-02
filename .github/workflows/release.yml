@@ -57,13 +57,15 @@ jobs:
           ls -la app/build/outputs/apk/release/
       - name: Verify signature
         run: |
+          cd android
           APKSIGNER="$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner"
-          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | head -3
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | head -3
       - name: Rename APK
         run: |
           VER="${GITHUB_REF_NAME#v}"
-          cp android/app/build/outputs/apk/release/app-release.apk \
-             "android/app/build/outputs/apk/release/rikkahub-ce-${VER}.apk"
+          cd android
+          cp app/build/outputs/apk/release/app-release.apk \
+             "app/build/outputs/apk/release/rikkahub-ce-${VER}.apk"
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
