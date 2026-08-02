@@ -203,3 +203,10 @@
 - SSE 单事件 data 8MB 上限(响应头原有 64KB 上限)
 - OCR/会话图片 16MB 限制
 - 已知限制: rhttp_parse_url 不支持 IPv6 字面量([::1])(场景罕见)
+
+### 当前进度(2026-08-02 深夜, 等待 CI)
+- master 最新 81cb044; CI 全绿基线: 58cd3f2 曾 build-test+sanitizers 双绿,
+  随后发布前深度审查又修了: JNI 回调线程(重大)/Host 端口/baseUrl 尾斜杠/
+  SSE 8MB 上限/图片 16MB 限制/ExceptionClear —— 均已在 53ed1d6/81cb044 提交
+- 待 CI(53ed1d6 → 81cb044)全绿 → 打 tag v0.7.8-ce 发布(版本号已升 0.7.8/708)
+- 发布验证: APK 下载后 zipfile 检查 librikka.so/libssl.so/libcrypto.so
