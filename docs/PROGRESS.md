@@ -46,9 +46,27 @@
 
 ## 六、最近提交记录（2026-08-02 夜间）
 
-- 3d8ae1e: 会话重命名（列表改名按钮 + 对话框）→ CI 全绿
-- 8f7354d: **release v0.4.0-ce 发布成功**（标题LLM/设置页/图片消息/WebView JS/重命名全量）
-- 9c278de: Kotlin imports 清理修复（Engine 重复/getValue）→ CI 全绿
+### UI 全面打磨（用户指示"先把 UI 全都做好，不计时间和 token"）
+- 主题系统: 三态切换（跟随系统/浅/深）+ 完整品牌配色（primary/secondary/tertiary/error/container/outline 全套）
+- Markdown 增强: 块解析（代码块语言标签+复制/标题1-3/引用竖线/段落）、斜体、链接（蓝色下划线+StringAnnotation）、行内代码背景
+- 消息气泡: 工具调用卡片（⚙️ 名称+参数/结果折叠+失败高亮+✓）、时间戳 HH:mm、错误重试按钮、流式闪烁光标（infiniteTransition）、长按菜单（复制/朗读）
+- 输入栏: 图片附件预览条（缩略图+✕）、IME 回车发送、OCR 队列化（图文并行发送）
+- 会话管理: 侧滑抽屉（ModalNavigationDrawer，列表项时间/当前加粗/✏️改名/🗑删除/新建）
+- 设置页: 全屏化（Dialog 全宽）+ 分组（Provider/通用/权限/关于）+ 字体大小滑杆 12-20sp + 清空所有数据（确认框）
+- 空状态: 欢迎页（品牌引导+4 个示例快捷发送）
+- 踩坑: material3 无 Dialog 符号→用 androidx.compose.ui.window.Dialog；
+  import 换行粘连（"BuildConfigimport"）多轮修复；inlineMarkdown 调 @Composable 需参数化颜色
+
+### 提交记录
+- 59e415b: import 换行粘连修复
+- 0be6e4b/a36ad2d: 流式光标 + 长按菜单
+- 496127d: 空状态欢迎页
+- 85880d9: Dialog 换 core 库 → **CI 全绿**
+- ce23cda→4ec0f5a→8f72cfc: 设置页全屏化 + import 区重建多轮修复
+- 11c5ae2: 工具卡片 + 时间戳
+- 5525c23: Markdown 渲染增强
+- 7f62db1: 主题系统
+- 3d8ae1e: 会话重命名
 - 27df2f0: WebView JS 工具（DeviceTools.javascriptEval）
 - f45f3a1/ffb2120/a66bf32: Kotlin 编译错误逐轮清零（HorizontalDivider material3、
   BuildConfig import、ChatMsg.imagePath 补回、DeviceTools/Context import）
