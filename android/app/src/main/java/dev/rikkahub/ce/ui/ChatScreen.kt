@@ -602,7 +602,7 @@ private fun InputBar(vm: ChatViewModel) {
                 } ?: Text("📷 图片", fontSize = 12.sp)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "将识别图片内容并发送",
+                    "将作为图片消息发送（多模态模型）",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -629,8 +629,11 @@ private fun InputBar(vm: ChatViewModel) {
                         val img = pendingImage
                         input = ""
                         pendingImage = null
-                        if (img != null) vm.ocrImage(img)
-                        if (text.isNotBlank()) vm.send(text)
+                        if (img != null) {
+                            vm.sendImage(img, text)
+                        } else if (text.isNotBlank()) {
+                            vm.send(text)
+                        }
                     }
                 }),
             )
@@ -655,8 +658,11 @@ private fun InputBar(vm: ChatViewModel) {
                             val img = pendingImage
                             input = ""
                             pendingImage = null
-                            if (img != null) vm.ocrImage(img)
-                            if (text.isNotBlank()) vm.send(text)
+                            if (img != null) {
+                                vm.sendImage(img, text)
+                            } else if (text.isNotBlank()) {
+                                vm.send(text)
+                            }
                         }
                     },
                     enabled = input.isNotBlank() || pendingImage != null,

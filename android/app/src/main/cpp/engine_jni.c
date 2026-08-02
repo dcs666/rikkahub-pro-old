@@ -13,6 +13,9 @@
 #include "rikka/ai/ocr.h"
 #include "rikka/ai/prompt.h"
 #include "rikka/ai/tool.h"
+
+/* 前向声明（parse_history 在 b64_encode 定义前调用） */
+static size_t b64_encode(const uint8_t *in, size_t in_len, char *out);
 #include "rikka/core/message.h"
 #include "rikka/json/json.h"
 #include "rikka/util/arena.h"
@@ -97,6 +100,31 @@ static int parse_history(Arena *a, const char *history_json,
         RikkaPart *p = rmsg_add_part(a, m, RIKKA_PART_TEXT);
         p->data = content;
         p->len = strlen(content);
+        /* 可选图片：image_path 字段 → 读文件 → base64 data URI → IMAGE part */
+        const char *img = jstr(e, "image_path");
+        if (img && img[0]) {
+            FILE *f = fopen(img, "rb");
+            if (f) {
+                Buf raw;
+                buf_init(&raw);
+                char rb[8192];
+                size_t rn;
+                while ((rn = fread(rb, 1, sizeof(rb), f)) > 0) buf_append(&raw, rb, rn);
+                fclose(f);
+                if (raw.len > 0) {
+                    size_t cap_b64 = ((raw.len + 2) / 3) * 4 + 64;
+                    char *b64 = (char *)arena_alloc(a, cap_b64);
+                    size_t b64len = b64_encode(raw.data, raw.len, b64);
+                    memmove(b64 + 22, b64, b64len);
+                    memcpy(b64, "data:image/png;base64,", 22);
+                    b64[22 + b64len] = '\0';
+                    RikkaPart *ip = rmsg_add_part(a, m, RIKKA_PART_IMAGE);
+                    ip->data = b64;
+                    ip->len = 22 + b64len;
+                }
+                buf_free(&raw);
+            }
+        }
         out[n++] = m;
     }
     *n_out = n;

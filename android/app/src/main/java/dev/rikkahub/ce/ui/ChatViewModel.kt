@@ -231,66 +231,6 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         sendInternal(text)
     }
 
-    /** 图片 OCR：图片消息展示 + 识别文本自动发送（队列版，busy 时排队） */
-    fun ocrImage(uri: Uri) {
-        ocrQueue.add(uri)
-        drainOcrQueue()
-    }
-
-    private val ocrQueue = mutableListOf<Uri>()
-
-    private fun drainOcrQueue() {
-        if (busy || ocrQueue.isEmpty()) return
-        val uri = ocrQueue.removeAt(0)
-        busy = true
-        viewModelScope.launch(Dispatchers.IO) {
-            val provider = JSONObject()
-                .put("base_url", providerBaseUrl)
-                .put("api_key", providerApiKey)
-                .put("model", providerModel)
-            try {
-                val path = copyUriToFile(uri)
-                val imgMsg = ChatMsg("user", "🖼️ 正在识别图片…", streaming = true, imagePath = path)
-                messages.add(imgMsg)
-                val result = Engine.nativeOcr(provider.toString(), path)
-                val parsed = JSONObject(result)
-                val text = if (parsed.optBoolean("ok")) {
-                    parsed.optString("text")
-                } else {
-                    "OCR 失败：${parsed.optString("error")}"
-                }
-                val idx = messages.indexOfLast { it.role == "user" && it.streaming }
-                if (idx >= 0) {
-                    messages[idx] = messages[idx].copy(
-                        text = "🖼️ 图片内容：\n$text",
-                        streaming = false,
-                        isError = !parsed.optBoolean("ok"),
-                    )
-                }
-                if (parsed.optBoolean("ok") && text.isNotBlank()) {
-                    // 识别成功：作为用户消息发送
-                    messages.add(ChatMsg("user", text))
-                    val session = currentSession ?: return@launch
-                    session.updatedAt = System.currentTimeMillis()
-                    saveSession()
-                    sendInternal(text)
-                }
-            } catch (e: Exception) {
-                val idx = messages.indexOfLast { it.role == "user" && it.streaming }
-                if (idx >= 0) {
-                    messages[idx] = messages[idx].copy(
-                        text = "🖼️ OCR 出错：${e.message}",
-                        streaming = false,
-                        isError = true,
-                    )
-                }
-            }
-            busy = false
-            saveSession()
-            drainOcrQueue()
-        }
-    }
-
     private fun copyUriToFile(uri: Uri): String {
         val file = java.io.File(appContext.cacheDir, "ocr_input.png")
         appContext.contentResolver.openInputStream(uri)?.use { input ->
@@ -299,7 +239,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         return file.absolutePath
     }
 
-    private fun sendInternal(text: String) {
+    private fun sendInternal(text: String, imagePath: String? = null) {
         val session = currentSession ?: return
         busy = true
         saveSession()
@@ -312,7 +252,11 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
             for (m in session.messages) {
                 if (m.role != "user" && m.role != "assistant") continue
                 if (m.isError || m.tool != null || m.text.startsWith("⚙️")) continue
-                history.put(JSONObject().put("role", m.role).put("content", m.text))
+                val jo = JSONObject().put("role", m.role).put("content", m.text)
+                if (m.role == "user" && m.imagePath != null) {
+                    jo.put("image_path", m.imagePath)
+                }
+                history.put(jo)
             }
             Engine.nativeChat(
                 provider.toString(),
