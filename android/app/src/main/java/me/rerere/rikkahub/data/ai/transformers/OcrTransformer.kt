@@ -105,7 +105,8 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         }
         val content = try {
             val parsed = org.json.JSONObject(result)
-            if (parsed.optBoolean("ok")) parsed.optString("text") else "[ERROR, OCR failed]"
+            if (parsed.optBoolean("ok")) parsed.optString("text")
+            else "[ERROR, ${parsed.optString("error", "OCR failed")}]"
         } catch (_: Exception) {
             "[ERROR, OCR failed]"
         }
