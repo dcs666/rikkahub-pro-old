@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>  /* TCP_NODELAY */
 #include <strings.h>
 #include <poll.h>
 #include <pthread.h>
@@ -122,6 +123,9 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
     }
     freeaddrinfo(res);
     if (fd < 0) return NULL;
+    /* 流式 SSE: 禁用 Nagle, 降低首包延迟(每次 write 立即发送) */
+    int nodelay = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
     set_nonblock(fd, 0);
 
     RHttpConn *c = (RHttpConn *)calloc(1, sizeof(RHttpConn));
