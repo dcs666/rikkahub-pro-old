@@ -161,7 +161,8 @@ int main(int argc, char **argv) {
                  : "https://generativelanguage.googleapis.com";
     }
 
-    RikkaProviderCfg cfg = {provider, base_url, api_key, model, max_tokens, 0, {0}};
+    RikkaProviderCfg cfg = {provider, base_url, api_key, model, max_tokens, 0,
+                             NULL, {0}, NULL, 0, -1, -1, NULL};
 
     if (interactive) {
         /* 交互模式 */
