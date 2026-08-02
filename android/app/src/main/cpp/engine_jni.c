@@ -151,7 +151,10 @@ static int parse_history(Arena *a, const char *history_json,
                 buf_init(&raw);
                 char rb[8192];
                 size_t rn;
-                while ((rn = fread(rb, 1, sizeof(rb), f)) > 0) buf_append(&raw, rb, rn);
+                while ((rn = fread(rb, 1, sizeof(rb), f)) > 0) {
+                    if (raw.len + rn > 16 * 1024 * 1024) break; /* 超大图截断 */
+                    buf_append(&raw, rb, rn);
+                }
                 fclose(f);
                 if (raw.len > 0) {
                     const char *mime = sniff_mime((const uint8_t *)raw.data, raw.len);
