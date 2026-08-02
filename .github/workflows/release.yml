@@ -51,6 +51,8 @@ jobs:
             echo "keyPassword=$RIKKA_CE_KEY_PASS"
           } > android/local.properties
           cat android/local.properties | sed 's/=.*/=<hidden>/'
+      - name: Build OpenSSL for Android (jniLibs)
+        run: bash android/scripts/build_openssl.sh
       - name: Build release APK (signed)
         run: |
           cd android && ./gradlew :app:assembleRelease --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -100 /tmp/gradle.log; exit 1; }

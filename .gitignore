@@ -8,3 +8,4 @@ build/
 # jniLibs 的 .so 是运行时依赖（libsimple.so 等），必须进仓库
 !android/app/src/main/jniLibs/
 !android/app/src/main/jniLibs/**/*.so
+*.so.*

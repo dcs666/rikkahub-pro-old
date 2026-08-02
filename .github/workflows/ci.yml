@@ -60,6 +60,8 @@ jobs:
           cmake --build android/build -j2 2>&1 | tee /tmp/android_build.log
           if grep -E 'warning' /tmp/android_build.log; then echo "WARNINGS PRESENT" && exit 1; fi
           ls -la android/build/librikka.so
+      - name: Build OpenSSL for Android (jniLibs)
+        run: bash android/scripts/build_openssl.sh
       - name: Build APK (Gradle)
         uses: gradle/actions/setup-gradle@v3
       - name: Set up pnpm (web-ui 前端构建依赖)
