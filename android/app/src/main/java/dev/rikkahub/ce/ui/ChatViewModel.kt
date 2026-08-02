@@ -61,13 +61,14 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
     /** 主题：0=跟随系统 1=浅色 2=深色 */
     var themeMode by mutableStateOf(prefs.getInt("theme_mode", 0))
         private set
+    var fontSize by mutableStateOf(prefs.getInt("font_size", 15))
+        private set
 
     var busy by mutableStateOf(false)
         private set
 
     val messages: MutableList<ChatMsg>
         get() = currentSession?.messages ?: mutableListOf()
-
     private val currentSession: ChatSession?
         get() = sessions.firstOrNull { it.id == currentSessionId }
 
@@ -338,6 +339,17 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
     fun updateThemeMode(mode: Int) {
         themeMode = mode
         prefs.edit().putInt("theme_mode", mode).apply()
+    }
+
+    fun updateFontSize(size: Int) {
+        fontSize = size
+        prefs.edit().putInt("font_size", size).apply()
+    }
+
+    fun clearAllData() {
+        prefs.edit().clear().apply()
+        sessions.clear()
+        newSession()
     }
 
     fun clearSession() {

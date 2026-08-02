@@ -38,6 +38,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Dialog
+import androidx.compose.material3.DialogProperties
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
@@ -217,6 +221,7 @@ private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
             MessageBubble(
                 msg,
                 onRetry = { vm.retryLast() },
+                fontSize = vm.fontSize,
             )
         }
     }
@@ -224,7 +229,7 @@ private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit) {
+private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15) {
     val isUser = msg.role == "user"
     val ctx = LocalContext.current
     val onCopy = {
@@ -302,7 +307,7 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit) {
                     }
                 }
                 if (msg.text.isNotBlank()) {
-                    MarkdownText(msg.text)
+                    MarkdownText(msg.text, fontSize = fontSize.sp)
                 }
                 if (msg.streaming) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -534,94 +539,163 @@ private fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
     var baseUrl by remember { mutableStateOf(vm.providerBaseUrl) }
     var apiKey by remember { mutableStateOf(vm.providerApiKey) }
     var model by remember { mutableStateOf(vm.providerModel) }
+    var confirmClear by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("设置") },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("Base URL") },
-                    singleLine = true,
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    label = { Text("API Key") },
-                    singleLine = true,
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text("模型") },
-                    singleLine = true,
-                )
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("朗读回复", modifier = Modifier.weight(1f))
-                    Switch(
-                        checked = vm.autoTts,
-                        onCheckedChange = { vm.updateAutoTts(it) },
-                    )
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // 顶栏
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onDismiss) { Text("←", fontSize = 18.sp) }
+                    Text("设置", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = {
+                        vm.providerBaseUrl = baseUrl.trim()
+                        vm.providerApiKey = apiKey.trim()
+                        vm.providerModel = model.trim()
+                        vm.saveProviderSettings()
+                        onDismiss()
+                    }) { Text("保存") }
                 }
-                Spacer(Modifier.height(12.dp))
-                Text("主题", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(4.dp))
-                Row {
-                    listOf(0 to "跟随系统", 1 to "浅色", 2 to "深色").forEach { (mode, label) ->
-                        FilterChip(
-                            selected = vm.themeMode == mode,
-                            onClick = { vm.updateThemeMode(mode) },
-                            label = { Text(label) },
-                            modifier = Modifier.padding(end = 8.dp),
+                HorizontalDivider()
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                ) {
+                    // ---- Provider ----
+                    SectionTitle("Provider")
+                    OutlinedTextField(
+                        value = baseUrl,
+                        onValueChange = { baseUrl = it },
+                        label = { Text("Base URL") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = { apiKey = it },
+                        label = { Text("API Key") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it },
+                        label = { Text("模型") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    // ---- 通用 ----
+                    SectionTitle("通用")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("朗读回复", modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = vm.autoTts,
+                            onCheckedChange = { vm.updateAutoTts(it) },
                         )
                     }
-                }
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
-                Text("权限", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(4.dp))
-                PermissionRow(
-                    label = "日历读取",
-                    granted = hasCalendarPermission(context),
-                    onRequest = { openAppSettings(context) },
-                )
-                PermissionRow(
-                    label = "屏幕时间",
-                    granted = hasUsageAccess(context),
-                    onRequest = {
-                        context.startActivity(
-                            android.content.Intent(
-                                android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS,
-                            ),
+                    Spacer(Modifier.height(8.dp))
+                    Text("主题", style = MaterialTheme.typography.bodyMedium)
+                    Row {
+                        listOf(0 to "跟随系统", 1 to "浅色", 2 to "深色").forEach { (mode, label) ->
+                            FilterChip(
+                                selected = vm.themeMode == mode,
+                                onClick = { vm.updateThemeMode(mode) },
+                                label = { Text(label) },
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text("字体大小", style = MaterialTheme.typography.bodyMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("小", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                        Slider(
+                            value = vm.fontSize.toFloat(),
+                            onValueChange = { vm.updateFontSize(it.toInt()) },
+                            valueRange = 12f..20f,
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                         )
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "RikkaHub CE v${BuildConfig.VERSION_NAME}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
-                )
+                        Text("大", fontSize = 16.sp, color = MaterialTheme.colorScheme.outline)
+                    }
+                    // ---- 权限 ----
+                    SectionTitle("权限")
+                    PermissionRow(
+                        label = "日历读取",
+                        granted = hasCalendarPermission(context),
+                        onRequest = { openAppSettings(context) },
+                    )
+                    PermissionRow(
+                        label = "屏幕时间",
+                        granted = hasUsageAccess(context),
+                        onRequest = {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS,
+                                ),
+                            )
+                        },
+                    )
+                    // ---- 关于 ----
+                    SectionTitle("关于")
+                    Text(
+                        "RikkaHub CE v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { confirmClear = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("清空所有数据", color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(Modifier.height(24.dp))
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                vm.providerBaseUrl = baseUrl.trim()
-                vm.providerApiKey = apiKey.trim()
-                vm.providerModel = model.trim()
-                vm.saveProviderSettings()
-                onDismiss()
-            }) { Text("保存") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
+        }
+    }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("清空所有数据？") },
+            text = { Text("将删除全部会话与设置，此操作不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.clearAllData()
+                    confirmClear = false
+                    onDismiss()
+                }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
     )
 }
 
