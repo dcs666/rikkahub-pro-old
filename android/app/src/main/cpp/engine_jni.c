@@ -389,6 +389,7 @@ static char *jni_clipboard_read(void *ud) {
 }
 
 static char *jni_calendar_create(const char *args, void *ud) {
+    (void)ud;
     JNIEnv *env = env_of();
     if (!env || !args) return NULL;
     if (!g_dev_cls) {
@@ -418,6 +419,7 @@ static char *jni_calendar_create(const char *args, void *ud) {
 }
 
 static char *jni_web_search(const char *query, void *ud) {
+    (void)ud;
     JNIEnv *env = env_of();
     if (!env || !query) return NULL;
     if (!g_dev_cls) {
