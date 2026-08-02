@@ -354,7 +354,7 @@ Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
                             jstr(pv, "base_url") ? jstr(pv, "base_url") : "",
                             jstr(pv, "api_key") ? jstr(pv, "api_key") : "",
                             jstr(pv, "model") ? jstr(pv, "model") : "",
-                            4096, 0, NULL, {0}};
+                            4096, 0, NULL, {0}, NULL, 0};
     char *text = NULL;
     char *detail = NULL;
     int rc = rk_ocr_image(&cfg, RK_PROMPT_OCR, data_uri, 120000, &text, &detail);
@@ -427,7 +427,7 @@ Java_dev_rikkahub_ce_Engine_nativeGenerateTitle(JNIEnv *env, jclass cls,
                             jstr(pv, "base_url") ? jstr(pv, "base_url") : "",
                             jstr(pv, "api_key") ? jstr(pv, "api_key") : "",
                             jstr(pv, "model") ? jstr(pv, "model") : "",
-                            4096, 0, NULL, {0}};
+                            4096, 0, NULL, {0}, NULL, 0};
 
     /* system = 标题 prompt；user = 会话内容 */
     const char *names[2] = {"locale", "content"};
@@ -540,7 +540,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
                              base_url ? base_url : "",
                              api_key ? api_key : "",
                              model ? model : "",
-                             4096, 0, NULL, {0}};
+                             4096, 0, NULL, {0}, NULL, 0};
     /* 思考模式(DeepSeek 等): reasoning_effort / thinking */
     pcfg.reasoning_effort = jstr(pv, "reasoning_effort");
     if (jstr(pv, "thinking")) pcfg.thinking_enabled = 1;
