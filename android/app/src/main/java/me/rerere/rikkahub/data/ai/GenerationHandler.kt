@@ -129,6 +129,14 @@ class GenerationHandler(
             .put("base_url", baseUrl)
             .put("api_key", apiKey)
             .put("model", modelId)
+        // 记忆库目标(对齐 turbo: enableMemory 时 memory_tool 反调落库)
+        if (assistant.enableMemory) {
+            providerJson.put(
+                "assistant_id",
+                if (assistant.useGlobalMemory) MemoryRepository.GLOBAL_MEMORY_ID
+                else assistant.id.toString(),
+            )
+        }
         // 思考模式(与 turbo 的 ai 模块逻辑对齐: DeepSeek/Moonshot/NVIDIA/opencode/默认)
         val (effort, thinking) = reasoningArgs(baseUrl, assistant.reasoningLevel)
         if (effort != null) providerJson.put("reasoning_effort", effort)

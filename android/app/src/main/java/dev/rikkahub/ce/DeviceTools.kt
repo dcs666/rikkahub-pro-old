@@ -256,6 +256,24 @@ object DeviceTools {
         }.getOrNull()
     }
 
+    /** [CE] memory_tool 引擎反调桥：落库到 MemoryRepository（引擎工作线程调用） */
+    @JvmStatic
+    fun memoryAction(action: String, id: Long, content: String, assistantId: String): String? {
+        return runCatching {
+            val memoryRepo = org.koin.java.KoinJavaComponent.getKoin()
+                .get<me.rerere.rikkahub.data.repository.MemoryRepository>()
+            kotlinx.coroutines.runBlocking {
+                when (action) {
+                    "create" -> memoryRepo.addMemory(assistantId, content)
+                    "edit" -> memoryRepo.updateContent(id.toInt(), content)
+                    "delete" -> memoryRepo.deleteMemory(id.toInt())
+                    else -> return null
+                }
+            }
+            JSONObject().put("ok", true).toString()
+        }.getOrNull()
+    }
+
     private fun err(msg: String): String {
         return JSONObject().put("error", msg).toString()
     }

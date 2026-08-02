@@ -197,7 +197,7 @@ static int parse_history(Arena *a, const char *history_json,
 
 static jclass g_dev_cls = NULL;
 static jmethodID g_dev_ask_user, g_dev_clip, g_dev_tts, g_dev_cal, g_dev_st, g_dev_js,
-                 g_dev_web_search;
+                 g_dev_web_search, g_dev_mem;
 static jclass g_store_cls = NULL;
 static jmethodID g_store_recent, g_store_search;
 
@@ -350,6 +350,60 @@ static char *jni_web_search(const char *query, void *ud) {
     (*env)->DeleteLocalRef(env, jq);
     (*env)->DeleteLocalRef(env, jr);
     return out;
+}
+
+/* memory_tool 反调: assistant_id 从 providerJson 传入, 存于 jni_ctx_mem_aid */
+static char *jni_ctx_mem_aid = NULL;  /* strdup 的 assistant_id; 每轮 chat 重建 */
+
+static char *jni_memory(const char *action, int64_t id, const char *content, void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env || !action || !jni_ctx_mem_aid) return NULL;
+    if (!g_dev_cls) {
+        jclass c = (*env)->FindClass(env, "dev/rikkahub/ce/DeviceTools");
+        if (!c) return NULL;
+        g_dev_cls = (*env)->NewGlobalRef(env, c);
+    }
+    if (!g_dev_mem) {
+        g_dev_mem = (*env)->GetStaticMethodID(
+            env, g_dev_cls, "memoryAction",
+            "(Ljava/lang/String;JLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+        if (!g_dev_mem) return NULL;
+    }
+    jstring ja = (*env)->NewStringUTF(env, action);
+    jstring jc = (*env)->NewStringUTF(env, content ? content : "");
+    jstring jid = (*env)->NewStringUTF(env, jni_ctx_mem_aid);
+    jstring jr = (jstring)(*env)->CallStaticObjectMethod(
+        env, g_dev_cls, g_dev_mem, ja, (jlong)id, jc, jid);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    if (!jr) return NULL;
+    const char *r = (*env)->GetStringUTFChars(env, jr, NULL);
+    if (!r) return NULL;
+    char *out = strdup(r);
+    (*env)->ReleaseStringUTFChars(env, jr, r);
+    (*env)->DeleteLocalRef(env, ja);
+    (*env)->DeleteLocalRef(env, jc);
+    (*env)->DeleteLocalRef(env, jid);
+    (*env)->DeleteLocalRef(env, jr);
+    return out;
+}
+
+static char *jni_memory_create(const char *content, void *ud) {
+    return jni_memory("create", 0, content, ud);
+}
+
+static char *jni_memory_edit(int64_t id, const char *content, void *ud) {
+    return jni_memory("edit", id, content, ud);
+}
+
+static int jni_memory_delete(int64_t id, void *ud) {
+    char *r = jni_memory("delete", id, NULL, ud);
+    if (!r) return -1;
+    free(r);
+    return 0;
 }
 
 static char *jni_recent_chats(int limit, void *ud) {
@@ -639,6 +693,12 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     pcfg.reasoning_effort = jstr(pv, "reasoning_effort");
     if (jstr(pv, "thinking")) pcfg.thinking_enabled = 1;
 
+    /* memory_tool 反调目标 assistant_id(enableMemory 时 Kotlin 传入; 每轮重建) */
+    free(jni_ctx_mem_aid);
+    jni_ctx_mem_aid = NULL;
+    const char *aid = jstr(pv, "assistant_id");
+    if (aid && aid[0]) jni_ctx_mem_aid = strdup(aid);
+
     const RikkaMessage *msgs[64];
     size_t n_msgs = 0;
     if (parse_history(a, hj, msgs, 64, &n_msgs) != 0) {
@@ -658,6 +718,9 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.recent_chats = jni_recent_chats;
     tenv.conversation_search = jni_conversation_search;
     tenv.web_search = jni_web_search;
+    tenv.memory_create = jni_memory_create;
+    tenv.memory_edit = jni_memory_edit;
+    tenv.memory_delete = jni_memory_delete;
     rk_tools_init(&reg);
     rk_tools_register_builtin(&reg, &tenv);
 
