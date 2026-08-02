@@ -25,10 +25,19 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.7
-      - name: Build release APK
+      - name: Build release APK (signed)
+        env:
+          RIKKA_CE_KEYSTORE_B64: ${{ secrets.RIKKA_CE_KEYSTORE_B64 }}
+          RIKKA_CE_KEYSTORE_PASS: ${{ secrets.RIKKA_CE_KEYSTORE_PASS }}
+          RIKKA_CE_KEY_ALIAS: ${{ secrets.RIKKA_CE_KEY_ALIAS }}
+          RIKKA_CE_KEY_PASS: ${{ secrets.RIKKA_CE_KEY_PASS }}
         run: |
           gradle -p android :app:assembleRelease --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -80 /tmp/gradle.log; exit 1; }
           ls -la android/app/build/outputs/apk/release/
+      - name: Verify signature
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner"
+          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | head -3
       - name: Rename APK
         run: |
           VER="${GITHUB_REF_NAME#v}"

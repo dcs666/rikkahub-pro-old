@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ce.ui
+package dev.rikkahub.ce.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts

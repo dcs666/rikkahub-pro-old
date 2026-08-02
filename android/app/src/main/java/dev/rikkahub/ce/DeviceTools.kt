@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ce
+package dev.rikkahub.ce
 
 import android.app.Dialog
 import android.content.ClipData

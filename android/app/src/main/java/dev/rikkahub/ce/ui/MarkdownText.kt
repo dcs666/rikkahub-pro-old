@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ce.ui
+package dev.rikkahub.ce.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column

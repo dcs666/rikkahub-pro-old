@@ -128,7 +128,7 @@ static char *jstrdup_utf(JNIEnv *env, jstring s) {
 
 static void ensure_device_cls(JNIEnv *env) {
     if (g_dev_cls) return;
-    jclass c = (*env)->FindClass(env, "me/rerere/rikkahub/ce/DeviceTools");
+    jclass c = (*env)->FindClass(env, "dev/rikkahub/ce/DeviceTools");
     if (!c) return;
     g_dev_cls = (jclass)(*env)->NewGlobalRef(env, c);
     g_dev_ask_user = (*env)->GetStaticMethodID(env, g_dev_cls, "askUser",
@@ -222,7 +222,7 @@ static char *jni_javascript_eval(const char *code, void *ud) {
 
 static void ensure_store_cls(JNIEnv *env) {
     if (g_store_cls) return;
-    jclass c = (*env)->FindClass(env, "me/rerere/rikkahub/ce/ChatStore");
+    jclass c = (*env)->FindClass(env, "dev/rikkahub/ce/ChatStore");
     if (!c) return;
     g_store_cls = (jclass)(*env)->NewGlobalRef(env, c);
     g_store_recent = (*env)->GetStaticMethodID(env, g_store_cls, "recentChats",
@@ -276,7 +276,7 @@ static size_t b64_encode(const uint8_t *in, size_t in_len, char *out) {
 }
 
 JNIEXPORT jstring JNICALL
-Java_me_rerere_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
+Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
                                             jstring provider_json,
                                             jstring image_path) {
     (void)cls;
@@ -361,7 +361,7 @@ Java_me_rerere_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
 /* ---------- JNI 入口 ---------- */
 
 JNIEXPORT jstring JNICALL
-Java_me_rerere_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
+Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
                                              jstring provider_json,
                                              jstring history_json,
                                              jstring workspace_root,
@@ -510,7 +510,7 @@ Java_me_rerere_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
 }
 
 JNIEXPORT void JNICALL
-Java_me_rerere_rikkahub_ce_Engine_nativeSetCancel(JNIEnv *env, jclass cls,
+Java_dev_rikkahub_ce_Engine_nativeSetCancel(JNIEnv *env, jclass cls,
                                                   jboolean cancel) {
     (void)env;
     (void)cls;

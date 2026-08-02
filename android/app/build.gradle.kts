@@ -5,11 +5,29 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.rikkahub.ce"
+    namespace = "dev.rikkahub.ce"
     compileSdk = 34
 
+    signingConfigs {
+        create("release") {
+            // CI 注入正式 keystore（GitHub Secrets）；本地无 env 时退回 debug 签名
+            val ksB64 = System.getenv("RIKKA_CE_KEYSTORE_B64")
+            if (ksB64 != null) {
+                val ksFile = File(
+                    System.getenv("RUNNER_TEMP") ?: "/tmp",
+                    "rikkahub-ce.keystore",
+                )
+                ksFile.writeBytes(java.util.Base64.getDecoder().decode(ksB64))
+                storeFile = ksFile
+                storePassword = System.getenv("RIKKA_CE_KEYSTORE_PASS")
+                keyAlias = System.getenv("RIKKA_CE_KEY_ALIAS") ?: "rikkahub-ce"
+                keyPassword = System.getenv("RIKKA_CE_KEY_PASS")
+            }
+        }
+    }
+
     defaultConfig {
-        applicationId = "me.rerere.rikkahub.ce"
+        applicationId = "dev.rikkahub.ce"
         minSdk = 26
         targetSdk = 34
         versionCode = 2
@@ -34,8 +52,12 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            // 临时：发布版用 debug 签名（正式签名待提供 keystore 后替换）
-            signingConfig = signingConfigs.getByName("debug")
+            // 统一签名：CI 有正式 keystore 用正式签名；本地退回 debug
+            signingConfig = if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {

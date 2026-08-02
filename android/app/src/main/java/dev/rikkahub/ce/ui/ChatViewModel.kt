@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ce.ui
+package dev.rikkahub.ce.ui
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -11,8 +11,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.ce.ChatCallback
-import me.rerere.rikkahub.ce.Engine
+import dev.rikkahub.ce.ChatCallback
+import dev.rikkahub.ce.Engine
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -123,7 +123,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         if (ok && autoTts) {
             val last = messages.lastOrNull { it.role == "assistant" && !it.isError }
             if (last != null) {
-                me.rerere.rikkahub.ce.DeviceTools.ttsSpeak(last.text.take(500))
+                dev.rikkahub.ce.DeviceTools.ttsSpeak(last.text.take(500))
             }
         }
     }

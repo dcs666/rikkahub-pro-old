@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ce
+package dev.rikkahub.ce
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -13,8 +13,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
-import me.rerere.rikkahub.ce.ui.ChatScreen
-import me.rerere.rikkahub.ce.ui.ChatViewModel
+import dev.rikkahub.ce.ui.ChatScreen
+import dev.rikkahub.ce.ui.ChatViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ce
+package dev.rikkahub.ce
 
 /** 引擎回调（增量/工具/完成，调用线程同步触发） */
 interface ChatCallback {
