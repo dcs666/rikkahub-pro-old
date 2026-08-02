@@ -386,48 +386,106 @@ private fun ToolCard(tool: ToolMsg, modifier: Modifier = Modifier) {
 @Composable
 private fun InputBar(vm: ChatViewModel) {
     var input by remember { mutableStateOf("") }
+    var pendingImage by remember { mutableStateOf<Uri?>(null) }
     val context = LocalContext.current
     val pickImage = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) vm.ocrImage(uri)
+        if (uri != null) pendingImage = uri
     }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        OutlinedTextField(
-            value = input,
-            onValueChange = { input = it },
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("输入消息…") },
-            maxLines = 5,
-        )
-        Spacer(Modifier.width(4.dp))
-        if (!vm.busy) {
-            TextButton(onClick = {
-                pickImage.launch("image/*")
-            }) { Text("📷") }
-        }
-        Spacer(Modifier.width(4.dp))
-        if (vm.busy) {
-            IconButton(onClick = { vm.cancel() }) {
-                Box(contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp), strokeWidth = 2.dp)
-                }
-            }
-        } else {
-            Button(
-                onClick = {
-                    if (input.isNotBlank()) {
-                        vm.send(input.trim())
-                        input = ""
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // 附件预览条
+        pendingImage?.let { uri ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val bitmap by produceState<android.graphics.Bitmap?>(
+                    initialValue = null, uri,
+                ) {
+                    value = try {
+                        context.contentResolver.openInputStream(uri)?.use {
+                            android.graphics.BitmapFactory.decodeStream(it)
+                        }
+                    } catch (_: Exception) {
+                        null
                     }
-                },
-                enabled = input.isNotBlank(),
-            ) { Text("发送") }
+                }
+                bitmap?.let { bmp ->
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "待发送图片",
+                        modifier = Modifier
+                            .width(64.dp)
+                            .height(64.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                } ?: Text("📷 图片", fontSize = 12.sp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "将识别图片内容并发送",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { pendingImage = null }) { Text("✕", fontSize = 12.sp) }
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("输入消息…") },
+                maxLines = 5,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = {
+                    if (input.isNotBlank() || pendingImage != null) {
+                        val text = input.trim()
+                        val img = pendingImage
+                        input = ""
+                        pendingImage = null
+                        if (img != null) vm.ocrImage(img)
+                        if (text.isNotBlank()) vm.send(text)
+                    }
+                }),
+            )
+            Spacer(Modifier.width(4.dp))
+            if (!vm.busy) {
+                TextButton(onClick = {
+                    pickImage.launch("image/*")
+                }) { Text("📷") }
+            }
+            Spacer(Modifier.width(4.dp))
+            if (vm.busy) {
+                IconButton(onClick = { vm.cancel() }) {
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.width(24.dp).height(24.dp), strokeWidth = 2.dp)
+                    }
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (input.isNotBlank() || pendingImage != null) {
+                            val text = input.trim()
+                            val img = pendingImage
+                            input = ""
+                            pendingImage = null
+                            if (img != null) vm.ocrImage(img)
+                            if (text.isNotBlank()) vm.send(text)
+                        }
+                    },
+                    enabled = input.isNotBlank() || pendingImage != null,
+                ) { Text("发送") }
+            }
         }
     }
 }

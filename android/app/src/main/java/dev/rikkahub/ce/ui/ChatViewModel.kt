@@ -230,9 +230,17 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         sendInternal(text)
     }
 
-    /** 图片 OCR：图片消息展示 + 识别文本自动发送 */
+    /** 图片 OCR：图片消息展示 + 识别文本自动发送（队列版，busy 时排队） */
     fun ocrImage(uri: Uri) {
-        if (busy) return
+        ocrQueue.add(uri)
+        drainOcrQueue()
+    }
+
+    private val ocrQueue = mutableListOf<Uri>()
+
+    private fun drainOcrQueue() {
+        if (busy || ocrQueue.isEmpty()) return
+        val uri = ocrQueue.removeAt(0)
         busy = true
         viewModelScope.launch(Dispatchers.IO) {
             val provider = JSONObject()
@@ -265,8 +273,6 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
                     session.updatedAt = System.currentTimeMillis()
                     saveSession()
                     sendInternal(text)
-                } else {
-                    busy = false
                 }
             } catch (e: Exception) {
                 val idx = messages.indexOfLast { it.role == "user" && it.streaming }
@@ -277,8 +283,10 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
                         isError = true,
                     )
                 }
-                busy = false
             }
+            busy = false
+            saveSession()
+            drainOcrQueue()
         }
     }
 
