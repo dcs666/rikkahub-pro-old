@@ -62,10 +62,8 @@ jobs:
           ls -la android/build/librikka.so
       - name: Build APK (Gradle)
         uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 8.7
       - name: Assemble debug APK
         run: |
-          gradle -p android :app:assembleDebug --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -80 /tmp/gradle.log; exit 1; }
+          cd android && ./gradlew :app:assembleDebug --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -100 /tmp/gradle.log; exit 1; }
           tail -5 /tmp/gradle.log
-          ls -la android/app/build/outputs/apk/debug/*.apk
+          ls -la app/build/outputs/apk/debug/*.apk

@@ -23,8 +23,6 @@ jobs:
         uses: android-actions/setup-android@v3
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 8.7
       - name: Build release APK (signed)
         env:
           RIKKA_CE_KEYSTORE_B64: ${{ secrets.RIKKA_CE_KEYSTORE_B64 }}
@@ -32,8 +30,8 @@ jobs:
           RIKKA_CE_KEY_ALIAS: ${{ secrets.RIKKA_CE_KEY_ALIAS }}
           RIKKA_CE_KEY_PASS: ${{ secrets.RIKKA_CE_KEY_PASS }}
         run: |
-          gradle -p android :app:assembleRelease --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -80 /tmp/gradle.log; exit 1; }
-          ls -la android/app/build/outputs/apk/release/
+          cd android && ./gradlew :app:assembleRelease --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -100 /tmp/gradle.log; exit 1; }
+          ls -la app/build/outputs/apk/release/
       - name: Verify signature
         run: |
           APKSIGNER="$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner"
