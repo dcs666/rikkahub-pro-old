@@ -473,7 +473,7 @@ TEST(ocr_via_provider) {
     char img[128];
     snprintf(img, sizeof(img), "http://127.0.0.1:%d/pic.png", g_port);
     char *text = NULL;
-    ASSERT_EQ_INT(0, rk_ocr_image(&cfg, "You are an OCR assistant.", img, 15000, &text));
+    ASSERT_EQ_INT(0, rk_ocr_image(&cfg, "You are an OCR assistant.", img, 15000, &text, NULL));
     ASSERT_NOT_NULL(text);
     ASSERT(strlen(text) > 0);
     /* mock /openai 回放的流式内容（Hello ...） */

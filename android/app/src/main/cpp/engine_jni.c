@@ -356,7 +356,8 @@ Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
                             jstr(pv, "model") ? jstr(pv, "model") : "",
                             4096, 0, NULL, {0}};
     char *text = NULL;
-    int rc = rk_ocr_image(&cfg, RK_PROMPT_OCR, data_uri, 120000, &text);
+    char *detail = NULL;
+    int rc = rk_ocr_image(&cfg, RK_PROMPT_OCR, data_uri, 120000, &text, &detail);
 
     Buf out;
     buf_init(&out);
@@ -380,9 +381,24 @@ Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
         buf_append_byte(&out, '"');
         buf_append_str(&out, "}");
     } else {
-        buf_append_str(&out, "{\"ok\":false,\"error\":\"ocr failed\"}");
+        const char *msg = (detail && detail[0]) ? detail : "ocr failed";
+        buf_append_str(&out, "{\"ok\":false,\"error\":");
+        buf_append_byte(&out, '"');
+        for (const char *q = msg; *q; q++) {
+            if (*q == '"' || *q == '\\') {
+                buf_append_byte(&out, '\\');
+                buf_append_byte(&out, (uint8_t)*q);
+            } else if (*q == '\n') {
+                buf_append_str(&out, "\\n");
+            } else {
+                buf_append_byte(&out, (uint8_t)*q);
+            }
+        }
+        buf_append_byte(&out, '"');
+        buf_append_str(&out, "}");
     }
     jstring result = (*env)->NewStringUTF(env, (const char *)out.data);
+    free(detail);
     free(text);
     free(data_uri);
     buf_free(&out);
@@ -428,7 +444,8 @@ Java_dev_rikkahub_ce_Engine_nativeGenerateTitle(JNIEnv *env, jclass cls,
     const RikkaMessage *msgs[2] = {sm, um};
     RikkaStream out;
     rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
-    int rc = rp_chat_stream(&cfg, msgs, 2, &out, 60000, NULL);
+    char *detail = NULL;
+    int rc = rp_chat_stream_cb(&cfg, msgs, 2, &out, 60000, NULL, NULL, NULL, NULL, &detail);
     char *text = NULL;
     if (rc == 0) {
         /* 提取文本 parts 拼接 */
@@ -465,9 +482,24 @@ Java_dev_rikkahub_ce_Engine_nativeGenerateTitle(JNIEnv *env, jclass cls,
         buf_append_byte(&out_json, '"');
         buf_append_str(&out_json, "}");
     } else {
-        buf_append_str(&out_json, "{\"ok\":false,\"error\":\"title generation failed\"}");
+        const char *msg = (detail && detail[0]) ? detail : "title generation failed";
+        buf_append_str(&out_json, "{\"ok\":false,\"error\":");
+        buf_append_byte(&out_json, '"');
+        for (const char *q = msg; *q; q++) {
+            if (*q == '"' || *q == '\\') {
+                buf_append_byte(&out_json, '\\');
+                buf_append_byte(&out_json, (uint8_t)*q);
+            } else if (*q == '\n') {
+                buf_append_str(&out_json, "\\n");
+            } else {
+                buf_append_byte(&out_json, (uint8_t)*q);
+            }
+        }
+        buf_append_byte(&out_json, '"');
+        buf_append_str(&out_json, "}");
     }
     jstring result = (*env)->NewStringUTF(env, (const char *)out_json.data);
+    free(detail);
     free(text);
     buf_free(&out_json);
     arena_destroy(a);

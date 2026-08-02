@@ -13,6 +13,7 @@
  * 返回 0 成功（*text_out 为识别文本，malloc，调用方 free）；-1 失败。
  */
 int rk_ocr_image(const RikkaProviderCfg *cfg, const char *ocr_prompt,
-                 const char *image_path, int timeout_ms, char **text_out);
+                 const char *image_path, int timeout_ms, char **text_out,
+                 char **err_out);
 
 #endif /* RIKKA_AI_OCR_H */

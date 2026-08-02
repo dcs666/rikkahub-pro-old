@@ -10,7 +10,8 @@
 #include <string.h>
 
 int rk_ocr_image(const RikkaProviderCfg *cfg, const char *ocr_prompt,
-                 const char *image_path, int timeout_ms, char **text_out) {
+                 const char *image_path, int timeout_ms, char **text_out,
+                 char **err_out) {
     if (!cfg || !ocr_prompt || !image_path || !text_out) return -1;
     Arena *a = arena_create(0);
     RikkaMessage *sys = rmsg_new(a, RIKKA_ROLE_SYSTEM);
@@ -24,7 +25,8 @@ int rk_ocr_image(const RikkaProviderCfg *cfg, const char *ocr_prompt,
     const RikkaMessage *msgs[2] = {sys, usr};
     RikkaStream out;
     rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
-    int rc = rp_chat_stream(cfg, msgs, 2, &out, timeout_ms, NULL);
+    char *detail = NULL;
+    int rc = rp_chat_stream_cb(cfg, msgs, 2, &out, timeout_ms, NULL, NULL, NULL, NULL, &detail);
     /* 收集文本 parts */
     char *text = NULL;
     if (rc == 0 && out.msg) {
@@ -47,7 +49,12 @@ int rk_ocr_image(const RikkaProviderCfg *cfg, const char *ocr_prompt,
     }
     rstream_destroy(&out);
     arena_destroy(a);
-    if (!text) return -1;
+    if (!text) {
+        if (err_out) *err_out = detail;
+        else free(detail);
+        return -1;
+    }
+    free(detail);
     *text_out = text;
     return 0;
 }

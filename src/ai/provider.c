@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "rikka/ai/provider.h"
 #include "rikka/http/http.h"
+#include <openssl/err.h>
 #include "rikka/http/sse.h"
 #include "rikka/json/json.h"
 #include "rikka/pipe/spsc.h"
@@ -661,7 +662,22 @@ static int start_once(RikkaStreamSession *ss, const char *path,
         path = full;
     }
     RHttpConn *conn = rhttp_connect(host, port, tls, timeout_ms);
-    if (!conn) return -1;
+    if (!conn) {
+        /* 记录连接/TLS 失败详情（供上层诊断） */
+        unsigned long e = ERR_get_error();
+        char msg[192];
+        if (e) {
+            const char *r = ERR_reason_error_string(e);
+            snprintf(msg, sizeof(msg), "connect/TLS failed: %s",
+                     r ? r : "unknown error");
+        } else {
+            snprintf(msg, sizeof(msg),
+                     "connect failed (dns/timeout/refused)");
+        }
+        free(ss->last_error);
+        ss->last_error = strdup(msg);
+        return -1;
+    }
 
     char auth[512];
     const char *hdrs[8];
@@ -929,7 +945,8 @@ int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
                       RikkaStream *out, int timeout_ms,
                       RkStreamDeltaCb delta_cb, void *delta_ud,
                       volatile int *cancel,
-                      RikkaSessionStats *stats_out) {
+                      RikkaSessionStats *stats_out,
+                      char **err_detail) {
     Buf body;
     buf_init(&body);
     if (rp_build_request(cfg, msgs, n, 1, &body) != 0) { buf_free(&body); return -1; }
@@ -949,6 +966,10 @@ int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
             rp_session_destroy(ss);
             break;
         }
+        if (err_detail) {
+            free(*err_detail);
+            *err_detail = rp_take_error_detail(ss);
+        }
         rp_session_destroy(ss);
         if (status >= 400 && status < 500) break; /* 4xx 不重试 */
         if (attempt + 1 < RIKKA_MAX_RETRIES) pm_msleep(100L << attempt); /* 指数退避 */
@@ -961,5 +982,5 @@ int rp_chat_stream(const RikkaProviderCfg *cfg,
                    const RikkaMessage *const *msgs, size_t n,
                    RikkaStream *out, int timeout_ms,
                    RikkaSessionStats *stats_out) {
-    return rp_chat_stream_cb(cfg, msgs, n, out, timeout_ms, NULL, NULL, NULL, stats_out);
+    return rp_chat_stream_cb(cfg, msgs, n, out, timeout_ms, NULL, NULL, NULL, stats_out, NULL);
 }

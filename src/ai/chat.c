@@ -240,15 +240,23 @@ int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
         br.cfg = cfg;
         buf_init(&br.out_text);
         buf_init(&br.out_reason);
+        char *detail = NULL;
         rc = rp_chat_stream_cb(&pcfg, arr, work.count, &out, timeout,
-                               delta_bridge, &br, cfg->cancel_flag, NULL);
+                               delta_bridge, &br, cfg->cancel_flag, NULL,
+                               &detail);
         buf_free(&br.out_text);
         buf_free(&br.out_reason);
         if (rc != 0) {
             rstream_destroy(&out);
-            err = strdup("provider request failed");
+            if (detail && detail[0]) {
+                err = detail; /* 具体原因（TLS/连接/HTTP 错误） */
+            } else {
+                free(detail);
+                err = strdup("provider request failed");
+            }
             break;
         }
+        free(detail);
         rstream_freeze(&out);
         if (n_owned < 16) owned[n_owned++] = out.msg; /* 结束时统一 free bufs */
 

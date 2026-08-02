@@ -112,6 +112,7 @@ int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
                       RikkaStream *out, int timeout_ms,
                       RkStreamDeltaCb delta_cb, void *delta_ud,
                       volatile int *cancel,
-                      RikkaSessionStats *stats_out);
+                      RikkaSessionStats *stats_out,
+                      char **err_detail);
 
 #endif /* RIKKA_AI_PROVIDER_H */
