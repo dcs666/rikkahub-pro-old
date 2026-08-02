@@ -28,8 +28,19 @@ static void ssl_init_once(void) {
     SSL_load_error_strings();
     g_ssl_ctx = SSL_CTX_new(TLS_client_method());
     if (g_ssl_ctx) {
+#ifdef RK_ANDROID
+        /* Android 无 /etc/ssl/certs：系统 CA 在 /system/etc/security/cacerts
+           (文件名 hash.0, OpenSSL 兼容格式)。加载失败则降级为不验证。 */
+        if (SSL_CTX_load_verify_locations(g_ssl_ctx, NULL,
+                                          "/system/etc/security/cacerts") != 1) {
+            SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_NONE, NULL);
+        } else {
+            SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
+        }
+#else
         SSL_CTX_set_default_verify_paths(g_ssl_ctx);
         SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
+#endif
         SSL_CTX_set_min_proto_version(g_ssl_ctx, TLS1_2_VERSION);
     }
 }

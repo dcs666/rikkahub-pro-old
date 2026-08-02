@@ -32,6 +32,7 @@ if(ANDROID)
     target_link_libraries(rikka PUBLIC z
         "${RK_OPENSSL_DIR}/libssl.so"
         "${RK_OPENSSL_DIR}/libcrypto.so")
+    target_compile_definitions(rikka PRIVATE RK_ANDROID)
     set(CMAKE_SHARED_LINKER_FLAGS
         "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,undefs")
 else()
