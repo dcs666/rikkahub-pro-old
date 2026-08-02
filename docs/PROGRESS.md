@@ -170,3 +170,13 @@
 - 测试: reasoning_body / stream_usage 双协议
 - 修: SSE data 非 NUL 结尾 strstr 越界(ASan 抓到)→ contains_usage
 - 功能差异已清零(除: Moonshot keep:all 未传、NVIDIA 非 v4 模型简化、reasoning_tokens 未解析)
+
+### 审查发现(2026-08-02 优化轮)
+- **重大: OpenAI 请求体 tools 在顶层 } 之后拼接 → 非法 JSON**(潜伏, 真实 provider
+  带工具必 400; mock 不校验 JSON 未暴露) → 已修 + 回归测试 build_openai_tools_json_valid
+- strstr 对非 NUL 结尾 SSE data 越界读(ASan 抓到) → contains_usage
+- reasoningArgs AUTO 与 turbo 不一致(NVIDIA/opencode AUTO 误写 effort) → 已修
+- 图片 MIME 魔数探测(jpeg/gif/webp/heic 替代硬编码 png)
+- OCR 失败透传引擎错误详情
+- 已知低风险: workspace resolve_path 不做 symlink 解析(字符串段级拦截已够用);
+  ProviderConnectionTester 走 Kotlin 路径(待办 C 化)
