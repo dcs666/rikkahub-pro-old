@@ -261,3 +261,10 @@
 - skills 列表注入 system prompt(对齐 turbo createSkillTools)
 - 待办记录: 系统代理(HTTP CONNECT)/MCP 接线/多问题 ask_user UI
 - 确认: 引擎无重试(对齐 turbo)/SSE 8MB 上限可接受/权限清单齐全
+
+### 25轮深度优化(第六批) — 已提交
+- CI 失败修复: rikkahub.c/test_chat.c/test_provider.c RikkaProviderCfg 初始化器补齐
+- engine_jni 修复: rjson_get→rjson_obj_get/rjson_is(NDK 编译错误) + 3 处初始化器
+- tenv.tool_whitelist 传递(白名单此前未生效)
+- tenv.workspace_cwd 设置(workspace_shell 默认在 workspaceCwd 执行, 原为 /)
+- 确认: 采样参数/custom_body 测试 / 白名单→tools JSON 自动 / memory 反调条件
