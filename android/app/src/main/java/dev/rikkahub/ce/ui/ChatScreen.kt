@@ -8,6 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.HorizontalDivider
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -281,11 +284,12 @@ private fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
     var baseUrl by remember { mutableStateOf(vm.providerBaseUrl) }
     var apiKey by remember { mutableStateOf(vm.providerApiKey) }
     var model by remember { mutableStateOf(vm.providerModel) }
+    val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Provider 设置") },
+        title = { Text("设置") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = baseUrl,
                     onValueChange = { baseUrl = it },
@@ -314,6 +318,33 @@ private fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                         onCheckedChange = { vm.updateAutoTts(it) },
                     )
                 }
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                Text("权限", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                PermissionRow(
+                    label = "日历读取",
+                    granted = hasCalendarPermission(context),
+                    onRequest = { openAppSettings(context) },
+                )
+                PermissionRow(
+                    label = "屏幕时间",
+                    granted = hasUsageAccess(context),
+                    onRequest = {
+                        context.startActivity(
+                            android.content.Intent(
+                                android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS,
+                            ),
+                        )
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "RikkaHub CE v${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
             }
         },
         confirmButton = {
@@ -328,5 +359,55 @@ private fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         },
+    )
+}
+
+@Composable
+private fun PermissionRow(label: String, granted: Boolean, onRequest: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        Text(
+            if (granted) "已授予" else "未授予",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (granted) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.error,
+        )
+        if (!granted) {
+            TextButton(onClick = onRequest) { Text("去授权") }
+        }
+    }
+}
+
+private fun hasCalendarPermission(context: Context): Boolean {
+    return androidx.core.content.ContextCompat.checkSelfPermission(
+        context,
+        android.Manifest.permission.READ_CALENDAR,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+}
+
+private fun hasUsageAccess(context: Context): Boolean {
+    return try {
+        val um = context.getSystemService(Context.USAGE_STATS_SERVICE)
+                as android.app.usage.UsageStatsManager
+        val now = System.currentTimeMillis()
+        val stats = um.queryUsageStats(
+            android.app.usage.UsageStatsManager.INTERVAL_DAILY,
+            now - 3600_000L, now,
+        )
+        !stats.isNullOrEmpty()
+    } catch (_: Exception) {
+        false
+    }
+}
+
+private fun openAppSettings(context: Context) {
+    context.startActivity(
+        android.content.Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.fromParts("package", context.packageName, null),
+        ),
     )
 }

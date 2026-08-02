@@ -71,7 +71,9 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
+    buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
 }
 
 dependencies {
