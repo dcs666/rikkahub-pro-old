@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ce.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -179,6 +182,12 @@ private fun MessageBubble(msg: ChatMsg) {
 @Composable
 private fun InputBar(vm: ChatViewModel) {
     var input by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) vm.ocrImage(uri)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -192,7 +201,13 @@ private fun InputBar(vm: ChatViewModel) {
             placeholder = { Text("输入消息…") },
             maxLines = 5,
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(4.dp))
+        if (!vm.busy) {
+            TextButton(onClick = {
+                pickImage.launch("image/*")
+            }) { Text("📷") }
+        }
+        Spacer(Modifier.width(4.dp))
         if (vm.busy) {
             IconButton(onClick = { vm.cancel() }) {
                 Box(contentAlignment = Alignment.Center) {

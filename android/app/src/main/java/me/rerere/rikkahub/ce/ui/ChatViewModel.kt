@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ce.ui
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -130,6 +131,72 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
             session.title = text.take(20)
         }
         session.updatedAt = System.currentTimeMillis()
+        sendInternal(text)
+    }
+
+    fun cancel() {
+        Engine.nativeSetCancel(true)
+    }
+
+    /** 图片 OCR：识别文本作为用户消息自动发送 */
+    fun ocrImage(uri: Uri) {
+        if (busy) return
+        messages.add(ChatMsg("user", "🖼️ 正在识别图片…", streaming = true))
+        busy = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val provider = JSONObject()
+                .put("base_url", providerBaseUrl)
+                .put("api_key", providerApiKey)
+                .put("model", providerModel)
+            try {
+                val path = copyUriToFile(uri)
+                val result = Engine.nativeOcr(provider.toString(), path)
+                val parsed = JSONObject(result)
+                val text = if (parsed.optBoolean("ok")) {
+                    parsed.optString("text")
+                } else {
+                    "OCR 失败：${parsed.optString("error")}"
+                }
+                val idx = messages.indexOfLast { it.role == "user" && it.streaming }
+                if (idx >= 0) {
+                    messages[idx] = messages[idx].copy(
+                        text = "🖼️ 图片内容：\n$text",
+                        streaming = false,
+                        isError = !parsed.optBoolean("ok"),
+                    )
+                }
+                if (parsed.optBoolean("ok") && text.isNotBlank()) {
+                    // 识别成功：作为用户消息发送
+                    messages.add(ChatMsg("user", text))
+                    val session = currentSession ?: return@launch
+                    session.updatedAt = System.currentTimeMillis()
+                    saveSession()
+                    sendInternal(text)
+                }
+            } catch (e: Exception) {
+                val idx = messages.indexOfLast { it.role == "user" && it.streaming }
+                if (idx >= 0) {
+                    messages[idx] = messages[idx].copy(
+                        text = "🖼️ OCR 出错：${e.message}",
+                        streaming = false,
+                        isError = true,
+                    )
+                }
+                busy = false
+            }
+        }
+    }
+
+    private fun copyUriToFile(uri: Uri): String {
+        val file = java.io.File(appContext.cacheDir, "ocr_input.png")
+        appContext.contentResolver.openInputStream(uri)?.use { input ->
+            file.outputStream().use { output -> input.copyTo(output) }
+        }
+        return file.absolutePath
+    }
+
+    private fun sendInternal(text: String) {
+        val session = currentSession ?: return
         busy = true
         saveSession()
         viewModelScope.launch(Dispatchers.IO) {
@@ -150,10 +217,6 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
                 this@ChatViewModel,
             )
         }
-    }
-
-    fun cancel() {
-        Engine.nativeSetCancel(true)
     }
 
     fun saveProviderSettings() {

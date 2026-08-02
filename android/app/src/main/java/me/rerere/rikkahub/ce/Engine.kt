@@ -23,4 +23,7 @@ object Engine {
     external fun nativeChat(providerJson: String, historyJson: String, workspaceRoot: String?, callback: ChatCallback): String
 
     external fun nativeSetCancel(cancel: Boolean)
+
+    /** 图片 OCR：返回 {"ok":true,"text":"..."} 或 {"ok":false,"error":"..."} */
+    external fun nativeOcr(providerJson: String, imagePath: String): String
 }

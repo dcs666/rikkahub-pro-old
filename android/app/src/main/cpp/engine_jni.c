@@ -10,6 +10,8 @@
 #include <string.h>
 
 #include "rikka/ai/chat.h"
+#include "rikka/ai/ocr.h"
+#include "rikka/ai/prompt.h"
 #include "rikka/ai/tool.h"
 #include "rikka/core/message.h"
 #include "rikka/json/json.h"
@@ -252,6 +254,108 @@ static char *jni_conversation_search(const char *query, void *ud) {
                                                         g_store_search, q);
     (*env)->DeleteLocalRef(env, q);
     return jstrdup_utf(env, r);
+}
+
+/* ---------- OCR（rk_ocr_image 暴露） ---------- */
+
+static const char B64_TBL[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static size_t b64_encode(const uint8_t *in, size_t in_len, char *out) {
+    size_t o = 0;
+    for (size_t i = 0; i + 2 < in_len || i < in_len; i += 3) {
+        uint32_t v = (uint32_t)in[i] << 16;
+        if (i + 1 < in_len) v |= (uint32_t)in[i + 1] << 8;
+        if (i + 2 < in_len) v |= in[i + 2];
+        out[o++] = B64_TBL[(v >> 18) & 63];
+        out[o++] = B64_TBL[(v >> 12) & 63];
+        out[o++] = i + 1 < in_len ? B64_TBL[(v >> 6) & 63] : '=';
+        out[o++] = i + 2 < in_len ? B64_TBL[v & 63] : '=';
+    }
+    return o;
+}
+
+JNIEXPORT jstring JNICALL
+Java_me_rerere_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
+                                            jstring provider_json,
+                                            jstring image_path) {
+    (void)cls;
+    const char *pj = provider_json ? (*env)->GetStringUTFChars(env, provider_json, NULL) : NULL;
+    const char *ip = image_path ? (*env)->GetStringUTFChars(env, image_path, NULL) : NULL;
+    if (!pj || !ip) {
+        if (pj) (*env)->ReleaseStringUTFChars(env, provider_json, pj);
+        if (ip) (*env)->ReleaseStringUTFChars(env, image_path, ip);
+        return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"bad args\"}");
+    }
+    /* 读图片 → base64 data URI */
+    FILE *f = fopen(ip, "rb");
+    if (!f) {
+        (*env)->ReleaseStringUTFChars(env, provider_json, pj);
+        (*env)->ReleaseStringUTFChars(env, image_path, ip);
+        return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"image not readable\"}");
+    }
+    Buf raw;
+    buf_init(&raw);
+    char rb[8192];
+    size_t n;
+    while ((n = fread(rb, 1, sizeof(rb), f)) > 0) buf_append(&raw, rb, n);
+    fclose(f);
+    char *b64 = (char *)malloc(((raw.len + 2) / 3) * 4 + 1);
+    if (!b64) { buf_free(&raw); return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"oom\"}"); }
+    size_t b64len = b64_encode(raw.data, raw.len, b64);
+    b64[b64len] = '\0';
+    buf_free(&raw);
+
+    /* 构造 data URI */
+    char *data_uri = (char *)malloc(b64len + 64);
+    if (!data_uri) { free(b64); return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"oom\"}"); }
+    snprintf(data_uri, b64len + 64, "data:image/png;base64,%s", b64);
+    free(b64);
+
+    /* provider 配置 */
+    Arena *a = arena_create(0);
+    size_t jerr = 0;
+    RJson *pv = rjson_parse(a, pj, strlen(pj), &jerr);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI,
+                            jstr(pv, "base_url") ? jstr(pv, "base_url") : "",
+                            jstr(pv, "api_key") ? jstr(pv, "api_key") : "",
+                            jstr(pv, "model") ? jstr(pv, "model") : "",
+                            4096, 0, NULL, {0}};
+    char *text = NULL;
+    int rc = rk_ocr_image(&cfg, RK_PROMPT_OCR, data_uri, 120000, &text);
+
+    Buf out;
+    buf_init(&out);
+    if (rc == 0 && text) {
+        buf_append_str(&out, "{\"ok\":true,\"text\":");
+        buf_append_byte(&out, '"');
+        for (const char *q = text; *q; q++) {
+            if (*q == '"' || *q == '\\') {
+                buf_append_byte(&out, '\\');
+                buf_append_byte(&out, (uint8_t)*q);
+            } else if (*q == '\n') {
+                buf_append_str(&out, "\\n");
+            } else if (*q == '\r') {
+                buf_append_str(&out, "\\r");
+            } else if (*q == '\t') {
+                buf_append_str(&out, "\\t");
+            } else {
+                buf_append_byte(&out, (uint8_t)*q);
+            }
+        }
+        buf_append_byte(&out, '"');
+        buf_append_str(&out, "}");
+    } else {
+        buf_append_str(&out, "{\"ok\":false,\"error\":\"ocr failed\"}");
+    }
+    jstring result = (*env)->NewStringUTF(env, (const char *)out.data);
+    free(text);
+    free(data_uri);
+    buf_free(&out);
+    arena_destroy(a);
+    (*env)->ReleaseStringUTFChars(env, provider_json, pj);
+    (*env)->ReleaseStringUTFChars(env, image_path, ip);
+    return result;
 }
 
 /* ---------- JNI 入口 ---------- */
