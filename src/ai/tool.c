@@ -648,6 +648,174 @@ static int tool_use_skill(const RkTool *t, const char *args_json, const RkToolEn
     return 0;
 }
 
+/* ================= 设备工具(local: ask_user/clipboard/tts/calendar/screen/js) ================= */
+
+static int tool_ask_user(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                         char **result) {
+    (void)t;
+    char q[4096];
+    if (rk_tool_arg_str(args_json, "question", q, sizeof(q)) != 0) {
+        if (result) *result = rk_tool_result_error("question is required");
+        return -1;
+    }
+    if (!env || !env->ask_user) {
+        if (result) *result = rk_tool_result_error("ask_user unavailable");
+        return -1;
+    }
+    char *r = env->ask_user(q, env->ud);
+    if (!r) { if (result) *result = rk_tool_result_error("ask_user failed"); return -1; }
+    *result = r;
+    return 0;
+}
+
+static int tool_clipboard(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                          char **result) {
+    (void)t;
+    if (!env || !env->clipboard_write) {
+        if (result) *result = rk_tool_result_error("clipboard unavailable");
+        return -1;
+    }
+    char text[8192];
+    if (rk_tool_arg_str(args_json, "text", text, sizeof(text)) != 0) {
+        if (result) *result = rk_tool_result_error("text is required");
+        return -1;
+    }
+    if (env->clipboard_write(text, env->ud) != 0) {
+        if (result) *result = rk_tool_result_error("clipboard write failed");
+        return -1;
+    }
+    if (result) *result = strdup("{\"ok\":true}");
+    return 0;
+}
+
+static int tool_tts(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                    char **result) {
+    (void)t;
+    if (!env || !env->tts_speak) {
+        if (result) *result = rk_tool_result_error("tts unavailable");
+        return -1;
+    }
+    char text[8192];
+    if (rk_tool_arg_str(args_json, "text", text, sizeof(text)) != 0) {
+        if (result) *result = rk_tool_result_error("text is required");
+        return -1;
+    }
+    if (env->tts_speak(text, env->ud) != 0) {
+        if (result) *result = rk_tool_result_error("tts failed");
+        return -1;
+    }
+    if (result) *result = strdup("{\"ok\":true}");
+    return 0;
+}
+
+static int tool_calendar(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                         char **result) {
+    (void)t;
+    if (!env || !env->calendar_query) {
+        if (result) *result = rk_tool_result_error("calendar unavailable");
+        return -1;
+    }
+    /* 原样透传参数 JSON(引擎侧只校验存在性; 参数语义由 Kotlin 侧处理) */
+    char *r = env->calendar_query(args_json, env->ud);
+    if (!r) { if (result) *result = rk_tool_result_error("calendar query failed"); return -1; }
+    *result = r;
+    return 0;
+}
+
+static int tool_screen_time(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                            char **result) {
+    (void)t;
+    if (!env || !env->screen_time_query) {
+        if (result) *result = rk_tool_result_error("screen_time unavailable");
+        return -1;
+    }
+    char *r = env->screen_time_query(args_json, env->ud);
+    if (!r) { if (result) *result = rk_tool_result_error("screen_time query failed"); return -1; }
+    *result = r;
+    return 0;
+}
+
+static int tool_javascript(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                           char **result) {
+    (void)t;
+    if (!env || !env->javascript_eval) {
+        if (result) *result = rk_tool_result_error("javascript unavailable");
+        return -1;
+    }
+    char code[8192];
+    if (rk_tool_arg_str(args_json, "code", code, sizeof(code)) != 0) {
+        if (result) *result = rk_tool_result_error("code is required");
+        return -1;
+    }
+    char *r = env->javascript_eval(code, env->ud);
+    if (!r) { if (result) *result = rk_tool_result_error("javascript eval failed"); return -1; }
+    *result = r;
+    return 0;
+}
+
+static const RkTool TOOL_ASK_USER = {
+    "ask_user",
+    "Ask the user one or more questions when you need clarification, additional information, "
+    "or confirmation. Each question can optionally provide a list of suggested options for "
+    "the user to choose from. The user may select an option or provide their own free-text "
+    "answer for each question.",
+    "{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"}},\"required\":[\"question\"]}",
+    tool_ask_user,
+};
+
+static const RkTool TOOL_CLIPBOARD = {
+    "clipboard_tool",
+    "Read or write plain text from the device clipboard. Use action: read or write. "
+    "For write, provide text. Do NOT write to the clipboard unless the user has explicitly "
+    "requested it.",
+    "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"Text to write to the clipboard\"}},\"required\":[\"text\"]}",
+    tool_clipboard,
+};
+
+static const RkTool TOOL_TTS = {
+    "text_to_speech",
+    "Speak text aloud to the user using the device's text-to-speech engine. Use this when "
+    "the user asks you to read something aloud, or when audio output is appropriate. "
+    "The tool returns immediately; audio plays in the background on the device. "
+    "Provide natural, readable text without markdown formatting.",
+    "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}",
+    tool_tts,
+};
+
+static const RkTool TOOL_CALENDAR = {
+    "calendar_query",
+    "Query calendar events on the user's device within a time range. Specify a custom "
+    "interval with 'begin'/'end', or use the 'range' preset (today/week/month). Returns a "
+    "list of events with title, description, location, start/end times, and calendar info. "
+    "The device timezone is 'Asia/Shanghai' (UTC offset +08:00); times without an explicit "
+    "offset are interpreted in this timezone. Requires the 'Calendar' permission; if it is "
+    "not granted, an error is returned and the permission request is triggered automatically.",
+    "{\"type\":\"object\",\"properties\":{\"begin\":{\"type\":\"string\"},\"end\":{\"type\":\"string\"},\"range\":{\"type\":\"string\",\"enum\":[\"today\",\"week\",\"month\"]},\"limit\":{\"type\":\"integer\"}},\"required\":[]}",
+    tool_calendar,
+};
+
+static const RkTool TOOL_SCREEN_TIME = {
+    "get_screen_time",
+    "Get the user's app screen usage (screen time) over a time range. Specify a custom "
+    "interval with 'begin'/'end', or use the 'range' preset (today/week). Returns the total "
+    "foreground time and a per-app breakdown sorted by usage time (descending). The device "
+    "timezone is 'Asia/Shanghai' (UTC offset +08:00). Requires the 'Usage access' special "
+    "permission; if it is not granted, the device's usage access settings page is opened "
+    "automatically and an error is returned.",
+    "{\"type\":\"object\",\"properties\":{\"begin\":{\"type\":\"string\"},\"end\":{\"type\":\"string\"},\"range\":{\"type\":\"string\",\"enum\":[\"today\",\"week\"]},\"top\":{\"type\":\"integer\"}},\"required\":[]}",
+    tool_screen_time,
+};
+
+static const RkTool TOOL_JAVASCRIPT = {
+    "eval_javascript",
+    "Execute JavaScript code using QuickJS engine (ES2020). The result is the value of the "
+    "last expression in the code. For calculations with decimals, use toFixed() to control "
+    "precision. Console output (log/info/warn/error) is captured and returned in 'logs' "
+    "field. No DOM or Node.js APIs available. Example: '1 + 2' returns 3.",
+    "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\"}},\"required\":[\"code\"]}",
+    tool_javascript,
+};
+
 /* ================= search_web / conversation 工具 ================= */
 
 static int tool_search_web(const RkTool *t, const char *args_json, const RkToolEnv *env,
@@ -796,5 +964,12 @@ void rk_tools_register_builtin(RkToolRegistry *r, const RkToolEnv *env) {
         if (env->web_search) rk_tools_add(r, &TOOL_SEARCH_WEB);
         if (env->recent_chats) rk_tools_add(r, &TOOL_RECENT_CHATS);
         if (env->conversation_search) rk_tools_add(r, &TOOL_CONVERSATION_SEARCH);
+        /* 设备工具（对齐 JVM local tools 名称） */
+        if (env->ask_user) rk_tools_add(r, &TOOL_ASK_USER);
+        if (env->clipboard_write) rk_tools_add(r, &TOOL_CLIPBOARD);
+        if (env->tts_speak) rk_tools_add(r, &TOOL_TTS);
+        if (env->calendar_query) rk_tools_add(r, &TOOL_CALENDAR);
+        if (env->screen_time_query) rk_tools_add(r, &TOOL_SCREEN_TIME);
+        if (env->javascript_eval) rk_tools_add(r, &TOOL_JAVASCRIPT);
     }
 }
