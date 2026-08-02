@@ -196,3 +196,10 @@
   用 JNIEnv = 未定义行为(流式输出可能从未真正回调到 Kotlin!)
   修: jni_thread_env() = GetEnv 优先 + AttachCurrentThread + 回调后 Detach;
   回调开头 ExceptionClear
+
+### 深度审查修复(发布前第二轮)
+- Host 头非默认端口必须带端口(自定义端口代理 400)
+- baseUrl 尾斜杠去重(https://x/v1/ → /v1/chat/completions 不再双斜杠)
+- SSE 单事件 data 8MB 上限(响应头原有 64KB 上限)
+- OCR/会话图片 16MB 限制
+- 已知限制: rhttp_parse_url 不支持 IPv6 字面量([::1])(场景罕见)
