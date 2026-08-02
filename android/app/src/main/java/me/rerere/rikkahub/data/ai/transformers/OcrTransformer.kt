@@ -55,7 +55,10 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         }
 
         val hasImages = messages.any { message ->
-            message.parts.any { it is UIMessagePart.Image && it.url.startsWith("file:") }
+            message.parts.any {
+                it is UIMessagePart.Image &&
+                    (it.url.startsWith("file:") || it.url.startsWith("content:"))
+            }
         }
         if (!hasImages) return messages
 
@@ -92,7 +95,21 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         val model = settings.findModelById(settings.ocrModelId) ?: return "[Image]"
         val providerSetting = model.findProvider(settings.providers) ?: return "[Image]"
         // [CE] 走 C 引擎 rk_ocr_image（JNI）
-        val path = part.url.removePrefix("file://").removePrefix("file:")
+        val path = when {
+            part.url.startsWith("content:") -> {
+                // content:// 复制到 cacheDir（引擎 fopen 读不了 content 协议）
+                val u = android.net.Uri.parse(part.url)
+                val f = java.io.File(
+                    get<Context>().cacheDir,
+                    "ocr_img_${System.currentTimeMillis()}_${(0..99999).random()}",
+                )
+                get<Context>().contentResolver.openInputStream(u)?.use { input ->
+                    f.outputStream().use { output -> input.copyTo(output) }
+                }
+                f.absolutePath
+            }
+            else -> part.url.removePrefix("file://").removePrefix("file:")
+        }
         val result = withContext(Dispatchers.IO) {
             dev.rikkahub.ce.Engine.nativeOcr(
                 org.json.JSONObject()
