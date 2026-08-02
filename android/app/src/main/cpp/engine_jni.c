@@ -777,7 +777,8 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     /* 工具（内置 + 设备工具 + 会话工具 + workspace 沙箱） */
     RkToolRegistry reg;
     RkToolEnv tenv = {0};
-    tenv.workspace_root = wr;   /* app filesDir（JNI 传入） */
+    tenv.workspace_root = wr;   /* workspace 沙箱根（JNI 传入） */
+    tenv.workspace_cwd = wr;    /* shell 默认工作目录 */
     tenv.ask_user = jni_ask_user;
     tenv.clipboard_write = jni_clipboard_write;
     tenv.tts_speak = jni_tts_speak;
