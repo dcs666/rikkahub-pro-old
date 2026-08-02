@@ -40,7 +40,7 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier, fontSize: TextUnit
             when (block) {
                 is Block.Code -> CodeBlock(block)
                 is Block.Heading -> Text(
-                    inlineMarkdown(block.content),
+                    inlineMarkdown(block.content, MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.primary),
                     fontSize = when (block.level) {
                         1 -> 20.sp
                         2 -> 18.sp
@@ -56,7 +56,7 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier, fontSize: TextUnit
                 )
                 is Block.Quote -> QuoteBlock(block.content, fontSize)
                 is Block.Para -> Text(
-                    inlineMarkdown(block.content),
+                    inlineMarkdown(block.content, MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.primary),
                     fontSize = fontSize,
                     lineHeight = (fontSize.value * 1.4).sp,
                 )
@@ -189,7 +189,7 @@ private fun QuoteBlock(content: String, fontSize: TextUnit) {
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            inlineMarkdown(content),
+            inlineMarkdown(content, MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.primary),
             fontSize = fontSize,
             lineHeight = (fontSize.value * 1.4).sp,
             color = scheme.onSurfaceVariant,
@@ -201,11 +201,10 @@ private fun QuoteBlock(content: String, fontSize: TextUnit) {
 /* ---------- 行内解析 ---------- */
 
 /** 行内 Markdown：**粗体**、*斜体*、`行内代码`、[链接](url)、- 列表 */
-private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+private fun inlineMarkdown(text: String, codeBg: androidx.compose.ui.graphics.Color, linkColor: androidx.compose.ui.graphics.Color): AnnotatedString = buildAnnotatedString {
     var i = 0
     val n = text.length
     var listPrefix = true
-    val schemeInline = MaterialTheme.colorScheme
     while (i < n) {
         val c = text[i]
         // 列表项
@@ -232,7 +231,7 @@ private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString
                     val url = text.substring(close + 2, urlEnd)
                     withStyle(
                         SpanStyle(
-                            color = schemeInline.primary,
+                            color = linkColor,
                             textDecoration = TextDecoration.Underline,
                         ),
                     ) {
@@ -252,7 +251,7 @@ private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString
                     SpanStyle(
                         fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp,
-                        background = schemeInline.surfaceVariant,
+                        background = codeBg,
                     ),
                 ) {
                     append(text.substring(i + 1, end))
