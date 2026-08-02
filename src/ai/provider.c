@@ -242,11 +242,12 @@ int rp_build_request(const RikkaProviderCfg *cfg,
         if (cfg->thinking_enabled) {
             buf_append_str(out, ",\"thinking\":{\"type\":\"enabled\"}");
         }
-        buf_append_str(out, "}");
+        /* tools 必须在顶层对象闭合前追加(原版在 } 之后拼 tools → 非法 JSON) */
         if (cfg->tools_json && cfg->tools_json[0]) {
             buf_append_str(out, ",\"tools\":");
             buf_append_str(out, cfg->tools_json);
         }
+        buf_append_str(out, "}");
         break;
     }
     case RIKKA_PROVIDER_CLAUDE: {

@@ -312,6 +312,33 @@ TEST(stream_retry_on_500) {
     stop_mock_server();
 }
 
+/* 带 tools 的请求体必须是合法 JSON(回归: tools 曾在 } 之后拼接 → 非法) */
+static void test_build_openai_tools_json_valid(void) {
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, "https://x/v1", "k", "m", 100, 0,
+        "[{\"type\":\"function\",\"function\":{\"name\":\"f\",\"parameters\":{}}}]",
+        {0}, NULL, 0};
+    cfg.reasoning_effort = "high";
+    cfg.thinking_enabled = 1;
+    Buf out;
+    buf_init(&out);
+    ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 1, 1, &out));
+    Arena *a2 = arena_create(0);
+    size_t err = 0;
+    RJson *v = rjson_parse(a2, (const char *)out.data, out.len, &err);
+    ASSERT_NOT_NULL(v);
+    ASSERT_NOT_NULL(rjson_obj_get(v, "tools"));
+    ASSERT_NOT_NULL(rjson_obj_get(v, "reasoning_effort"));
+    ASSERT_NOT_NULL(rjson_obj_get(v, "thinking"));
+    const RJson *m = rjson_obj_get(v, "messages");
+    ASSERT(rjson_is(m, RJSON_ARRAY) && m->u.arr.count == 1);
+    buf_free(&out);
+    arena_destroy(a);
+    arena_destroy(a2);
+}
+
 /* reasoning_effort / thinking 请求体字段 */
 static void test_reasoning_body(void) {
     Arena *a = arena_create(0);
@@ -718,6 +745,7 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, stream_claude_tool),
         RIKKA_TEST_REGISTER(provider, stream_google_tool),
         RIKKA_TEST_REGISTER(provider, stream_parallel_tools),
+        RIKKA_TEST_REGISTER(provider, build_openai_tools_json_valid),
         RIKKA_TEST_REGISTER(provider, reasoning_body),
         RIKKA_TEST_REGISTER(provider, stream_usage),
     };
