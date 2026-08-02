@@ -75,3 +75,7 @@
 - e878e98: 图片消息展示（ChatMsg.imagePath + BitmapFactory）
 - 并行会话（非本会话）: Claude/Google tool_calls、OpenAI 并行调用、
   UI 推理折叠/复制/重试、rk_chat_think_feed、versionCode 3/0.3.0
+
+- 图片直发多模态: parse_history 支持 image_path → base64 data URI → IMAGE part；sendImage 图文一条消息（并行覆盖恢复踩坑: sendImage/MessageBubble vm 参数被覆盖需补回）
+- 消息删除（长按菜单）/清空会话确认/切换会话自动滚底
+- 踩坑补充: arena_alloc 是 3 参 (a, align, size) 不是 2 参；import 换行粘连（BuildConfigimport）；DropdownMenu 需 material3 import
