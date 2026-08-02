@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.transformers
 
+import android.content.Context
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
@@ -10,9 +11,10 @@ import me.rerere.document.DocxParser
 import me.rerere.document.EpubParser
 import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
+import org.koin.core.component.get
 import java.io.File
 
-object DocumentAsPromptTransformer : InputMessageTransformer {
+object DocumentAsPromptTransformer : InputMessageTransformer, org.koin.core.component.KoinComponent {
     override suspend fun transform(
         ctx: TransformerContext,
         messages: List<UIMessage>,
@@ -43,6 +45,23 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         }
     }
 
+    // content://（SAF 选择器主流路径）复制到 cacheDir 再解析；file:// 直接使用
+    private fun uriToLocalFile(url: String): File? = runCatching {
+        val uri = url.toUri()
+        if (uri.scheme == "content") {
+            val f = File(
+                get<Context>().cacheDir,
+                "doc_${System.currentTimeMillis()}_${(0..99999).random()}",
+            )
+            get<Context>().contentResolver.openInputStream(uri)?.use { input ->
+                f.outputStream().use { output -> input.copyTo(output) }
+            }
+            f
+        } else {
+            uri.toFile()
+        }
+    }.getOrNull()
+
     private fun parsePdfAsText(file: File): String {
         return PdfParser.parserPdf(file)
     }
@@ -68,7 +87,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
     }
 
     private fun readDocumentContent(document: UIMessagePart.Document): String {
-        val file = runCatching { document.url.toUri().toFile() }.getOrNull()
+        val file = uriToLocalFile(document.url)
             ?: return "[ERROR, invalid file uri: ${document.fileName}]"
         if (!file.exists() || !file.isFile) {
             return "[ERROR, file not found: ${document.fileName}]"
