@@ -16,6 +16,7 @@ typedef struct ssl_st SSL;
 typedef struct ssl_ctx_st SSL_CTX;
 typedef struct ssl_method_st SSL_METHOD;
 typedef struct x509_store_st X509_STORE;
+typedef struct x509_st X509;
 typedef struct ssl_session_st SSL_SESSION;
 
 #define SSL_VERIFY_PEER 1
@@ -65,7 +66,11 @@ int SSL_get_error(const SSL *ssl, int ret);
 void SSL_shutdown(SSL *ssl);
 long SSL_get_verify_result(const SSL *ssl);
 #define X509_V_OK 0
+#define X509_V_FLAG_PARTIAL_CHAIN 0x80000
 int SSL_set1_host(SSL *ssl, const char *hostname);
+X509_STORE *SSL_CTX_get_cert_store(const SSL_CTX *ctx);
+void X509_STORE_set_flags(X509_STORE *ctx, long flags);
+const char *X509_verify_cert_error_string(long n);
 
 /* SSL_set_tlsext_host_name 是宏（OpenSSL 1.1）；55 = SSL_CTRL_SET_TLSEXT_HOSTNAME */
 long SSL_ctrl(SSL *ssl, int cmd, long larg, void *parg);

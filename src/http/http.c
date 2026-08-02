@@ -30,17 +30,38 @@ static void ssl_init_once(void) {
     g_ssl_ctx = SSL_CTX_new(TLS_client_method());
     if (g_ssl_ctx) {
 #ifdef RK_ANDROID
+        int ca_ok = 0;
         /* Android 无 /etc/ssl/certs：系统 CA 在 /system/etc/security/cacerts
-           (文件名 hash.0, OpenSSL 兼容格式)。加载失败则降级为不验证。 */
+           (文件名 hash.0, OpenSSL 兼容格式)。
+           同时加载用户安装的 CA(/data/misc/user/0/cacerts-added)——
+           新 CA(如 2025 年 TrustAsia 根)系统目录可能缺失, 用户手动装根可解决。 */
         if (SSL_CTX_load_verify_locations(g_ssl_ctx, NULL,
-                                          "/system/etc/security/cacerts") != 1) {
-            SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_NONE, NULL);
-        } else {
+                                          "/system/etc/security/cacerts") == 1)
+            ca_ok = 1;
+        else if (getenv("HTTP_DEBUG"))
+            fprintf(stderr, "[http] system CA dir load failed\n");
+        /* 用户 CA(存在时追加) */
+        if (access("/data/misc/user/0/cacerts-added", R_OK) == 0) {
+            if (SSL_CTX_load_verify_locations(g_ssl_ctx, NULL,
+                                              "/data/misc/user/0/cacerts-added") == 1)
+                ca_ok = 1;
+            else if (getenv("HTTP_DEBUG"))
+                fprintf(stderr, "[http] user CA dir load failed\n");
+        }
+        /* 部分链: 服务器链终止于信任库中的任意证书(根或中间)即通过。
+           兼容"系统 CA 只有中间/缺根"的受限环境。 */
+        if (ca_ok) {
             SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
+            X509_STORE *st = SSL_CTX_get_cert_store(g_ssl_ctx);
+            if (st) X509_STORE_set_flags(st, X509_V_FLAG_PARTIAL_CHAIN);
+        } else {
+            SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_NONE, NULL);
         }
 #else
         SSL_CTX_set_default_verify_paths(g_ssl_ctx);
         SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
+        X509_STORE *st = SSL_CTX_get_cert_store(g_ssl_ctx);
+        if (st) X509_STORE_set_flags(st, X509_V_FLAG_PARTIAL_CHAIN);
 #endif
         SSL_CTX_set_min_proto_version(g_ssl_ctx, TLS1_2_VERSION);
     }
@@ -157,6 +178,16 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
             if (err == SSL_ERROR_WANT_WRITE) {
                 if (wait_fd(fd, POLLOUT, timeout_ms) != 0) { rhttp_close(c); return NULL; }
                 continue;
+            }
+            if (getenv("HTTP_DEBUG")) {
+                /* 证书验证失败时输出 X509 错误码(便于诊断 CA/链问题) */
+                long vr = SSL_get_verify_result(c->ssl);
+                if (vr != X509_V_OK) {
+                    fprintf(stderr, "[http] TLS handshake failed: verify_err=%ld (%s)\n",
+                            vr, X509_verify_cert_error_string(vr));
+                } else {
+                    fprintf(stderr, "[http] TLS handshake failed: ssl_err=%d\n", err);
+                }
             }
             rhttp_close(c);
             return NULL;
