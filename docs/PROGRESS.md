@@ -180,3 +180,12 @@
 - OCR 失败透传引擎错误详情
 - 已知低风险: workspace resolve_path 不做 symlink 解析(字符串段级拦截已够用);
   ProviderConnectionTester 走 Kotlin 路径(待办 C 化)
+
+### v0.7.8 发布内容汇总(等待 CI 全绿)
+1. 思考模式 reasoning_effort/thinking(host 分派对齐 turbo)
+2. Token 用量 usage + cached_tokens(OpenAI/Anthropic 流式解析)
+3. 请求日志摘要(status/耗时/tokens)入日志页
+4. 错误详情透传(TLS/连接/HTTP/服务端 message)
+5. **tools JSON 非法修复(重大潜伏 bug)**
+6. strstr 越界修复(ASan)/MIME 魔数/OCR 错误详情/AUTO 修复
+7. ci.yml concurrency cancel-in-progress
