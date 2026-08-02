@@ -294,3 +294,8 @@
 ### 25轮深度优化(第十一批) — 已提交
 - ndk-include shim 补 SSL_set1_host/X509_V_OK(NDK 编译失败修复)
 - 确认: NDK 用 shim 头(非系统 openssl)/链接真 OpenSSL 3 so/SONAME 无版本
+
+### 🎉 v0.7.8-ce 已发布(2026-08-03)
+- Release: rikkahub-ce-0.7.8-ce.apk(44MB, 1497 条目, 双 ABI arm64+x86_64)
+- 验证: zip 完整/签名通过(CI apksigner)/librikka+libssl+libcrypto 齐全
+- 含全部修复: 设备工具 context/主机名校验/重定向/per-call 取消/翻译对齐/白名单 等
