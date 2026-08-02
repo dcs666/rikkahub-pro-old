@@ -65,11 +65,11 @@ jobs:
       - name: Set up pnpm (web-ui 前端构建依赖)
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 11
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
           cache-dependency-path: android/web-ui/pnpm-lock.yaml
       - name: Install web-ui dependencies
