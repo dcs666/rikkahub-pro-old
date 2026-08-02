@@ -28,6 +28,7 @@ import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.datastore.Settings
@@ -134,10 +135,23 @@ class GenerationHandler(
         if (thinking) providerJson.put("thinking", true)
 
         val history = JSONArray()
-        if (!conversationSystemPrompt.isNullOrBlank()) {
-            history.put(JSONObject().put("role", "system").put("content", conversationSystemPrompt))
+        // ---- system prompt(对齐 turbo: assistant.systemPrompt + 会话覆盖 + 记忆注入) ----
+        val systemBuilder = StringBuilder()
+        val effectiveSystemPrompt =
+            if (assistant.allowConversationSystemPrompt && !conversationSystemPrompt.isNullOrBlank())
+                conversationSystemPrompt
+            else
+                assistant.systemPrompt
+        if (!effectiveSystemPrompt.isNullOrBlank()) systemBuilder.append(effectiveSystemPrompt)
+        if (assistant.enableMemory && !memories.isNullOrEmpty()) {
+            systemBuilder.append(buildMemoryPrompt(memories!!))
         }
-        for (m in messages) {
+        if (systemBuilder.isNotBlank()) {
+            history.put(JSONObject().put("role", "system").put("content", systemBuilder.toString()))
+        }
+        // ---- 上下文截断(limitContext, 对齐 turbo) ----
+        val effectiveMessages = messages.limitContext(assistant.contextMessageLimit)
+        for (m in effectiveMessages) {
             if (m.role != MessageRole.USER && m.role != MessageRole.ASSISTANT) continue
             for (part in m.parts) {
                 when (part) {
