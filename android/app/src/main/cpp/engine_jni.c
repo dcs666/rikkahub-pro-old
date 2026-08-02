@@ -598,7 +598,7 @@ Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
                             jstr(pv, "base_url") ? jstr(pv, "base_url") : "",
                             jstr(pv, "api_key") ? jstr(pv, "api_key") : "",
                             jstr(pv, "model") ? jstr(pv, "model") : "",
-                            4096, 0, NULL, {0}, NULL, 0};
+                            4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
     char *text = NULL;
     char *detail = NULL;
     int rc = rk_ocr_image(&cfg, RK_PROMPT_OCR, data_uri, 120000, &text, &detail);
@@ -649,7 +649,7 @@ Java_dev_rikkahub_ce_Engine_nativeGenerateTitle(JNIEnv *env, jclass cls,
                             jstr(pv, "base_url") ? jstr(pv, "base_url") : "",
                             jstr(pv, "api_key") ? jstr(pv, "api_key") : "",
                             jstr(pv, "model") ? jstr(pv, "model") : "",
-                            4096, 0, NULL, {0}, NULL, 0};
+                            4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
 
     /* system = 标题 prompt；user = 会话内容 */
     const char *names[2] = {"locale", "content"};
@@ -746,17 +746,17 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
                              base_url ? base_url : "",
                              api_key ? api_key : "",
                              model ? model : "",
-                             4096, 0, NULL, {0}, NULL, 0};
+                             4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
     /* 思考模式(DeepSeek 等): reasoning_effort / thinking */
     pcfg.reasoning_effort = jstr(pv, "reasoning_effort");
     if (jstr(pv, "thinking")) pcfg.thinking_enabled = 1;
     /* 采样参数与附加 body(QWEN_MT 翻译等; 缺省不写) */
     pcfg.temperature = -1;
     pcfg.top_p = -1;
-    const RJson *j_temp = rjson_get(pv, "temperature");
-    if (j_temp && rjson_is_number(j_temp)) pcfg.temperature = (float)rjson_num(j_temp);
-    const RJson *j_tp = rjson_get(pv, "top_p");
-    if (j_tp && rjson_is_number(j_tp)) pcfg.top_p = (float)rjson_num(j_tp);
+    const RJson *j_temp = rjson_obj_get(pv, "temperature");
+    if (j_temp && rjson_is(j_temp, RJSON_NUMBER)) pcfg.temperature = (float)j_temp->u.number;
+    const RJson *j_tp = rjson_obj_get(pv, "top_p");
+    if (j_tp && rjson_is(j_tp, RJSON_NUMBER)) pcfg.top_p = (float)j_tp->u.number;
     pcfg.custom_body = jstr(pv, "custom_body");
 
     /* memory_tool 反调目标 assistant_id(enableMemory 时 Kotlin 传入; 每轮重建) */
@@ -785,10 +785,10 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.screen_time_query = jni_screen_time_query;
     tenv.javascript_eval = jni_javascript_eval;
     /* 会话/搜索开关(对齐 turbo: enableWebSearch / enableRecentChatsReference) */
-    const RJson *e_ws = rjson_get(pv, "enable_web_search");
-    const RJson *e_rc = rjson_get(pv, "enable_recent_chats");
-    int enable_web_search = !e_ws || rjson_is_true(e_ws);
-    int enable_recent = !e_rc || rjson_is_true(e_rc);
+    const RJson *e_ws = rjson_obj_get(pv, "enable_web_search");
+    const RJson *e_rc = rjson_obj_get(pv, "enable_recent_chats");
+    int enable_web_search = !e_ws || (rjson_is(e_ws, RJSON_BOOL) && e_ws->u.boolean);
+    int enable_recent = !e_rc || (rjson_is(e_rc, RJSON_BOOL) && e_rc->u.boolean);
     tenv.recent_chats = enable_recent ? jni_recent_chats : NULL;
     tenv.conversation_search = enable_recent ? jni_conversation_search : NULL;
     tenv.web_search = enable_web_search ? jni_web_search : NULL;
