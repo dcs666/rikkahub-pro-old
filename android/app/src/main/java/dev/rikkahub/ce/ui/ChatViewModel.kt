@@ -17,6 +17,14 @@ import dev.rikkahub.ce.ChatCallback
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** 工具调用消息（卡片展示：参数/结果折叠） */
+data class ToolMsg(
+    val name: String,
+    val args: String,
+    val result: String? = null,
+    val isError: Boolean = false,
+)
+
 data class ChatMsg(
     val role: String,          // user / assistant
     val text: String,
@@ -24,6 +32,8 @@ data class ChatMsg(
     val streaming: Boolean = false,
     val isError: Boolean = false,
     val imagePath: String? = null,  // 本地图片路径（消息附带展示）
+    val tool: ToolMsg? = null,      // 工具调用卡片
+    val time: Long = System.currentTimeMillis(),
 )
 
 data class ChatSession(
@@ -126,11 +136,15 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
     }
 
     override fun onToolCall(name: String, args: String) {
-        messages.add(ChatMsg("assistant", "⚙️ 调用工具: $name", streaming = false))
+        messages.add(ChatMsg("assistant", "", tool = ToolMsg(name, args)))
     }
 
     override fun onToolResult(name: String, result: String) {
-        messages.add(ChatMsg("assistant", "⚙️ 工具 $name 返回", streaming = false))
+        val idx = messages.indexOfLast { it.tool?.name == name && it.tool.result == null }
+        if (idx >= 0) {
+            val t = messages[idx].tool!!
+            messages[idx] = messages[idx].copy(tool = t.copy(result = result))
+        }
     }
 
     override fun onFinish(ok: Boolean, error: String?) {
@@ -288,7 +302,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
             val history = JSONArray()
             for (m in session.messages) {
                 if (m.role != "user" && m.role != "assistant") continue
-                if (m.isError || m.text.startsWith("⚙️")) continue
+                if (m.isError || m.tool != null || m.text.startsWith("⚙️")) continue
                 history.put(JSONObject().put("role", m.role).put("content", m.text))
             }
             Engine.nativeChat(
@@ -331,6 +345,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         val s = currentSession ?: return
         val arr = JSONArray()
         for (m in s.messages) {
+            if (m.tool != null) continue  // 工具消息不持久化（重启后模型上下文亦排除）
             arr.put(JSONObject()
                 .put("role", m.role)
                 .put("text", m.text)

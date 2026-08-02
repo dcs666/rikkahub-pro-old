@@ -193,6 +193,11 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit) {
                 as android.content.ClipboardManager
         cm.setPrimaryClip(android.content.ClipData.newPlainText("rikka", msg.text))
     }
+    if (msg.tool != null) {
+        // 工具调用卡片（参数/结果折叠）
+        ToolCard(msg.tool, modifier = Modifier.fillMaxWidth())
+        return
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
@@ -257,29 +262,122 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit) {
                         )
                     }
                 }
-                if (msg.text.startsWith("⚙️")) {
-                    Text(
-                        msg.text,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
+                if (msg.text.isNotBlank()) {
                     MarkdownText(msg.text)
                 }
                 if (msg.streaming) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            modifier = Modifier.width(14.dp).height(14.dp),
+                            strokeWidth = 2.dp,
+                        )
                         Spacer(Modifier.width(6.dp))
                         Text("生成中…", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
                     }
                 }
                 if (msg.isError) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("重试", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
-                        TextButton(onClick = onRetry) { Text("🔄") }
+                        Text("生成失败", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = onRetry) { Text("🔄 重试", fontSize = 12.sp) }
                     }
+                } else if (!msg.streaming) {
+                    // 时间戳（非流式、非工具消息）
+                    Text(
+                        formatTime(msg.time),
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
                 }
+            }
+        }
+    }
+}
+
+private fun formatTime(ts: Long): String {
+    val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+    return fmt.format(java.util.Date(ts))
+}
+
+/** 工具调用卡片：⚙️ 名称 + 参数/结果折叠，失败高亮 */
+@Composable
+private fun ToolCard(tool: ToolMsg, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    var showArgs by remember { mutableStateOf(false) }
+    var showResult by remember { mutableStateOf(false) }
+    Column(
+        modifier = modifier
+            .padding(vertical = 2.dp)
+            .fillMaxWidth()
+            .background(
+                if (tool.isError) scheme.errorContainer else scheme.surfaceVariant,
+                RoundedCornerShape(8.dp),
+            )
+            .padding(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (tool.isError) "❌" else "⚙️",
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                tool.name,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = if (tool.isError) scheme.error else scheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            if (tool.result != null) {
+                Text("✓", fontSize = 13.sp, color = scheme.tertiary)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        TextButton(
+            onClick = { showArgs = !showArgs },
+            modifier = Modifier.padding(0.dp),
+        ) {
+            Text(
+                if (showArgs) "▾ 收起参数" else "▸ 参数",
+                fontSize = 11.sp,
+                color = scheme.onSurfaceVariant,
+            )
+        }
+        if (showArgs) {
+            Text(
+                tool.args.take(2000),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(scheme.surface, RoundedCornerShape(4.dp))
+                    .padding(6.dp),
+            )
+        }
+        if (tool.result != null) {
+            TextButton(
+                onClick = { showResult = !showResult },
+                modifier = Modifier.padding(0.dp),
+            ) {
+                Text(
+                    if (showResult) "▾ 收起结果" else "▸ 结果",
+                    fontSize = 11.sp,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            if (showResult) {
+                Text(
+                    tool.result.take(3000),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(scheme.surface, RoundedCornerShape(4.dp))
+                        .padding(6.dp),
+                )
             }
         }
     }
