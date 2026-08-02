@@ -181,26 +181,23 @@ class GenerationHandler(
                 )
                 // nativeChat 返回后检查结果（防止回调遗漏导致死等）
                 logMsg(TAG, "nativeChat returned: ${nativeResult.take(200)}")
-                // 请求日志(诊断): C 引擎请求摘要写入 App 日志页
-                runCatching {
-                    val rp = JSONObject(nativeResult)
-                    rp.optJSONObject("request")?.let { req ->
-                        Logging.log(
-                            TAG,
-                            "request: POST ${baseUrl} -> ${req.optInt("status")} " +
-                                "(${req.optLong("duration_ms")}ms)" +
-                                (rp.optJSONObject("usage")?.let {
-                                    " | tokens: in=${it.optInt("prompt_tokens")} " +
-                                        "out=${it.optInt("completion_tokens")} " +
-                                        "cached=${it.optInt("cached_tokens")}"
-                                } ?: ""),
-                        )
-                    }
-                }
                 val parsed = try {
                     JSONObject(nativeResult)
                 } catch (_: Exception) {
                     null
+                }
+                // 请求日志(诊断): C 引擎请求摘要写入 App 日志页(复用 parsed)
+                parsed?.optJSONObject("request")?.let { req ->
+                    Logging.log(
+                        TAG,
+                        "request: POST ${baseUrl} -> ${req.optInt("status")} " +
+                            "(${req.optLong("duration_ms")}ms)" +
+                            (parsed.optJSONObject("usage")?.let {
+                                " | tokens: in=${it.optInt("prompt_tokens")} " +
+                                    "out=${it.optInt("completion_tokens")} " +
+                                    "cached=${it.optInt("cached_tokens")}"
+                            } ?: ""),
+                    )
                 }
                 if (parsed != null && !parsed.optBoolean("ok", true)) {
                     channel.trySend(Evt.Finish(false, parsed.optString("error", "engine error")))
