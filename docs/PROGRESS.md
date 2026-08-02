@@ -142,3 +142,10 @@
     - 根因: release isMinifyEnabled=true 把 Engine 类裁剪 → NoClassDefFoundError
   - 日志页 TextLog 可点击查看详情
   - generateTitle 异常写入 App 日志页
+
+- **v0.7.5-ce 发布成功!** (2026-08-02) APK 内置 OpenSSL 3 — 根治 SSL_new
+  - 根因: librikka.so 链接 NDK stub libssl(仅符号), 运行时靠系统 BoringSSL;
+    国产 ROM 系统库无 SSL_new → UnsatisfiedLinkError → Engine 类初始化失败
+  - 修复: android/scripts/build_openssl.sh — CI 编译 OpenSSL 3.0.13
+    (arm64-v8a + x86_64, SONAME 去版本号) 进 jniLibs; release.yml/ci.yml 调用
+  - 踩坑: GitHub archive 解压目录名 openssl-openssl-3.0.13; no-docs 是 3.1+ 选项
