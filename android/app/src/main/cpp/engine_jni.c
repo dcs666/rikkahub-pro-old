@@ -141,9 +141,6 @@ static int parse_history(Arena *a, const char *history_json,
                     RikkaPart *ip = rmsg_add_part(a, m, RIKKA_PART_IMAGE);
                     ip->data = b64;
                     ip->len = pfx + b64len;
-                    RikkaPart *ip = rmsg_add_part(a, m, RIKKA_PART_IMAGE);
-                    ip->data = b64;
-                    ip->len = 22 + b64len;
                 }
                 buf_free(&raw);
             }

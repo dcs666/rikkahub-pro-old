@@ -359,11 +359,10 @@ class GenerationHandler(
     }
 
     /** 思考模式参数(与 turbo ai 模块的 ChatCompletionsAPI 分派对齐)。
-     * 返回 (reasoning_effort, thinking_enabled)。 */
+     * 返回 (reasoning_effort, thinking_enabled)。
+     * 对齐 turbo: AUTO 一律不写 effort; DeepSeek/Moonshot 的 thinking 在
+     * 非 OFF 时 enabled。 */
     private fun reasoningArgs(baseUrl: String, level: ReasoningLevel): Pair<String?, Boolean> {
-        if (level == ReasoningLevel.AUTO && !baseUrl.contains("deepseek")) {
-            return null to false
-        }
         val host = runCatching { java.net.URI(baseUrl).host ?: "" }.getOrDefault("")
         return when {
             host.contains("deepseek") -> when (level) {
@@ -375,12 +374,14 @@ class GenerationHandler(
             }
             host.contains("moonshot") -> null to (level != ReasoningLevel.OFF)
             host.contains("nvidia") -> when (level) {
+                ReasoningLevel.AUTO -> null to false
                 ReasoningLevel.OFF -> "none" to false
                 ReasoningLevel.XHIGH -> "max" to false
                 else -> "high" to false
             }
-            host.contains("opencode") -> level.effort to false
-            else -> (if (level.effort == "none") "low" else level.effort) to false
+            host.contains("opencode") -> if (level == ReasoningLevel.AUTO) null to false else level.effort to false
+            else -> if (level == ReasoningLevel.AUTO) null to false
+            else (if (level.effort == "none") "low" else level.effort) to false
         }
     }
 }
