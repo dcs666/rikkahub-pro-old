@@ -43,6 +43,8 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
     var providerApiKey by mutableStateOf(prefs.getString("api_key", "") ?: "")
     var providerModel by mutableStateOf(
         prefs.getString("model", "gpt-4o-mini") ?: "gpt-4o-mini")
+    var autoTts by mutableStateOf(prefs.getBoolean("auto_tts", false))
+        private set
 
     var busy by mutableStateOf(false)
         private set
@@ -118,6 +120,12 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         }
         busy = false
         saveSession()
+        if (ok && autoTts) {
+            val last = messages.lastOrNull { it.role == "assistant" && !it.isError }
+            if (last != null) {
+                me.rerere.rikkahub.ce.DeviceTools.ttsSpeak(last.text.take(500))
+            }
+        }
     }
 
     fun send(text: String) {
@@ -225,6 +233,11 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
             .putString("api_key", providerApiKey)
             .putString("model", providerModel)
             .apply()
+    }
+
+    fun setAutoTts(on: Boolean) {
+        autoTts = on
+        prefs.edit().putBoolean("auto_tts", on).apply()
     }
 
     fun clearSession() {
