@@ -20,7 +20,7 @@ object Engine {
      * @param historyJson  [{"role":"user|assistant|system","content":"..."}]
      * @return {"ok":true,"text":"..."} 或 {"ok":false,"error":"..."}
      */
-    external fun nativeChat(providerJson: String, historyJson: String, callback: ChatCallback): String
+    external fun nativeChat(providerJson: String, historyJson: String, workspaceRoot: String?, callback: ChatCallback): String
 
     external fun nativeSetCancel(cancel: Boolean)
 }

@@ -143,7 +143,12 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
                 if (m.isError || m.text.startsWith("⚙️")) continue
                 history.put(JSONObject().put("role", m.role).put("content", m.text))
             }
-            Engine.nativeChat(provider.toString(), history.toString(), this@ChatViewModel)
+            Engine.nativeChat(
+                provider.toString(),
+                history.toString(),
+                appContext.filesDir.absolutePath,
+                this@ChatViewModel,
+            )
         }
     }
 

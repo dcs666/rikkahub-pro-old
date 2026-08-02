@@ -260,13 +260,16 @@ JNIEXPORT jstring JNICALL
 Java_me_rerere_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
                                              jstring provider_json,
                                              jstring history_json,
+                                             jstring workspace_root,
                                              jobject callback) {
     (void)cls;
     const char *pj = provider_json ? (*env)->GetStringUTFChars(env, provider_json, NULL) : NULL;
     const char *hj = history_json ? (*env)->GetStringUTFChars(env, history_json, NULL) : NULL;
+    const char *wr = workspace_root ? (*env)->GetStringUTFChars(env, workspace_root, NULL) : NULL;
     if (!pj || !hj) {
         if (pj) (*env)->ReleaseStringUTFChars(env, provider_json, pj);
         if (hj) (*env)->ReleaseStringUTFChars(env, history_json, hj);
+        if (wr) (*env)->ReleaseStringUTFChars(env, workspace_root, wr);
         return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"bad args\"}");
     }
 
@@ -291,9 +294,10 @@ Java_me_rerere_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
         err = "history must be a non-empty JSON array";
     }
 
-    /* 工具（内置最小集 + 设备工具反调） */
+    /* 工具（内置 + 设备工具 + 会话工具 + workspace 沙箱） */
     RkToolRegistry reg;
     RkToolEnv tenv = {0};
+    tenv.workspace_root = wr;   /* app filesDir（JNI 传入） */
     tenv.ask_user = jni_ask_user;
     tenv.clipboard_write = jni_clipboard_write;
     tenv.tts_speak = jni_tts_speak;
@@ -397,6 +401,7 @@ Java_me_rerere_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     arena_destroy(a);
     (*env)->ReleaseStringUTFChars(env, provider_json, pj);
     (*env)->ReleaseStringUTFChars(env, history_json, hj);
+    if (wr) (*env)->ReleaseStringUTFChars(env, workspace_root, wr);
     return result;
 }
 
