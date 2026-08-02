@@ -735,6 +735,19 @@ static int tool_screen_time(const RkTool *t, const char *args_json, const RkTool
     return 0;
 }
 
+static int tool_calendar_create(const RkTool *t, const char *args_json, const RkToolEnv *env,
+                                char **result) {
+    (void)t;
+    if (!env || !env->calendar_create) {
+        if (result) *result = rk_tool_result_error("calendar_create unavailable");
+        return -1;
+    }
+    char *r = env->calendar_create(args_json, env->ud);
+    if (!r) { if (result) *result = rk_tool_result_error("calendar create failed"); return -1; }
+    *result = r;
+    return 0;
+}
+
 static int tool_javascript(const RkTool *t, const char *args_json, const RkToolEnv *env,
                            char **result) {
     (void)t;
@@ -804,6 +817,16 @@ static const RkTool TOOL_SCREEN_TIME = {
     "automatically and an error is returned.",
     "{\"type\":\"object\",\"properties\":{\"begin\":{\"type\":\"string\"},\"end\":{\"type\":\"string\"},\"range\":{\"type\":\"string\",\"enum\":[\"today\",\"week\"]},\"top\":{\"type\":\"integer\"}},\"required\":[]}",
     tool_screen_time,
+};
+
+static const RkTool TOOL_CALENDAR_CREATE = {
+    "calendar_create",
+    "Create a new calendar event on the user's device. Requires title and start time at "
+    "minimum. End time defaults to 1 hour after start. The device timezone is the local "
+    "timezone; times without an explicit offset are interpreted in this timezone. "
+    "Requires the 'Calendar' permission; if it is not granted, an error is returned.",
+    "{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"location\":{\"type\":\"string\"},\"start\":{\"type\":\"string\"},\"end\":{\"type\":\"string\"},\"all_day\":{\"type\":\"boolean\"}},\"required\":[\"title\",\"start\"]}",
+    tool_calendar_create,
 };
 
 static const RkTool TOOL_JAVASCRIPT = {
@@ -969,6 +992,7 @@ void rk_tools_register_builtin(RkToolRegistry *r, const RkToolEnv *env) {
         if (env->clipboard_write) rk_tools_add(r, &TOOL_CLIPBOARD);
         if (env->tts_speak) rk_tools_add(r, &TOOL_TTS);
         if (env->calendar_query) rk_tools_add(r, &TOOL_CALENDAR);
+        if (env->calendar_create) rk_tools_add(r, &TOOL_CALENDAR_CREATE);
         if (env->screen_time_query) rk_tools_add(r, &TOOL_SCREEN_TIME);
         if (env->javascript_eval) rk_tools_add(r, &TOOL_JAVASCRIPT);
     }

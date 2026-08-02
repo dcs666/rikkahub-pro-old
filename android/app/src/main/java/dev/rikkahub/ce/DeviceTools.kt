@@ -256,6 +256,76 @@ object DeviceTools {
         }.getOrNull()
     }
 
+    /** [CE] calendar_create 引擎反调桥：插入系统日历事件（引擎工作线程调用） */
+    @JvmStatic
+    fun calendarCreate(args: String): String? {
+        val ctx = appContext ?: return err("no context")
+        return runCatching {
+            val p = JSONObject(args)
+            val title = p.optString("title")
+            val startRaw = p.optString("start")
+            if (title.isBlank() || startRaw.isBlank()) return err("both title and start are required")
+            val startMillis = parseCalendarTime(startRaw)
+                ?: return err("invalid start time")
+            val endMillis = if (p.optString("end").isNotBlank()) {
+                parseCalendarTime(p.optString("end")) ?: return err("invalid end time")
+            } else {
+                startMillis + 3600_000L
+            }
+            if (endMillis <= startMillis) return err("end must be after start")
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx, android.Manifest.permission.WRITE_CALENDAR,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) return err("NO_PERMISSION: calendar write permission not granted")
+            val values = android.content.ContentValues().apply {
+                put(android.provider.CalendarContract.Events.CALENDAR_ID, 1L)
+                put(android.provider.CalendarContract.Events.TITLE, title)
+                put(android.provider.CalendarContract.Events.DTSTART, startMillis)
+                put(android.provider.CalendarContract.Events.DTEND, endMillis)
+                put(
+                    android.provider.CalendarContract.Events.EVENT_TIMEZONE,
+                    java.util.TimeZone.getDefault().id,
+                )
+                if (p.has("description")) {
+                    put(android.provider.CalendarContract.Events.DESCRIPTION, p.optString("description"))
+                }
+                if (p.has("location")) {
+                    put(android.provider.CalendarContract.Events.EVENT_LOCATION, p.optString("location"))
+                }
+            }
+            val uri = ctx.contentResolver.insert(
+                android.provider.CalendarContract.Events.CONTENT_URI, values,
+            )
+            if (uri == null) {
+                err("calendar insert failed")
+            } else {
+                JSONObject().put("ok", true).put("uri", uri.toString()).toString()
+            }
+        }.getOrNull()
+    }
+
+    /** 解析 ISO-8601 日期/日期时间/epoch 毫秒；失败返回 null */
+    private fun parseCalendarTime(raw: String): Long? = runCatching {
+        val trimmed = raw.trim()
+        trimmed.toLongOrNull()?.let { return it }
+        when {
+            trimmed.matches(Regex("""\d{4}-\d{2}-\d{2}""")) -> {
+                java.time.LocalDate.parse(trimmed)
+                    .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            }
+            trimmed.matches(Regex("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?""")) -> {
+                val dt = java.time.LocalDateTime.parse(
+                    if (trimmed.length == 16) trimmed + ":00" else trimmed,
+                )
+                dt.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            }
+            trimmed.endsWith("Z") -> java.time.Instant.parse(trimmed).toEpochMilli()
+            else -> {
+                java.time.OffsetDateTime.parse(trimmed).toInstant().toEpochMilli()
+            }
+        }
+    }.getOrNull()
+
     /** [CE] memory_tool 引擎反调桥：落库到 MemoryRepository（引擎工作线程调用） */
     @JvmStatic
     fun memoryAction(action: String, id: Long, content: String, assistantId: String): String? {

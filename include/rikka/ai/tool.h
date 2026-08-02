@@ -35,6 +35,7 @@ struct RkToolEnv {
     /* 设备/UI 工具（壳层实现；NULL = 工具不可注册） */
     char *(*ask_user)(const char *question, void *ud);
     char *(*calendar_query)(const char *args_json, void *ud);
+    char *(*calendar_create)(const char *args_json, void *ud);
     char *(*screen_time_query)(const char *args_json, void *ud);
     int (*clipboard_write)(const char *text, void *ud);
     int (*tts_speak)(const char *text, void *ud);
