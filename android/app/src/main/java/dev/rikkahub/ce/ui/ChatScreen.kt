@@ -220,6 +220,11 @@ private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
         contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (vm.messages.isEmpty()) {
+            item {
+                EmptyState(vm)
+            }
+        }
         items(vm.messages) { msg ->
             MessageBubble(
                 msg,
@@ -227,6 +232,56 @@ private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
                 fontSize = vm.fontSize,
             )
         }
+    }
+}
+
+/** 空会话欢迎页：品牌引导 + 示例快捷发送 */
+@Composable
+private fun EmptyState(vm: ChatViewModel) {
+    val examples = listOf(
+        "总结一下我的屏幕时间",
+        "明天有什么安排",
+        "帮我写一段 C 代码",
+        "说说 RikkaHub 是什么",
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("🤖", fontSize = 52.sp)
+        Spacer(Modifier.height(8.dp))
+        Text("RikkaHub CE", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "纯 C 引擎 · 轻量 AI 客户端",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "试试这些示例：",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(8.dp))
+        examples.forEach { ex ->
+            OutlinedButton(
+                onClick = { vm.send(ex) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 2.dp),
+            ) {
+                Text(ex, fontSize = 13.sp)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "点击顶部标题管理会话 · 设置里配置 Provider",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
     }
 }
 
