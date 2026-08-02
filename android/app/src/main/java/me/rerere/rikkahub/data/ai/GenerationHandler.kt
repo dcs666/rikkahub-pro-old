@@ -98,6 +98,7 @@ class GenerationHandler(
     private val memoryRepo: MemoryRepository,
     private val skillManager: me.rerere.rikkahub.data.files.SkillManager,
 ) {
+    private val cancelSeq = AtomicInteger(0)
     fun generateText(
         settings: Settings,
         model: Model,
@@ -126,10 +127,12 @@ class GenerationHandler(
         processingStatus.value = "生成中…"
 
         // ---- 组装 C 引擎输入 ----
+        val cancelId = cancelSeq.incrementAndGet().toLong()
         val providerJson = JSONObject()
             .put("base_url", baseUrl)
             .put("api_key", apiKey)
             .put("model", modelId)
+            .put("cancel_id", cancelId)
         // skills 根目录(use_skill 工具读取; Android: filesDir/skills)
         providerJson.put(
             "skills_root",
@@ -315,11 +318,12 @@ class GenerationHandler(
                 channel.trySend(Evt.Finish(false, e.message ?: "engine error"))
             }
         }
-        // 协程取消(用户停止)→ 通知引擎 g_cancel(阻塞 nativeChat 不响应协程取消)
+        // 协程取消(用户停止)→ 通知引擎(阻塞 nativeChat 不响应协程取消;
+        // 按 cancel_id 精准取消本会话, 不误伤其他并发会话)
         job.invokeOnCompletion { cause ->
             if (cause is kotlinx.coroutines.CancellationException) {
                 logMsg(TAG, "generation cancelled, signalling engine")
-                Engine.nativeSetCancel(true)
+                Engine.nativeSetCancel(cancelId, true)
             }
         }
 

@@ -22,6 +22,65 @@ static size_t b64_encode(const uint8_t *in, size_t in_len, char *out);
 #include "rikka/util/arena.h"
 
 static volatile int g_cancel = 0;
+
+/* per-call 取消槽: 多会话并发时各会话独立取消(nativeChat 按 cancel_id 注册) */
+#define RK_MAX_CANCEL_SLOTS 16
+static struct {
+    long id;
+    volatile int *flag;
+} g_cancel_slots[RK_MAX_CANCEL_SLOTS];
+static pthread_mutex_t g_cancel_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static volatile int *cancel_slot_register(long id) {
+    pthread_mutex_lock(&g_cancel_mu);
+    volatile int *f = NULL;
+    for (int i = 0; i < RK_MAX_CANCEL_SLOTS; i++) {
+        if (g_cancel_slots[i].id == id) {
+            f = g_cancel_slots[i].flag;
+            *f = 0;
+            break;
+        }
+    }
+    if (!f) {
+        for (int i = 0; i < RK_MAX_CANCEL_SLOTS; i++) {
+            if (!g_cancel_slots[i].flag) {
+                f = (volatile int *)calloc(1, sizeof(int));
+                g_cancel_slots[i].id = id;
+                g_cancel_slots[i].flag = f;
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_cancel_mu);
+    return f;
+}
+
+static void cancel_slot_release(long id) {
+    pthread_mutex_lock(&g_cancel_mu);
+    for (int i = 0; i < RK_MAX_CANCEL_SLOTS; i++) {
+        if (g_cancel_slots[i].id == id && g_cancel_slots[i].flag) {
+            free((void *)g_cancel_slots[i].flag);
+            g_cancel_slots[i].id = 0;
+            g_cancel_slots[i].flag = NULL;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_cancel_mu);
+}
+
+static int cancel_slot_set(long id, int v) {
+    pthread_mutex_lock(&g_cancel_mu);
+    int found = 0;
+    for (int i = 0; i < RK_MAX_CANCEL_SLOTS; i++) {
+        if (g_cancel_slots[i].id == id && g_cancel_slots[i].flag) {
+            *g_cancel_slots[i].flag = v;
+            found = 1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_cancel_mu);
+    return found;
+}
 static JavaVM *g_vm = NULL;
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
@@ -767,6 +826,11 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
 
     /* skills 根目录(Android: filesDir/skills; NULL 用默认 /skills) */
     const char *skills_root = jstr(pv, "skills_root");
+    /* per-call 取消 id(多会话互不干扰; 缺省用全局 g_cancel) */
+    long cancel_id = 0;
+    const RJson *j_cid = rjson_obj_get(pv, "cancel_id");
+    if (j_cid && rjson_is(j_cid, RJSON_NUMBER)) cancel_id = (long)j_cid->u.number;
+    volatile int *local_cancel = cancel_id ? cancel_slot_register(cancel_id) : NULL;
 
     const RikkaMessage *msgs[64];
     size_t n_msgs = 0;
@@ -830,14 +894,16 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     cc.tools = &reg;
     cc.tool_env = &tenv;
     cc.timeout_ms = 120000;
-    cc.cancel_flag = &g_cancel;
+    cc.cancel_flag = local_cancel ? local_cancel : &g_cancel;
 
     char *final_text = NULL;
     char *chat_err = NULL;
     RikkaSessionStats cstats;
     memset(&cstats, 0, sizeof(cstats));
     g_cancel = 0;
+    if (local_cancel) *local_cancel = 0;
     int rc = err ? -1 : rk_chat_run(&cc, &cbs, msgs, n_msgs, &final_text, &chat_err, &cstats);
+    if (local_cancel) cancel_slot_release(cancel_id);
 
     /* 完成回调 */
     jstring ferr = (rc != 0 && chat_err) ? (*env)->NewStringUTF(env, chat_err) : NULL;
@@ -896,8 +962,9 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
 
 JNIEXPORT void JNICALL
 Java_dev_rikkahub_ce_Engine_nativeSetCancel(JNIEnv *env, jclass cls,
-                                                  jboolean cancel) {
+                                                  jlong cancelId, jboolean cancel) {
     (void)env;
     (void)cls;
+    if (cancelId != 0 && cancel_slot_set(cancelId, cancel ? 1 : 0)) return;
     g_cancel = cancel ? 1 : 0;
 }
