@@ -80,6 +80,15 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         }
     }
 
+    fun renameSession(id: String, newTitle: String) {
+        val s = sessions.firstOrNull { it.id == id } ?: return
+        val t = newTitle.trim()
+        if (t.isNotBlank()) {
+            s.title = t.take(20)
+            saveSessionMeta()
+        }
+    }
+
     fun deleteSession(id: String) {
         if (busy) return
         val idx = sessions.indexOfFirst { it.id == id }

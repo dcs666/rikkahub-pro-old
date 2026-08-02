@@ -91,6 +91,7 @@ fun ChatScreen(vm: ChatViewModel) {
 
 @Composable
 private fun SessionsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
+    var editing by remember { mutableStateOf<ChatSession?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("会话") },
@@ -122,6 +123,7 @@ private fun SessionsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                             )
                         }
                         if (vm.sessions.size > 1) {
+                            TextButton(onClick = { editing = s }) { Text("改名") }
                             TextButton(onClick = { vm.deleteSession(s.id) }) { Text("删除") }
                         }
                     }
@@ -132,6 +134,29 @@ private fun SessionsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text("关闭") }
         },
     )
+    editing?.let { s ->
+        var title by remember(s.id) { mutableStateOf(s.title) }
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text("重命名会话") },
+            text = {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.renameSession(s.id, title)
+                    editing = null
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = null }) { Text("取消") }
+            },
+        )
+    }
 }
 
 @Composable
