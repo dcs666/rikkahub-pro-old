@@ -4,6 +4,11 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -59,6 +64,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -68,8 +74,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rikkahub.ce.BuildConfig
-import kotlinx.coroutines.launch
+import dev.rikkahub.ce.BuildConfigimport kotlinx.coroutines.launch
 
 
 
@@ -290,6 +295,7 @@ private fun EmptyState(vm: ChatViewModel) {
 private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15) {
     val isUser = msg.role == "user"
     val ctx = LocalContext.current
+    var showMenu by remember { mutableStateOf(false) }
     val onCopy = {
         val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                 as android.content.ClipboardManager
@@ -315,7 +321,7 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15)
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.combinedClickable(
                 onClick = {},
-                onLongClick = onCopy,
+                onLongClick = { showMenu = true },
             ),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -368,6 +374,15 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15)
                     MarkdownText(msg.text, fontSize = fontSize.sp)
                 }
                 if (msg.streaming) {
+                    val transition = rememberInfiniteTransition()
+                    val alpha by transition.animateFloat(
+                        initialValue = 0.3f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            tween(450),
+                            RepeatMode.Reverse,
+                        ),
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
                             modifier = Modifier.width(14.dp).height(14.dp),
@@ -375,6 +390,13 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15)
                         )
                         Spacer(Modifier.width(6.dp))
                         Text("生成中…", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            "▍",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.alpha(alpha),
+                        )
                     }
                 }
                 if (msg.isError) {
@@ -393,6 +415,26 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15)
                 }
             }
         }
+    }
+    // 长按菜单：复制 / 朗读
+    DropdownMenu(
+        expanded = showMenu,
+        onDismissRequest = { showMenu = false },
+    ) {
+        DropdownMenuItem(
+            text = { Text("📋 复制") },
+            onClick = {
+                showMenu = false
+                onCopy()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("🔊 朗读") },
+            onClick = {
+                showMenu = false
+                dev.rikkahub.ce.DeviceTools.ttsSpeak(msg.text.take(500))
+            },
+        )
     }
 }
 
