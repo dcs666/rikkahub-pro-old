@@ -64,6 +64,8 @@ int SSL_write(SSL *ssl, const void *buf, int num);
 int SSL_get_error(const SSL *ssl, int ret);
 void SSL_shutdown(SSL *ssl);
 long SSL_get_verify_result(const SSL *ssl);
+#define X509_V_OK 0
+int SSL_set1_host(SSL *ssl, const char *hostname);
 
 /* SSL_set_tlsext_host_name 是宏（OpenSSL 1.1）；55 = SSL_CTRL_SET_TLSEXT_HOSTNAME */
 long SSL_ctrl(SSL *ssl, int cmd, long larg, void *parg);
