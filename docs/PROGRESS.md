@@ -41,6 +41,18 @@
 - [x] 设置页完善: 权限引导（日历/屏幕时间）、朗读回复开关、版本信息（2026-08-02）
 - [x] 会话标题 LLM 自动生成（RK_PROMPT_TITLE，首轮回复后异步）（2026-08-02）
 - [x] WebView JS 工具（WebView eval 落地，主线程+latch 桥 10s 超时）（2026-08-02）
-- [x] 图片消息展示（气泡内显示，2026-08-02）
-- [ ] 桌面小部件/深链（可选）
+- [x] 工具调用可视化（当前仅文本行）——待 UI 增强
+- [ ] 会话标题手动编辑
 - [ ] 正式 keystore 长期轮换提醒
+
+## 六、最近提交记录（2026-08-02 夜间）
+
+- 9c278de: Kotlin imports 清理修复（Engine 重复/getValue）→ CI 全绿
+- 27df2f0: WebView JS 工具（DeviceTools.javascriptEval）
+- f45f3a1/ffb2120/a66bf32: Kotlin 编译错误逐轮清零（HorizontalDivider material3、
+  BuildConfig import、ChatMsg.imagePath 补回、DeviceTools/Context import）
+- a7f0aab: 会话标题 LLM 自动生成（nativeGenerateTitle + RK_PROMPT_TITLE）
+- e86ebfe: 设置页权限引导 + 版本信息（BuildConfig.VERSION_NAME）
+- e878e98: 图片消息展示（ChatMsg.imagePath + BitmapFactory）
+- 并行会话（非本会话）: Claude/Google tool_calls、OpenAI 并行调用、
+  UI 推理折叠/复制/重试、rk_chat_think_feed、versionCode 3/0.3.0
