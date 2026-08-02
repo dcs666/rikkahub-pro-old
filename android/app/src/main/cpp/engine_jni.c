@@ -56,18 +56,30 @@ static void jni_delta(void *ud, int kind, const char *data, size_t len) {
     JNIEnv *env = jni_thread_env(&attached);
     if (!env) return;
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env); /* 防上次异常污染 */
-    /* NewStringUTF 需要 NUL 结尾：临时拷贝（增量块通常 <4KB） */
-    char tmp[4096];
-    const char *s = data;
-    if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
-    memcpy(tmp, data, len);
-    tmp[len] = '\0';
-    s = tmp;
+    /* NewStringUTF 需要 NUL 结尾：小块栈拷贝，大块堆拷贝（不截断防丢内容） */
+    char tmp[1024];
+    char *heap = NULL;
+    const char *s;
+    if (len < sizeof(tmp)) {
+        memcpy(tmp, data, len);
+        tmp[len] = '\0';
+        s = tmp;
+    } else {
+        heap = (char *)malloc(len + 1);
+        if (!heap) {
+            if (attached) (*g_vm)->DetachCurrentThread(g_vm);
+            return;
+        }
+        memcpy(heap, data, len);
+        heap[len] = '\0';
+        s = heap;
+    }
     jstring js = (*env)->NewStringUTF(env, s);
     if (js) {
         (*env)->CallVoidMethod(env, jc->cb, g_m_delta, (jint)kind, js);
         (*env)->DeleteLocalRef(env, js);
     }
+    free(heap);
     if (attached) (*g_vm)->DetachCurrentThread(g_vm);
 }
 
