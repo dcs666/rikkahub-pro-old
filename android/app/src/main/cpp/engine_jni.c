@@ -95,6 +95,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
 typedef struct {
     JNIEnv *env;
     jobject cb; /* 全局引用 */
+    const char *mem_aid; /* 本会话 assistant_id(arena 生命周期 = nativeChat) */
 } JniCb;
 
 static jmethodID g_m_delta, g_m_tool_call, g_m_tool_result, g_m_finish;
@@ -508,13 +509,11 @@ static char *jni_web_search(const char *query, void *ud) {
     return out;
 }
 
-/* memory_tool 反调: assistant_id 从 providerJson 传入, 存于 jni_ctx_mem_aid */
-static char *jni_ctx_mem_aid = NULL;  /* strdup 的 assistant_id; 每轮 chat 重建 */
 
 static char *jni_memory(const char *action, int64_t id, const char *content, void *ud) {
-    (void)ud;
+    JniCb *j = (JniCb *)ud;
     JNIEnv *env = env_of();
-    if (!env || !action || !jni_ctx_mem_aid) return NULL;
+    if (!env || !action || !j || !j->mem_aid) return NULL;
     if (!g_dev_cls) {
         jclass c = (*env)->FindClass(env, "dev/rikkahub/ce/DeviceTools");
         if (!c) return NULL;
@@ -528,7 +527,7 @@ static char *jni_memory(const char *action, int64_t id, const char *content, voi
     }
     jstring ja = (*env)->NewStringUTF(env, action);
     jstring jc = (*env)->NewStringUTF(env, content ? content : "");
-    jstring jid = (*env)->NewStringUTF(env, jni_ctx_mem_aid);
+    jstring jid = (*env)->NewStringUTF(env, j->mem_aid);
     jstring jr = (jstring)(*env)->CallStaticObjectMethod(
         env, g_dev_cls, g_dev_mem, ja, (jlong)id, jc, jid);
     if ((*env)->ExceptionCheck(env)) {
@@ -819,11 +818,8 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     if (j_tp && rjson_is(j_tp, RJSON_NUMBER)) pcfg.top_p = (float)j_tp->u.number;
     pcfg.custom_body = jstr(pv, "custom_body");
 
-    /* memory_tool 反调目标 assistant_id(enableMemory 时 Kotlin 传入; 每轮重建) */
-    free(jni_ctx_mem_aid);
-    jni_ctx_mem_aid = NULL;
+    /* memory_tool 反调目标 assistant_id(enableMemory 时 Kotlin 传入; per-call 传递) */
     const char *aid = jstr(pv, "assistant_id");
-    if (aid && aid[0]) jni_ctx_mem_aid = strdup(aid);
 
     /* skills 根目录(Android: filesDir/skills; NULL 用默认 /skills) */
     const char *skills_root = jstr(pv, "skills_root");
@@ -866,13 +862,15 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.skills_root = skills_root;
     tenv.tool_whitelist = jstr(pv, "tool_whitelist");
     rk_tools_init(&reg);
-    rk_tools_register_builtin(&reg, &tenv);
 
     /* 回调引用与方法 */
     JniCb jc;
     jc.env = env;
     jobject gcb = (*env)->NewGlobalRef(env, callback);
     jc.cb = gcb;
+    jc.mem_aid = aid;
+    tenv.ud = &jc; /* 工具反调上下文(per-call assistant_id 等) */
+    rk_tools_register_builtin(&reg, &tenv);
     jclass cbcls = (*env)->GetObjectClass(env, callback);
     if (!g_m_delta) {
         g_m_delta = (*env)->GetMethodID(env, cbcls, "onDelta", "(ILjava/lang/String;)V");
