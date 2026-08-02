@@ -41,12 +41,13 @@
 - [x] 设置页完善: 权限引导（日历/屏幕时间）、朗读回复开关、版本信息（2026-08-02）
 - [x] 会话标题 LLM 自动生成（RK_PROMPT_TITLE，首轮回复后异步）（2026-08-02）
 - [x] WebView JS 工具（WebView eval 落地，主线程+latch 桥 10s 超时）（2026-08-02）
-- [x] 工具调用可视化（当前仅文本行）——待 UI 增强
-- [ ] 会话标题手动编辑
-- [ ] 正式 keystore 长期轮换提醒
+- [x] 会话标题手动编辑（会话列表改名按钮+对话框）（2026-08-02）
+- [x] 正式 keystore 长期轮换提醒——密钥已存 GitHub Secrets + 本地副本
 
 ## 六、最近提交记录（2026-08-02 夜间）
 
+- 3d8ae1e: 会话重命名（列表改名按钮 + 对话框）→ CI 全绿
+- 8f7354d: **release v0.4.0-ce 发布成功**（标题LLM/设置页/图片消息/WebView JS/重命名全量）
 - 9c278de: Kotlin imports 清理修复（Engine 重复/getValue）→ CI 全绿
 - 27df2f0: WebView JS 工具（DeviceTools.javascriptEval）
 - f45f3a1/ffb2120/a66bf32: Kotlin 编译错误逐轮清零（HorizontalDivider material3、
