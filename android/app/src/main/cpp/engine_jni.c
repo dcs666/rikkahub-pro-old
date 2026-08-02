@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "rikka/ai/chat.h"
 #include "rikka/ai/ocr.h"
