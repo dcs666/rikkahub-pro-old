@@ -86,6 +86,7 @@ import kotlinx.coroutines.launch
 fun ChatScreen(vm: ChatViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     ModalNavigationDrawer(
@@ -113,10 +114,46 @@ fun ChatScreen(vm: ChatViewModel) {
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                if (vm.messages.isNotEmpty()) {
-                    TextButton(onClick = { confirmClear = true }) { Text("清空") }
+                var showMore by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { showMore = true }) { Text("⋮") }
+                    DropdownMenu(
+                        expanded = showMore,
+                        onDismissRequest = { showMore = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("📋 复制全部对话") },
+                            enabled = vm.messages.isNotEmpty(),
+                            onClick = {
+                                showMore = false
+                                val cm = context.getSystemService(
+                                    android.content.Context.CLIPBOARD_SERVICE,
+                                ) as android.content.ClipboardManager
+                                cm.setPrimaryClip(
+                                    android.content.ClipData.newPlainText(
+                                        "rikka-chat",
+                                        vm.copyAllText(),
+                                    ),
+                                )
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🗑 清空会话", color = MaterialTheme.colorScheme.error) },
+                            enabled = vm.messages.isNotEmpty(),
+                            onClick = {
+                                showMore = false
+                                confirmClear = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("⚙️ 设置") },
+                            onClick = {
+                                showMore = false
+                                showSettings = true
+                            },
+                        )
+                    }
                 }
-                TextButton(onClick = { showSettings = true }) { Text("设置") }
             }
             MessageList(vm, Modifier.weight(1f))
             InputBar(vm)

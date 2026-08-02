@@ -333,6 +333,17 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         }
     }
 
+    fun copyAllText(): String {
+        val session = currentSession ?: return ""
+        val sb = StringBuilder()
+        for (m in session.messages) {
+            if (m.tool != null) continue
+            if (m.text.isBlank()) continue
+            sb.append(if (m.role == "user") "👤 " else "🤖 ").append(m.text).append("\n\n")
+        }
+        return sb.toString().trim()
+    }
+
     fun clearSession() {
         val s = currentSession ?: return
         s.messages.clear()
