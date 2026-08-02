@@ -178,10 +178,40 @@ object DeviceTools {
         }
     }
 
-    /** JavaScript 求值（当前返回错误：WebView 环境打磨期接入） */
+    /** JavaScript 求值（WebView 环境，主线程 + latch 桥；10s 超时） */
     @JvmStatic
     fun javascriptEval(code: String): String? {
-        return err("javascript eval not available")
+        val ctx = appContext ?: return err("no context")
+        val latch = CountDownLatch(1)
+        val result = AtomicReference<String?>(null)
+        mainHandler.post {
+            try {
+                val webView = android.webkit.WebView(ctx)
+                webView.settings.javaScriptEnabled = true
+                val quoted = org.json.JSONObject.quote(code)
+                val js = "(function(){try{" +
+                        "return JSON.stringify({ok:true,result:eval($quoted)})" +
+                        "}catch(e){return JSON.stringify({ok:false,error:String(e)})}})()"
+                webView.evaluateJavascript(js) { r ->
+                    try {
+                        // r 是 JSON 编码字符串（带引号），解包后即为 {ok,result}
+                        val inner = org.json.JSONTokener(r).nextValue().toString()
+                        result.set(inner)
+                    } catch (_: Exception) {
+                        result.set(err("js eval parse failed"))
+                    }
+                    latch.countDown()
+                }
+            } catch (e: Exception) {
+                result.set(err("js eval failed: ${e.message}"))
+                latch.countDown()
+            }
+        }
+        try {
+            latch.await(10, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+        }
+        return result.get() ?: err("js eval timeout")
     }
 
     private fun err(msg: String): String {
