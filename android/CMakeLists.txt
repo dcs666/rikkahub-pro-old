@@ -24,11 +24,14 @@ add_library(rikka SHARED ${RIKKA_SRC})
 target_include_directories(rikka PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 
-# 链接 NDK 的 libssl/libcrypto stub(NDK 提供符号表) → DT_NEEDED 写入
-# libssl.so/libcrypto.so → 运行时 linker 优先加载 APK jniLibs 内的真 OpenSSL 3
-# (由 android/scripts/build_openssl.sh 生成), 不再依赖系统 BoringSSL。
+# 直接链接 build_openssl.sh 生成的真 OpenSSL 3 (app/src/main/jniLibs/<abi>/)
+# → DT_NEEDED 写入 libssl.so/libcrypto.so → 运行时 linker 加载 APK 内真库,
+#   不再依赖系统 BoringSSL(国产 ROM 无 SSL_new)。
 if(ANDROID)
-    target_link_libraries(rikka PUBLIC z ssl crypto)
+    set(RK_OPENSSL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/app/src/main/jniLibs/${ANDROID_ABI}")
+    target_link_libraries(rikka PUBLIC z
+        "${RK_OPENSSL_DIR}/libssl.so"
+        "${RK_OPENSSL_DIR}/libcrypto.so")
     set(CMAKE_SHARED_LINKER_FLAGS
         "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,undefs")
 else()

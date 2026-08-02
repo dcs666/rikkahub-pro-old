@@ -50,6 +50,11 @@ build_abi() {
   sed -i 's/-Wl,-soname,libssl\.so\.3/-Wl,-soname,libssl.so/; s/-Wl,-soname,libcrypto\.so\.3/-Wl,-soname,libcrypto.so/' Makefile
   make -j"$(nproc)" build_libs > "/tmp/ossl-$abi.log" 2>&1 || { echo "make failed for $abi:"; tail -40 "/tmp/ossl-$abi.log"; exit 1; }
   cp -f libssl.so libcrypto.so "$JNI/$abi/"
+  # 验证 SONAME 无版本号(否则 DT_NEEDED 指向 libssl.so.3 不被 AGP 打包)
+  for so in libssl libcrypto; do
+    sn=$(readelf -d "$JNI/$abi/$so.so" | grep -o "\[$so\.so\]" || true)
+    [ -n "$sn" ] || { echo "ERROR: $so.so SONAME has version suffix!"; readelf -d "$JNI/$abi/$so.so" | grep SONAME; exit 1; }
+  done
   echo "  -> $JNI/$abi/: $(ls libssl.so libcrypto.so)"
 }
 

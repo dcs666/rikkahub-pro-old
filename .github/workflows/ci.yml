@@ -50,6 +50,8 @@ jobs:
           java-version: '17'
       - name: Set up Android NDK
         uses: android-actions/setup-android@v3
+      - name: Build OpenSSL for Android (jniLibs)
+        run: bash android/scripts/build_openssl.sh
       - name: NDK cross-compile librikka.so
         run: |
           NDK="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
@@ -62,8 +64,7 @@ jobs:
           echo "=== DT_NEEDED check (must include libssl.so/libcrypto.so) ==="
           readelf -d android/build/librikka.so | grep NEEDED
           ls -la android/build/librikka.so
-      - name: Build OpenSSL for Android (jniLibs)
-        run: bash android/scripts/build_openssl.sh
+
       - name: Build APK (Gradle)
         uses: gradle/actions/setup-gradle@v3
       - name: Set up pnpm (web-ui 前端构建依赖)
