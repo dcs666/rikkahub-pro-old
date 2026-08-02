@@ -155,3 +155,7 @@
     =123 → SSL_CTX_ctrl), libssl.so 不导出; shim 头误声明为函数 → dlopen 失败
   - 修复: ndk-include/openssl/ssl.h 声明 SSL_CTX_ctrl + 按官方宏定义
   - 依赖链已完整: R8 keep ✓ + DT_NEEDED libssl/libcrypto ✓ + 符号全部可解析 ✓
+
+### 已知限制(待办)
+- engine_jni.c 的 g_cancel 是全局变量: 多会话并发生成时, 取消一个会话会影响另一个
+  (v0.7.8 记录; 修复方案: nativeChat 返回会话 token, nativeSetCancel(token, cancel))
