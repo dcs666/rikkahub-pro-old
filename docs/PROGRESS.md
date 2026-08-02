@@ -79,3 +79,5 @@
 - 图片直发多模态: parse_history 支持 image_path → base64 data URI → IMAGE part；sendImage 图文一条消息（并行覆盖恢复踩坑: sendImage/MessageBubble vm 参数被覆盖需补回）
 - 消息删除（长按菜单）/清空会话确认/切换会话自动滚底
 - 踩坑补充: arena_alloc 是 3 参 (a, align, size) 不是 2 参；import 换行粘连（BuildConfigimport）；DropdownMenu 需 material3 import
+
+- **release v0.5.0-ce 发布成功** (2026-08-02): UI 全面打磨版 — 主题三态/Markdown增强/工具卡片/侧滑抽屉/全屏设置/附件预览/流式光标/空状态/图片直发多模态/图片持久化/顶栏⋮菜单
