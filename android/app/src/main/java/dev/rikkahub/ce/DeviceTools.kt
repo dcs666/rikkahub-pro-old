@@ -214,6 +214,48 @@ object DeviceTools {
         return result.get() ?: err("js eval timeout")
     }
 
+    /** [CE] search_web 引擎反调桥：阻塞执行 SearchService.search（引擎工作线程调用） */
+    @JvmStatic
+    fun webSearch(query: String): String? {
+        val ctx = appContext ?: return err("no context")
+        return runCatching {
+            val settingsStore = org.koin.java.KoinJavaComponent.getKoin()
+                .get<me.rerere.rikkahub.data.datastore.SettingsStore>()
+            val settings = settingsStore.settingsFlow.value
+            val options = settings.searchServices.getOrElse(
+                index = settings.searchServiceSelected,
+                defaultValue = { me.rerere.search.SearchServiceOptions.DEFAULT },
+            )
+            val service = me.rerere.search.SearchService.getService(options)
+            val params = JSONObject().put("query", query)
+            val jsonObj = kotlinx.serialization.json.Json
+                .parseToJsonElement(params.toString()).jsonObject
+            val result = kotlinx.coroutines.runBlocking {
+                service.search(jsonObj, settings.searchCommonOptions, options)
+            }.getOrNull() ?: return err("search failed")
+            // 对齐 turbo: items 加 id/index
+            val encoded = me.rerere.rikkahub.utils.JsonInstantPretty
+                .encodeToJsonElement(result).jsonObject
+            val map = encoded.toMutableMap()
+            map["items"] = kotlinx.serialization.json.JsonArray(
+                encoded["items"]?.jsonArray?.mapIndexed { index, item ->
+                    kotlinx.serialization.json.JsonObject(
+                        item.jsonObject.toMutableMap().apply {
+                            put(
+                                "id",
+                                kotlinx.serialization.json.JsonPrimitive(
+                                    kotlin.uuid.Uuid.random().toString().take(6),
+                                ),
+                            )
+                            put("index", kotlinx.serialization.json.JsonPrimitive(index + 1))
+                        },
+                    )
+                } ?: emptyList(),
+            )
+            kotlinx.serialization.json.JsonObject(map).toString()
+        }.getOrNull()
+    }
+
     private fun err(msg: String): String {
         return JSONObject().put("error", msg).toString()
     }

@@ -196,7 +196,8 @@ static int parse_history(Arena *a, const char *history_json,
 /* ---------- 设备工具（JNI 反调 Kotlin DeviceTools） ---------- */
 
 static jclass g_dev_cls = NULL;
-static jmethodID g_dev_ask_user, g_dev_clip, g_dev_tts, g_dev_cal, g_dev_st, g_dev_js;
+static jmethodID g_dev_ask_user, g_dev_clip, g_dev_tts, g_dev_cal, g_dev_st, g_dev_js,
+                 g_dev_web_search;
 static jclass g_store_cls = NULL;
 static jmethodID g_store_recent, g_store_search;
 
@@ -320,6 +321,35 @@ static void ensure_store_cls(JNIEnv *env) {
     g_store_search = (*env)->GetStaticMethodID(env, g_store_cls, "conversationSearch",
                                                "(Ljava/lang/String;)Ljava/lang/String;");
     (*env)->DeleteLocalRef(env, c);
+}
+
+static char *jni_web_search(const char *query, void *ud) {
+    JNIEnv *env = env_of();
+    if (!env || !query) return NULL;
+    if (!g_dev_cls) {
+        jclass c = (*env)->FindClass(env, "dev/rikkahub/ce/DeviceTools");
+        if (!c) return NULL;
+        g_dev_cls = (*env)->NewGlobalRef(env, c);
+    }
+    if (!g_dev_web_search) {
+        g_dev_web_search = (*env)->GetStaticMethodID(env, g_dev_cls, "webSearch",
+                                                     "(Ljava/lang/String;)Ljava/lang/String;");
+        if (!g_dev_web_search) return NULL;
+    }
+    jstring jq = (*env)->NewStringUTF(env, query);
+    jstring jr = (jstring)(*env)->CallStaticObjectMethod(env, g_dev_cls, g_dev_web_search, jq);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    if (!jr) return NULL;
+    const char *r = (*env)->GetStringUTFChars(env, jr, NULL);
+    if (!r) return NULL;
+    char *out = strdup(r);
+    (*env)->ReleaseStringUTFChars(env, jr, r);
+    (*env)->DeleteLocalRef(env, jq);
+    (*env)->DeleteLocalRef(env, jr);
+    return out;
 }
 
 static char *jni_recent_chats(int limit, void *ud) {
@@ -627,6 +657,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.javascript_eval = jni_javascript_eval;
     tenv.recent_chats = jni_recent_chats;
     tenv.conversation_search = jni_conversation_search;
+    tenv.web_search = jni_web_search;
     rk_tools_init(&reg);
     rk_tools_register_builtin(&reg, &tenv);
 
