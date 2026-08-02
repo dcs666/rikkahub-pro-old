@@ -275,3 +275,9 @@
 - HTTP 3xx 重定向跟随(最多3次, 对齐 OkHttp) + mock /redirect + 测试
 - CI 失败修复: memoryAction non-local return / DeviceTools import / RikkaProviderCfg 初始化器
 - 确认: 重定向 Host 头正确/Authorization 跨域保留(信任场景)/304 不跟随
+
+### 25轮深度优化(第八批) — 已提交
+- TLS 主机名校验(SSL_set1_host; x509v3.h NDK 缺失 → 改方案)
+- buf_append OOM 越界修复(reserve 失败丢弃追加)
+- 确认: header 64KB 上限/chunk 行 64B/SSE 8MB/单退出路径清理完整
+- CI 失败修复: memoryAction non-local return
