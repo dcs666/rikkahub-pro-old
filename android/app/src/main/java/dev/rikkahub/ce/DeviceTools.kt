@@ -227,14 +227,16 @@ object DeviceTools {
         val latch = CountDownLatch(1)
         val result = AtomicReference<String?>(null)
         mainHandler.post {
+            var webView: android.webkit.WebView? = null
             try {
-                val webView = android.webkit.WebView(ctx)
-                webView.settings.javaScriptEnabled = true
+                val wv = android.webkit.WebView(ctx)
+                webView = wv
+                wv.settings.javaScriptEnabled = true
                 val quoted = org.json.JSONObject.quote(code)
                 val js = "(function(){try{" +
                         "return JSON.stringify({ok:true,result:eval($quoted)})" +
                         "}catch(e){return JSON.stringify({ok:false,error:String(e)})}})()"
-                webView.evaluateJavascript(js) { r ->
+                wv.evaluateJavascript(js) { r ->
                     try {
                         // r 是 JSON 编码字符串（带引号），解包后即为 {ok,result}
                         val inner = org.json.JSONTokener(r).nextValue().toString()
@@ -247,6 +249,14 @@ object DeviceTools {
             } catch (e: Exception) {
                 result.set(err("js eval failed: ${e.message}"))
                 latch.countDown()
+            } finally {
+                // 防泄漏：评估完成后销毁 WebView（等回调先消费完）
+                if (result.get() != null) {
+                    webView?.postDelayed({
+                        webView?.destroy()
+                        webView?.removeAllViews()
+                    }, 500)
+                }
             }
         }
         try {
