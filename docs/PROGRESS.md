@@ -253,3 +253,11 @@
 - MCP 客户端接线: 引擎 mcp.c 完备但未注册为工具(JNI 桥缺失)
 - 多会话 g_cancel 全局互扰(现 UI 单会话生成, 风险低)
 - ask_user 多问题 UI(引擎已支持 questions 数组, 壳层 UI 未做多问题展示)
+
+### 25轮深度优化(第五批) — 已提交
+- 工具白名单开关: localTools/enableMemory/enabledSkills 真正生效(原 tools 参数被忽略)
+- web_search/recent_chats 开关: enableWebSearch/enableRecentChatsReference 条件注册
+- use_skill 根目录参数化: Android 读 filesDir/skills(原硬编码 /skills 不存在)
+- skills 列表注入 system prompt(对齐 turbo createSkillTools)
+- 待办记录: 系统代理(HTTP CONNECT)/MCP 接线/多问题 ask_user UI
+- 确认: 引擎无重试(对齐 turbo)/SSE 8MB 上限可接受/权限清单齐全
