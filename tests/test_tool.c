@@ -51,9 +51,51 @@ TEST(tool_registry) {
 }
 
 static char *stub_ask_user(const char *questions, void *ud) {
-    (void)questions;
     (void)ud;
-    return strdup("{\"ok\":true,\"answer\":\"test\"}");
+    return strdup(questions); /* 原样返回，验证透传内容 */
+}
+
+static char *captured_ask = NULL;
+static char *stub_ask_capture(const char *questions, void *ud) {
+    (void)ud;
+    free(captured_ask);
+    captured_ask = strdup(questions);
+    return strdup("{\"ok\":true}");
+}
+
+TEST(tool_ask_user_passthrough) {
+    RkToolRegistry r;
+    rk_tools_init(&r);
+    RkToolEnv env = {0};
+    env.ask_user = stub_ask_capture;
+    rk_tools_register_builtin(&r, &env);
+    const RkTool *t = rk_tools_find(&r, "ask_user");
+    ASSERT_NOT_NULL(t);
+    char *res = NULL;
+    /* 完整 questions 数组透传 */
+    const char *qs = "{\"questions\":[{\"id\":\"a\",\"question\":\"Q1\",\"options\":[\"x\",\"y\"]},"
+                     "{\"id\":\"b\",\"question\":\"Q2\"}]}";
+    ASSERT_EQ_INT(0, rk_tool_call(t, qs, &env, &res));
+    ASSERT_NOT_NULL(res);
+    ASSERT(strstr(res, "ok") != NULL); /* 反调返回值原样透传 */
+    free(res);
+    ASSERT_NOT_NULL(captured_ask);
+    ASSERT(strstr(captured_ask, "Q1") != NULL && strstr(captured_ask, "Q2") != NULL);
+    ASSERT(strstr(captured_ask, "\"options\"") != NULL);
+    /* 旧单 question 字段 → 包装为 questions 数组 */
+    res = NULL;
+    ASSERT_EQ_INT(0, rk_tool_call(t, "{\"question\":\"old style\"}", &env, &res));
+    ASSERT_NOT_NULL(res);
+    ASSERT(strstr(res, "ok") != NULL);
+    free(res);
+    ASSERT_NOT_NULL(captured_ask);
+    ASSERT(strstr(captured_ask, "old style") != NULL);
+    ASSERT(strstr(captured_ask, "questions") != NULL);
+    free(captured_ask);
+    captured_ask = NULL;
+    free(captured_ask);
+    captured_ask = NULL;
+    rk_tools_destroy(&r);
 }
 
 TEST(tool_whitelist) {
@@ -399,6 +441,7 @@ int run_tool_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(tool, tool_registry),
         RIKKA_TEST_REGISTER(tool, tool_whitelist),
+        RIKKA_TEST_REGISTER(tool, tool_ask_user_passthrough),
         RIKKA_TEST_REGISTER(tool, tool_time_info),
         RIKKA_TEST_REGISTER(tool, tool_workspace_files),
         RIKKA_TEST_REGISTER(tool, tool_workspace_shell),

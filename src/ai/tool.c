@@ -655,11 +655,11 @@ static int tool_use_skill(const RkTool *t, const char *args_json, const RkToolEn
 static int tool_ask_user(const RkTool *t, const char *args_json, const RkToolEnv *env,
                          char **result) {
     (void)t;
-    /* turbo 对齐: questions 数组(每项 id/question/options)。取第一项展示，
-     * 完整多问题 UI 待办(DeviceTools.askUser 单问题 Dialog)。 */
+    /* turbo 对齐: questions 数组(每项 id/question/options) 完整透传反调，
+     * 由壳层 UI 渲染多问题 + options 快捷选择。 */
     char q[4096];
-    const char *q1 = NULL;
-    size_t q1_len = 0;
+    const char *payload = NULL;
+    char rebuilt[4224];
     Arena *ja = arena_create(1024);
     if (ja) {
         size_t jerr = 0;
@@ -667,34 +667,42 @@ static int tool_ask_user(const RkTool *t, const char *args_json, const RkToolEnv
         if (root) {
             const RJson *qs = rjson_obj_get(root, "questions");
             if (qs && qs->type == RJSON_ARRAY && qs->u.arr.count > 0) {
-                const RJson *first = qs->u.arr.items[0];
-                const RJson *qq = rjson_obj_get(first, "question");
-                if (qq && qq->type == RJSON_STRING) {
-                    q1 = qq->u.str.ptr;
-                    q1_len = qq->u.str.len;
-                }
+                payload = args_json; /* 完整数组原样透传 */
             }
         }
         arena_destroy(ja);
     }
-    if (!q1) {
-        /* 兼容旧单 question 字段 */
+    if (!payload) {
+        /* 兼容旧单 question 字段 → 包装为 questions 数组 */
         if (rk_tool_arg_str(args_json, "question", q, sizeof(q)) != 0) {
             if (result) *result = rk_tool_result_error("question is required");
             return -1;
         }
-        q1 = q;
-        q1_len = strlen(q);
+        Buf b;
+        buf_init(&b);
+        buf_append_str(&b, "{\"questions\":[{\"question\":");
+        RJsonOut jo;
+        rjson_out_init(&jo);
+        rjson_write_string(&jo, q, strlen(q));
+        buf_append(&b, jo.buf, jo.len);
+        rjson_out_free(&jo);
+        buf_append_str(&b, "}]}");
+        buf_append_byte(&b, '\0');
+        if (b.len <= sizeof(rebuilt)) {
+            memcpy(rebuilt, b.data, b.len);
+            payload = rebuilt;
+        }
+        buf_free(&b);
+        if (!payload) {
+            if (result) *result = rk_tool_result_error("ask_user oom");
+            return -1;
+        }
     }
     if (!env || !env->ask_user) {
         if (result) *result = rk_tool_result_error("ask_user unavailable");
         return -1;
     }
-    char qbuf[4096];
-    size_t qn = q1_len < sizeof(qbuf) - 1 ? q1_len : sizeof(qbuf) - 1;
-    memcpy(qbuf, q1, qn);
-    qbuf[qn] = '\0';
-    char *r = env->ask_user(qbuf, env->ud);
+    char *r = env->ask_user(payload, env->ud);
     if (!r) { if (result) *result = rk_tool_result_error("ask_user failed"); return -1; }
     *result = r;
     return 0;
