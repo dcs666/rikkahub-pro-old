@@ -53,3 +53,9 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
+
+# [CE] JNI 引擎类 — R8 混淆会删除/重命名导致 NoClassDefFoundError (dev.rikkahub.ce.Engine)
+-keep class dev.rikkahub.ce.Engine { *; }
+-keep class dev.rikkahub.ce.ChatCallback { *; }
+-keep interface dev.rikkahub.ce.ChatCallback { *; }
+-keepclasseswithmembernames class dev.rikkahub.ce.Engine { native <methods>; }
