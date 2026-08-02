@@ -280,6 +280,13 @@ class GenerationHandler(
                 channel.trySend(Evt.Finish(false, e.message ?: "engine error"))
             }
         }
+        // 协程取消(用户停止)→ 通知引擎 g_cancel(阻塞 nativeChat 不响应协程取消)
+        job.invokeOnCompletion { cause ->
+            if (cause is kotlinx.coroutines.CancellationException) {
+                logMsg(TAG, "generation cancelled, signalling engine")
+                Engine.nativeSetCancel(true)
+            }
+        }
 
         // ---- 消费事件 → 组装 UI 消息（滚动超时：130s 无事件保护；
         // 引擎侧每轮 120s，多轮工具循环总时长可能更长 → 收到事件即续期） ----
