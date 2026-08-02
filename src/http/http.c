@@ -17,6 +17,8 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/x509v3.h>  /* X509_check_host */
+#include <openssl/x509.h>
 
 /* ---------- 全局 TLS 上下文 ---------- */
 
@@ -156,6 +158,16 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
             rhttp_close(c);
             return NULL;
         }
+        /* 证书链结果 + 主机名校验（独立于 VERIFY 模式，防有效证书域不符的中间人） */
+        if (SSL_get_verify_result(c->ssl) != X509_V_OK) {
+            rhttp_close(c);
+            return NULL;
+        }
+        X509 *cert = SSL_get_peer_certificate(c->ssl);
+        if (!cert) { rhttp_close(c); return NULL; }
+        int hrc = X509_check_host(cert, host, strlen(host), 0, NULL);
+        X509_free(cert);
+        if (hrc != 1) { rhttp_close(c); return NULL; }
     }
     return c;
 }
