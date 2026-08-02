@@ -60,7 +60,8 @@ jobs:
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build android/build -j2 2>&1 | tee /tmp/android_build.log
-          if grep -E 'warning' /tmp/android_build.log; then echo "WARNINGS PRESENT" && exit 1; fi
+          # 过滤 NDK/CMake 自身的 Deprecation Warning(非代码告警)
+          if grep -E 'warning' /tmp/android_build.log | grep -v 'Deprecation Warning' | grep -v 'cmake_minimum_required'; then echo "WARNINGS PRESENT" && exit 1; fi
           echo "=== DT_NEEDED check (must include libssl.so/libcrypto.so) ==="
           readelf -d android/build/librikka.so | grep NEEDED
           ls -la android/build/librikka.so
