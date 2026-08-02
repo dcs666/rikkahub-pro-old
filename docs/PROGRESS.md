@@ -117,3 +117,8 @@
   - turbo UI(5.9万行) + 纯 C 引擎(JNI)全链路 APK
   - 发布流程修: splits 输出 APK 名 (app-universal-release.apk)
   - 下载: https://github.com/dcs666/rikkahub-pro-old/releases/tag/v0.7.0-ce
+
+- **v0.7.1-ce 发布成功!** (2026-08-02) 修复真机崩溃
+  - 崩溃: SQLiteException dlopen libsimple.so not found (coil MemoryCacheService 加载 SQLite 扩展)
+  - 根因: .gitignore 的 *.so 把 jniLibs/libsimple.so 排除, APK 缺库
+  - 修复: 强制提交 libsimple.so (arm64/x86_64) + .gitignore 例外规则
