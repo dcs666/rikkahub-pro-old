@@ -100,8 +100,10 @@ static int parse_history(Arena *a, const char *history_json,
         RikkaPart *p = rmsg_add_part(a, m, RIKKA_PART_TEXT);
         p->data = content;
         p->len = strlen(content);
-        /* 可选图片：image_path 字段 → 读文件 → base64 data URI → IMAGE part */
+        /* 可选图片：image_path 字段 → 读文件 → base64 data URI → IMAGE part；
+           或 image_url 字段（http/https）→ 直接作为 IMAGE part */
         const char *img = jstr(e, "image_path");
+        const char *img_url = jstr(e, "image_url");
         if (img && img[0]) {
             FILE *f = fopen(img, "rb");
             if (f) {
@@ -124,6 +126,10 @@ static int parse_history(Arena *a, const char *history_json,
                 }
                 buf_free(&raw);
             }
+        } else if (img_url && img_url[0]) {
+            RikkaPart *ip = rmsg_add_part(a, m, RIKKA_PART_IMAGE);
+            ip->data = img_url;
+            ip->len = strlen(img_url);
         }
         out[n++] = m;
     }
