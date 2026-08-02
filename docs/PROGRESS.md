@@ -90,3 +90,7 @@
 - **替换点（进行中）**: data/ai/GenerationHandler.kt（629 行 Kotlin 生成循环）→ 内部改 JNI 调 C 引擎（rk_chat 编排循环）
 - 旧壳备份: /workspace/android_backup/android_old
 - 踩坑: AGP 9.3.1 需 gradle 9.5.0（CI 已改 wrapper）；R8 需 keep JNI 类
+
+- **1a2fda5: android-build 全绿 — turbo UI 工程 + C 引擎集成构建成功!** (2026-08-02)
+  - 10 模块 + web-ui 前端 + material-color-utilities submodule 全部就位
+  - 待办: GenerationHandler.kt C 化 (JNI 调 rk_chat)
