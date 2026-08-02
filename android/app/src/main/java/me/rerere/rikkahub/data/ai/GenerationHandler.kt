@@ -57,6 +57,21 @@ private fun logErr(tag: String, msg: String, e: Throwable? = null) {
     me.rerere.common.android.Logging.log(tag, msg + (e?.let { " | " + it.message } ?: ""))
 }
 
+/** [CE] content:// URI 复制到 cacheDir（引擎 fopen 读不了 content 协议）。
+ *  返回绝对路径；超大图(>16MB)/解析失败返回 null。 */
+private fun resolveContentToFile(context: Context, uri: String): String? = runCatching {
+    val u = android.net.Uri.parse(uri)
+    val size = context.contentResolver.query(
+        u, arrayOf(android.provider.MediaStore.MediaColumns.SIZE), null, null, null,
+    )?.use { c -> if (c.moveToFirst()) c.getLong(0) else -1L } ?: -1L
+    if (size > 16 * 1024 * 1024) return null
+    val f = java.io.File(context.cacheDir, "chat_img_${System.currentTimeMillis()}_${(0..99999).random()}")
+    context.contentResolver.openInputStream(u)?.use { input ->
+        f.outputStream().use { output -> input.copyTo(output) }
+    }
+    f.absolutePath
+}.getOrNull()
+
 /* C 引擎回调事件（文件级，Kotlin 不允许局部 interface） */
 private sealed interface Evt {
     class Delta(val kind: Int, val text: String) : Evt
@@ -136,13 +151,34 @@ class GenerationHandler(
                         }
                     }
                     is UIMessagePart.Image -> {
-                        if (part.url.startsWith("http")) {
-                            history.put(
-                                JSONObject()
-                                    .put("role", "user")
-                                    .put("content", "[图片]")
-                                    .put("image_url", part.url),
+                        val url = part.url
+                        when {
+                            // 远程图片 URL：直传 provider
+                            url.startsWith("http") -> history.put(
+                                JSONObject().put("role", "user").put("content", "[图片]")
+                                    .put("image_url", url),
                             )
+                            // base64 data URI：直通引擎（image_data 分支）
+                            url.startsWith("data:") -> history.put(
+                                JSONObject().put("role", "user").put("content", "[图片]")
+                                    .put("image_data", url),
+                            )
+                            // content://（PhotoPicker 主流路径）：复制到 cacheDir 再交给引擎读
+                            url.startsWith("content:") -> {
+                                val path = resolveContentToFile(context, url)
+                                if (path != null) history.put(
+                                    JSONObject().put("role", "user").put("content", "[图片]")
+                                        .put("image_path", path),
+                                )
+                            }
+                            // file:// 或裸路径：引擎直接读文件
+                            else -> {
+                                val path = url.removePrefix("file://").removePrefix("file:")
+                                if (path.isNotBlank()) history.put(
+                                    JSONObject().put("role", "user").put("content", "[图片]")
+                                        .put("image_path", path),
+                                )
+                            }
                         }
                     }
                     else -> { /* 工具等中间态由 C 引擎自管理，不进入历史 */ }

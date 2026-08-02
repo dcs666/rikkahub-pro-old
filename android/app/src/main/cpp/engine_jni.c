@@ -178,6 +178,14 @@ static int parse_history(Arena *a, const char *history_json,
             RikkaPart *ip = rmsg_add_part(a, m, RIKKA_PART_IMAGE);
             ip->data = img_url;
             ip->len = strlen(img_url);
+        } else {
+            /* data: URI(image_data)——已是 data:<mime>;base64,<payload> 格式直通 */
+            const char *img_data = jstr(e, "image_data");
+            if (img_data && strncmp(img_data, "data:", 5) == 0) {
+                RikkaPart *ip = rmsg_add_part(a, m, RIKKA_PART_IMAGE);
+                ip->data = img_data;
+                ip->len = strlen(img_data);
+            }
         }
         out[n++] = m;
     }
