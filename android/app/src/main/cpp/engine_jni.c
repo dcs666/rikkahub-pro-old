@@ -629,10 +629,11 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
         }
         buf_append_byte(&out, '"');
         if (cstats.prompt_tokens > 0 || cstats.completion_tokens > 0) {
-            char ub[128];
+            char ub[192];
             int uk = snprintf(ub, sizeof(ub),
-                              ",\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":%d}",
-                              cstats.prompt_tokens, cstats.completion_tokens);
+                              ",\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":%d,\"cached_tokens\":%d}",
+                              cstats.prompt_tokens, cstats.completion_tokens,
+                              cstats.cached_tokens);
             buf_append(&out, ub, (size_t)uk);
         }
         buf_append_str(&out, "}");

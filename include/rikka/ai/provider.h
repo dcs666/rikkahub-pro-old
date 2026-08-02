@@ -64,6 +64,7 @@ typedef struct {
     /* token 用量(流式 usage 解析; 0=未上报) */
     int prompt_tokens;
     int completion_tokens;
+    int cached_tokens;
 } RikkaSessionStats;
 
 RikkaStreamSession *rp_session_create(const RikkaProviderCfg *cfg);

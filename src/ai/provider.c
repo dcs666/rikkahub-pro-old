@@ -537,6 +537,12 @@ static void parse_usage(RikkaStreamSession *ss, const char *data, size_t len,
         const RJson *ct = rjson_obj_get(u, "completion_tokens");
         if (pt && pt->type == RJSON_NUMBER) ss->stats.prompt_tokens = (int)pt->u.number;
         if (ct && ct->type == RJSON_NUMBER) ss->stats.completion_tokens = (int)ct->u.number;
+        /* DeepSeek/OpenAI: prompt_tokens_details.cached_tokens */
+        const RJson *pdet = rjson_obj_get(u, "prompt_tokens_details");
+        if (pdet && pdet->type == RJSON_OBJECT) {
+            const RJson *ck = rjson_obj_get(pdet, "cached_tokens");
+            if (ck && ck->type == RJSON_NUMBER) ss->stats.cached_tokens = (int)ck->u.number;
+        }
     } else {
         const RJson *ot = rjson_obj_get(u, "output_tokens");
         if (ot && ot->type == RJSON_NUMBER) ss->stats.completion_tokens = (int)ot->u.number;

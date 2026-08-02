@@ -192,10 +192,12 @@ class GenerationHandler(
                     parsed.optJSONObject("usage")?.let { u ->
                         val p = u.optInt("prompt_tokens", 0)
                         val c = u.optInt("completion_tokens", 0)
+                        val ck = u.optInt("cached_tokens", 0)
                         if (p > 0 || c > 0) {
                             nativeUsage = TokenUsage(
                                 promptTokens = p,
                                 completionTokens = c,
+                                cachedTokens = ck,
                                 totalTokens = p + c,
                             )
                         }
