@@ -85,6 +85,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatScreen(vm: ChatViewModel) {
     var showSettings by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     ModalNavigationDrawer(
@@ -112,7 +113,9 @@ fun ChatScreen(vm: ChatViewModel) {
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { vm.clearSession() }) { Text("清空") }
+                if (vm.messages.isNotEmpty()) {
+                    TextButton(onClick = { confirmClear = true }) { Text("清空") }
+                }
                 TextButton(onClick = { showSettings = true }) { Text("设置") }
             }
             MessageList(vm, Modifier.weight(1f))
@@ -121,6 +124,22 @@ fun ChatScreen(vm: ChatViewModel) {
     }
     if (showSettings) {
         SettingsDialog(vm, onDismiss = { showSettings = false })
+    }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("清空当前会话？") },
+            text = { Text("会话历史将被清空，此操作不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.clearSession()
+                    confirmClear = false
+                }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -217,7 +236,7 @@ private fun formatDate(ts: Long): String {
 @Composable
 private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
-    LaunchedEffect(vm.messages.size) {
+    LaunchedEffect(vm.messages.size, vm.currentSessionId) {
         if (vm.messages.isNotEmpty()) {
             listState.animateScrollToItem(vm.messages.size - 1)
         }
@@ -419,7 +438,7 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15)
             }
         }
     }
-    // 长按菜单：复制 / 朗读
+    // 长按菜单：复制 / 朗读 / 删除
     DropdownMenu(
         expanded = showMenu,
         onDismissRequest = { showMenu = false },
@@ -438,6 +457,16 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15)
                 dev.rikkahub.ce.DeviceTools.ttsSpeak(msg.text.take(500))
             },
         )
+        if (msg.role == "user" && !msg.streaming) {
+            DropdownMenuItem(
+                text = { Text("🗑 删除此消息", color = MaterialTheme.colorScheme.error) },
+                onClick = {
+                    showMenu = false
+                    val idx = vm.messages.indexOfFirst { it === msg }
+                    if (idx >= 0) vm.deleteMessage(idx)
+                },
+            )
+        }
     }
 }
 

@@ -352,6 +352,14 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         newSession()
     }
 
+    fun deleteMessage(index: Int) {
+        val session = currentSession ?: return
+        if (index in 0 until session.messages.size) {
+            session.messages.removeAt(index)
+            saveSession()
+        }
+    }
+
     fun clearSession() {
         val s = currentSession ?: return
         s.messages.clear()
