@@ -281,3 +281,7 @@
 - buf_append OOM 越界修复(reserve 失败丢弃追加)
 - 确认: header 64KB 上限/chunk 行 64B/SSE 8MB/单退出路径清理完整
 - CI 失败修复: memoryAction non-local return
+
+### 25轮深度优化(第九批) — 已提交
+- DeviceTools.init 接入 RikkaHubApp(重大: 设备工具反调 context 此前从未初始化, 全部失效)
+- 确认: 线程模型(引擎线程→mainHandler桥)/TTS懒加载/工具结果格式
