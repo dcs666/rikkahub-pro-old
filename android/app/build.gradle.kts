@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.Packaging
+import java.util.Base64
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
