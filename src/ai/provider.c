@@ -366,7 +366,7 @@ static const RJsonStreamPathElem P_GOOG_FC[] = {
 /* Google functionCall（完整对象，非分片）：解析 name/args 构造 TOOL_CALL part */
 static void google_finalize_tool_call(RikkaStreamSession *ss) {
     if (!ss->out || !ss->out->msg || ss->tc_args_buf.len == 0) return;
-    Arena *a = arena_create(0);
+    Arena *a = ss->out->arena; /* part 结构/数据必须分配在消息 arena */
     size_t err = 0;
     RJson *v = rjson_parse(a, (const char *)ss->tc_args_buf.data,
                            ss->tc_args_buf.len, &err);
@@ -387,8 +387,6 @@ static void google_finalize_tool_call(RikkaStreamSession *ss) {
                     RJsonOut jo;
                     rjson_out_init(&jo);
                     rjson_write_value(&jo, args);
-                    buf_append(&ss->tc_args_buf, jo.buf, jo.len);
-                    buf_append_byte(&ss->tc_args_buf, '\0');
                     char *ac = (char *)arena_alloc(a, 1, jo.len + 1);
                     if (ac) {
                         memcpy(ac, jo.buf, jo.len);
@@ -408,7 +406,6 @@ static void google_finalize_tool_call(RikkaStreamSession *ss) {
             }
         }
     }
-    arena_destroy(a);
     buf_reset(&ss->tc_args_buf);
 }
 /* OpenAI tool_calls 专用解析（并行多 index；每事件完整解析增量字段） */
