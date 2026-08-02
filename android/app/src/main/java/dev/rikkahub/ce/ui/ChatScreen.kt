@@ -1,5 +1,6 @@
 package dev.rikkahub.ce.ui
 
+import android.net.Uri
 import dev.rikkahub.ce.BuildConfig
 
 import androidx.activity.compose.rememberLauncherForActivityResult
