@@ -96,6 +96,7 @@ class GenerationHandler(
     private val providerManager: ProviderManager,
     private val json: Json,
     private val memoryRepo: MemoryRepository,
+    private val skillManager: me.rerere.rikkahub.data.files.SkillManager,
 ) {
     fun generateText(
         settings: Settings,
@@ -158,6 +159,30 @@ class GenerationHandler(
         if (!effectiveSystemPrompt.isNullOrBlank()) systemBuilder.append(effectiveSystemPrompt)
         if (assistant.enableMemory && !memories.isNullOrEmpty()) {
             systemBuilder.append(buildMemoryPrompt(memories!!))
+        }
+        // skills 列表注入(对齐 turbo createSkillTools 的 systemPrompt)
+        if (assistant.enabledSkills.isNotEmpty()) {
+            val available = skillManager.listSkills().filter { it.name in assistant.enabledSkills }
+            if (available.isNotEmpty()) {
+                systemBuilder.appendLine()
+                systemBuilder.append("**Skills**")
+                systemBuilder.appendLine()
+                systemBuilder.append(
+                    "You have access to the following skills. Use the `use_skill` tool to " +
+                        "load a skill's instructions when the user's request matches.",
+                )
+                systemBuilder.appendLine()
+                systemBuilder.append("<available_skills>")
+                systemBuilder.appendLine()
+                available.forEach { skill ->
+                    systemBuilder.appendLine("  <skill>")
+                    systemBuilder.appendLine("    <name>${skill.name}</name>")
+                    systemBuilder.appendLine("    <description>${skill.description}</description>")
+                    systemBuilder.append("  </skill>")
+                    systemBuilder.appendLine()
+                }
+                systemBuilder.append("</available_skills>")
+            }
         }
         if (systemBuilder.isNotBlank()) {
             history.put(JSONObject().put("role", "system").put("content", systemBuilder.toString()))
