@@ -42,6 +42,8 @@ struct RkToolEnv {
     int (*tts_speak)(const char *text, void *ud);
     char *(*javascript_eval)(const char *code, void *ud);
     char *(*web_search)(const char *query, void *ud);
+    /* skills 根目录（use_skill 读取；NULL = 默认 /skills） */
+    const char *skills_root;
     /* 会话查询（壳层实现；NULL = 工具不可注册） */
     char *(*recent_chats)(int limit, void *ud);                 /* JSON 数组（malloc） */
     char *(*conversation_search)(const char *query, void *ud);  /* JSON 数组（malloc） */

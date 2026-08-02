@@ -599,11 +599,13 @@ static int tool_use_skill(const RkTool *t, const char *args_json, const RkToolEn
             }
         }
     }
-    /* /skills/<name>/<rel> */
-    size_t cap = 8 + strlen(name) + 1 + strlen(rel) + 1;
+    /* <skills_root>/<name>/<rel> */
+    const char *root = (env && env->skills_root && env->skills_root[0])
+                           ? env->skills_root : "/skills";
+    size_t cap = strlen(root) + 1 + strlen(name) + 1 + strlen(rel) + 1;
     char *full = (char *)malloc(cap);
     if (!full) return -1;
-    snprintf(full, cap, "/skills/%s/%s", name, rel);
+    snprintf(full, cap, "%s/%s/%s", root, name, rel);
     int fd = open(full, O_RDONLY);
     if (fd < 0) {
         free(full);

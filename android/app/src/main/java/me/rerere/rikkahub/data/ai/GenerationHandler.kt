@@ -129,6 +129,11 @@ class GenerationHandler(
             .put("base_url", baseUrl)
             .put("api_key", apiKey)
             .put("model", modelId)
+        // skills 根目录(use_skill 工具读取; Android: filesDir/skills)
+        providerJson.put(
+            "skills_root",
+            java.io.File(context.filesDir, "skills").absolutePath,
+        )
         // 记忆库目标(对齐 turbo: enableMemory 时 memory_tool 反调落库)
         if (assistant.enableMemory) {
             providerJson.put(

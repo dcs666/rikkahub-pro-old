@@ -757,6 +757,9 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     const char *aid = jstr(pv, "assistant_id");
     if (aid && aid[0]) jni_ctx_mem_aid = strdup(aid);
 
+    /* skills 根目录(Android: filesDir/skills; NULL 用默认 /skills) */
+    const char *skills_root = jstr(pv, "skills_root");
+
     const RikkaMessage *msgs[64];
     size_t n_msgs = 0;
     if (parse_history(a, hj, msgs, 64, &n_msgs) != 0) {
@@ -781,6 +784,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.memory_delete = jni_memory_delete;
     tenv.calendar_create = jni_calendar_create;
     tenv.clipboard_read = jni_clipboard_read;
+    tenv.skills_root = skills_root;
     rk_tools_init(&reg);
     rk_tools_register_builtin(&reg, &tenv);
 
