@@ -653,16 +653,46 @@ static int tool_use_skill(const RkTool *t, const char *args_json, const RkToolEn
 static int tool_ask_user(const RkTool *t, const char *args_json, const RkToolEnv *env,
                          char **result) {
     (void)t;
+    /* turbo 对齐: questions 数组(每项 id/question/options)。取第一项展示，
+     * 完整多问题 UI 待办(DeviceTools.askUser 单问题 Dialog)。 */
     char q[4096];
-    if (rk_tool_arg_str(args_json, "question", q, sizeof(q)) != 0) {
-        if (result) *result = rk_tool_result_error("question is required");
-        return -1;
+    const char *q1 = NULL;
+    size_t q1_len = 0;
+    Arena *ja = arena_create(1024);
+    if (ja) {
+        size_t jerr = 0;
+        RJson *root = rjson_parse(ja, args_json, strlen(args_json), &jerr);
+        if (root) {
+            const RJson *qs = rjson_obj_get(root, "questions");
+            if (qs && qs->type == RJSON_ARRAY && qs->u.arr.count > 0) {
+                const RJson *first = qs->u.arr.items[0];
+                const RJson *qq = rjson_obj_get(first, "question");
+                if (qq && qq->type == RJSON_STRING) {
+                    q1 = qq->u.str.ptr;
+                    q1_len = qq->u.str.len;
+                }
+            }
+        }
+        arena_destroy(ja);
+    }
+    if (!q1) {
+        /* 兼容旧单 question 字段 */
+        if (rk_tool_arg_str(args_json, "question", q, sizeof(q)) != 0) {
+            if (result) *result = rk_tool_result_error("question is required");
+            return -1;
+        }
+        q1 = q;
+        q1_len = strlen(q);
     }
     if (!env || !env->ask_user) {
         if (result) *result = rk_tool_result_error("ask_user unavailable");
         return -1;
     }
-    char *r = env->ask_user(q, env->ud);
+    char qbuf[4096];
+    size_t qn = q1_len < sizeof(qbuf) - 1 ? q1_len : sizeof(qbuf) - 1;
+    memcpy(qbuf, q1, qn);
+    qbuf[qn] = '\0';
+    char *r = env->ask_user(qbuf, env->ud);
     if (!r) { if (result) *result = rk_tool_result_error("ask_user failed"); return -1; }
     *result = r;
     return 0;
@@ -772,7 +802,7 @@ static const RkTool TOOL_ASK_USER = {
     "or confirmation. Each question can optionally provide a list of suggested options for "
     "the user to choose from. The user may select an option or provide their own free-text "
     "answer for each question.",
-    "{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"}},\"required\":[\"question\"]}",
+    "{\"type\":\"object\",\"properties\":{\"questions\":{\"type\":\"array\",\"description\":\"List of questions to ask the user\",\"items\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"question\":{\"type\":\"string\"},\"options\":{\"type\":\"array\"}},\"required\":[\"question\"]}}},\"required\":[\"questions\"]}",
     tool_ask_user,
 };
 
