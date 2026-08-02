@@ -285,3 +285,8 @@
 ### 25轮深度优化(第九批) — 已提交
 - DeviceTools.init 接入 RikkaHubApp(重大: 设备工具反调 context 此前从未初始化, 全部失效)
 - 确认: 线程模型(引擎线程→mainHandler桥)/TTS懒加载/工具结果格式
+
+### 25轮深度优化(第十批) — 已提交
+- askUser 用 Activity context(Dialog 需窗口 token; RikkaHubApp 生命周期跟踪 currentActivity)
+- memory 反调 assistant_id per-call 传递(ud→JniCb.mem_aid; 原全局 jni_ctx_mem_aid 多会话竞态)
+- 确认: 工具反调链路(env->ud)/内存/引用清理
