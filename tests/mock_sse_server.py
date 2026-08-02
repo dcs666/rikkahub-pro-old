@@ -498,6 +498,32 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, ValueError):
                 pass
+        elif self.path == '/claude_tool':
+            # Claude 工具调用回放（tool_use + input_json_delta 流式累积）
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            evs = [
+                'event: message_start\ndata: {"type":"message_start","message":{"id":"m1"}}\n\n',
+                'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"get_time_info"}}\n\n',
+                'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"time\\":"}}\n\n',
+                'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\\"now\\"}"}}\n\n',
+                'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+                'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}\n\n',
+            ]
+            for e in evs:
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+            try:
+                self.wfile.write(b'0\r\n\r\n')
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         elif self.path == '/google':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')

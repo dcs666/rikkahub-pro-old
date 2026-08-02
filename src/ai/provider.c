@@ -361,6 +361,14 @@ static const RJsonStreamPathElem P_OAI_TC_ARGS[] = {
 static const RJsonStreamPathElem P_OAI_TC_ID[] = {
     {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}},
     {0, {.key = "tool_calls"}}, {1, {.index = 0}}, {0, {.key = "id"}}, {-2, {0}}};
+/* Claude tool_calls: content_block_start 的 content_block.name/id;
+ * content_block_delta 的 delta.partial_json（流式累积） */
+static const RJsonStreamPathElem P_CLAUDE_TC_NAME[] = {
+    {0, {.key = "content_block"}}, {0, {.key = "name"}}, {-2, {0}}};
+static const RJsonStreamPathElem P_CLAUDE_TC_ID[] = {
+    {0, {.key = "content_block"}}, {0, {.key = "id"}}, {-2, {0}}};
+static const RJsonStreamPathElem P_CLAUDE_TC_JSON[] = {
+    {0, {.key = "delta"}}, {0, {.key = "partial_json"}}, {-2, {0}}};
 
 static void sink_text(void *ctx, const char *data, size_t len) {
     RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
@@ -431,12 +439,28 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
         }
         break;
     case RIKKA_PROVIDER_CLAUDE:
-        if (strcmp(event, "content_block_delta") == 0) {
+        if (strcmp(event, "content_block_start") == 0) {
+            /* 新块：若为 tool_use 则重置调用缓冲（sink 仅覆盖 name/id） */
+            fprintf(stderr, "DBG cbs: id_len=%zu name_len=%zu\n", ss->tc_id_buf.len, ss->tc_name_buf.len);
+            run_extract(ss->js_tc_name, data, len);
+            fprintf(stderr, "DBG cbs after name: id_len=%zu name_len=%zu\n", ss->tc_id_buf.len, ss->tc_name_buf.len);
+            run_extract(ss->js_tc_id, data, len);
+            fprintf(stderr, "DBG cbs after id: id_len=%zu name_len=%zu\n", ss->tc_id_buf.len, ss->tc_name_buf.len);
+        } else if (strcmp(event, "content_block_delta") == 0) {
             buf_reset(&ss->type_buf);
             run_extract(ss->js_type, data, len);
             int is_thinking = ss->type_buf.len >= 8 &&
                               memcmp(ss->type_buf.data, "thinking", 8) == 0;
-            run_extract(is_thinking ? ss->js_reason : ss->js_text, data, len);
+            int is_json = ss->type_buf.len >= 15 &&
+                          memcmp(ss->type_buf.data, "input_json_delta", 15) == 0;
+            if (is_json) {
+                run_extract(ss->js_tc_args, data, len); /* partial_json 累积 */
+            } else if (!is_thinking && ss->type_buf.len >= 9 &&
+                       memcmp(ss->type_buf.data, "text_delta", 9) == 0) {
+                run_extract(ss->js_text, data, len);
+            } else if (is_thinking) {
+                run_extract(ss->js_reason, data, len);
+            }
         } else if (strcmp(event, "error") == 0) {
             ss->stats.error_events++;
         }
@@ -637,6 +661,9 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
             rjson_stream_set_path(ss->js_type, P_CLAUDE_TYPE);
             rjson_stream_set_path(ss->js_text, P_CLAUDE_TEXT);
             rjson_stream_set_path(ss->js_reason, P_CLAUDE_THINK);
+            rjson_stream_set_path(ss->js_tc_name, P_CLAUDE_TC_NAME);
+            rjson_stream_set_path(ss->js_tc_id, P_CLAUDE_TC_ID);
+            rjson_stream_set_path(ss->js_tc_args, P_CLAUDE_TC_JSON);
             break;
         case RIKKA_PROVIDER_GOOGLE:
             rjson_stream_set_path(ss->js_text, P_GOOG_TEXT);

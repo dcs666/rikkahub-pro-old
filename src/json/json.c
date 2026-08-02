@@ -515,6 +515,7 @@ static void compute_match(RJsonStream *s) {
     if (f->kind == 1) { /* array */
         m = e->is_index && e->u.index == f->index;
     } else {
+        fprintf(stderr, "path_key=[%s] strcmp=%d key_ready=%d\n", e->u.key, strcmp(f->key, e->u.key), f->key_ready);
         m = (!e->is_index) && f->key_ready && strcmp(f->key, e->u.key) == 0;
     }
     s->pending_match = m ? d : 0;
@@ -599,7 +600,7 @@ RJsonStreamStatus rjson_stream_feed(RJsonStream *s, const char *data, size_t len
         case ST_VALUE: {
             if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
             int m = value_match(s);
-            if (ch == '{' || ch == '[') {
+                if (ch == '{' || ch == '[') {
                 if (m == (int)s->path_len && s->path_len > 0) {
                     /* 目标是容器：捕获整棵子树原始字节 */
                     s->cap_raw_depth = 1;
@@ -681,6 +682,7 @@ RJsonStreamStatus rjson_stream_feed(RJsonStream *s, const char *data, size_t len
                     size_t room = RJSON_STREAM_KEY_MAX - top(s)->key_len;
                     if (room == 0) {
                         /* 键超长：不再收集，标记结束（匹配必然失败，正常跳过） */
+                        top(s)->key[top(s)->key_len] = '\0';
                         top(s)->key_ready = 1;
                     } else {
                         if (total > room) total = room;
@@ -695,6 +697,7 @@ RJsonStreamStatus rjson_stream_feed(RJsonStream *s, const char *data, size_t len
             }
             if (ch == '"') {
                 if (in_key(s)) {
+                    top(s)->key[top(s)->key_len] = '\0';
                     top(s)->key_ready = 1;
                     s->state = ST_OBJ_COLON;
                 } else {

@@ -482,6 +482,51 @@ TEST(ocr_via_provider) {
     stop_mock_server();
 }
 
+TEST(stream_claude_tool) {
+    if (getenv("CI")) {
+        printf("  [skip: CI environment]\n");
+        return;
+    }
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_CLAUDE, base, "test-key",
+                            "claude-3-5-sonnet", 4096, 0, NULL, {0}};
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "what time");
+    RikkaStream out;
+    rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+    RikkaStreamSession *ss = rp_session_create(&cfg);
+    Buf body;
+    buf_init(&body);
+    ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 1, 1, &body));
+    int status = 0;
+    ASSERT_EQ_INT(0, rp_stream_start(ss, "/claude_tool", (const char *)body.data,
+                                     body.len, &out, 15000, &status));
+    ASSERT_EQ_INT(0, rp_stream_pump(ss, 15000));
+    rstream_freeze(&out);
+    /* 应解析出 TOOL_CALL part（name/args 流式累积） */
+    int found = 0;
+    for (size_t i = 0; i < out.msg->part_count; i++) {
+        const RikkaPart *p = &out.msg->parts[i];
+        if (p->type == RIKKA_PART_TOOL_CALL) {
+            found = 1;
+            ASSERT(strcmp(p->tool_name, "get_time_info") == 0);
+            ASSERT(strstr(p->data, "\"time\"") != NULL);
+            ASSERT(strstr(p->data, "now") != NULL);
+            ASSERT(strcmp(p->tool_id, "toolu_1") == 0);
+        }
+    }
+    ASSERT_EQ_INT(1, found);
+    rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
+    buf_free(&body);
+    rp_session_destroy(ss);
+    arena_destroy(a);
+    stop_mock_server();
+}
+
 int run_provider_suite(void) {
     const RikkaTest tests[] = {
         RIKKA_TEST_REGISTER(provider, build_openai),
@@ -499,6 +544,7 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, stream_google),
         RIKKA_TEST_REGISTER(provider, stream_bad_sse_no_deadlock),
         RIKKA_TEST_REGISTER(provider, ocr_via_provider),
+        RIKKA_TEST_REGISTER(provider, stream_claude_tool),
     };
     return run_suite("provider", tests, sizeof(tests) / sizeof(tests[0]));
 }
