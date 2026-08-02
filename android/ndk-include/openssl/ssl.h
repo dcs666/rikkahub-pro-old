@@ -19,6 +19,7 @@ typedef struct x509_store_st X509_STORE;
 typedef struct ssl_session_st SSL_SESSION;
 
 #define SSL_VERIFY_PEER 1
+#define SSL_VERIFY_NONE 0
 #define TLS1_2_VERSION 0x0303
 
 enum {
@@ -41,6 +42,7 @@ const SSL_METHOD *TLS_client_method(void);
 SSL_CTX *SSL_CTX_new(const SSL_METHOD *meth);
 void SSL_CTX_free(SSL_CTX *ctx);
 void SSL_CTX_set_default_verify_paths(SSL_CTX *ctx);
+int SSL_CTX_load_verify_locations(SSL_CTX *ctx, const char *cafile, const char *capath);
 void SSL_CTX_set_verify(SSL_CTX *ctx, int mode, void *callback);
 /* 3.x 中 set_min/max_proto_version 是宏 → SSL_CTX_ctrl, 不能声明为函数
    (libssl.so 不导出该符号, 会 dlopen 失败) */
