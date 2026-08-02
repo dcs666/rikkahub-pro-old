@@ -62,7 +62,7 @@ TEST(chat_tool_loop) {
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
     RikkaProviderCfg pcfg = {RIKKA_PROVIDER_OPENAI, base, "test-key",
-                             "mock-model", 100, 0, NULL, {0}};
+                             "mock-model", 100, 0, NULL, {0}, NULL, 0};
 
     /* 工具集：get_time_info 可用 */
     RkToolRegistry reg;
@@ -87,7 +87,7 @@ TEST(chat_tool_loop) {
     cb.on_tool_result = on_tool_result;
 
     char *final_text = NULL, *err = NULL;
-    ASSERT_EQ_INT(0, rk_chat_run(&cfg, &cb, msgs, 1, &final_text, &err));
+    ASSERT_EQ_INT(0, rk_chat_run(&cfg, &cb, msgs, 1, &final_text, &err, NULL));
     /* 第一轮请求工具 → 第二轮出最终文本 */
     ASSERT_EQ_INT(1, rec.tool_calls);
     ASSERT_EQ_INT(1, rec.tool_results);
@@ -115,7 +115,7 @@ TEST(chat_plain_stream) {
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
     RikkaProviderCfg pcfg = {RIKKA_PROVIDER_OPENAI, base, "test-key",
-                             "mock-model", 100, 0, NULL, {0}};
+                             "mock-model", 100, 0, NULL, {0}, NULL, 0};
     RkChatConfig cfg = {0};
     cfg.provider = pcfg;
     cfg.timeout_ms = 15000;
@@ -128,7 +128,7 @@ TEST(chat_plain_stream) {
     cb.ud = &rec;
     cb.on_delta = on_delta;
     char *final_text = NULL, *err = NULL;
-    ASSERT_EQ_INT(0, rk_chat_run(&cfg, &cb, msgs, 1, &final_text, &err));
+    ASSERT_EQ_INT(0, rk_chat_run(&cfg, &cb, msgs, 1, &final_text, &err, NULL));
     ASSERT_EQ_INT(0, rec.tool_calls);
     ASSERT_NOT_NULL(final_text);
     /* mock /openai 回放内容（Hello ... world） */
@@ -185,7 +185,7 @@ TEST(chat_cancel_mid_stream) {
     char base[64];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
     RikkaProviderCfg pcfg = {RIKKA_PROVIDER_OPENAI, base, "test-key",
-                             "mock-model", 100, 0, NULL, {0}};
+                             "mock-model", 100, 0, NULL, {0}, NULL, 0};
     RkChatConfig cfg = {0};
     cfg.provider = pcfg;
     cfg.timeout_ms = 30000;

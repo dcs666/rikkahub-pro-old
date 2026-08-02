@@ -17,6 +17,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
@@ -110,6 +112,10 @@ class GenerationHandler(
             .put("base_url", baseUrl)
             .put("api_key", apiKey)
             .put("model", modelId)
+        // 思考模式(与 turbo 的 ai 模块逻辑对齐: DeepSeek/Moonshot/NVIDIA/opencode/默认)
+        val (effort, thinking) = reasoningArgs(baseUrl, assistant.reasoningLevel)
+        if (effort != null) providerJson.put("reasoning_effort", effort)
+        if (thinking) providerJson.put("thinking", true)
 
         val history = JSONArray()
         if (!conversationSystemPrompt.isNullOrBlank()) {
@@ -145,6 +151,7 @@ class GenerationHandler(
 
         // ---- 回调事件（文件级 Evt） ----
         val channel = Channel<Evt>(Channel.UNLIMITED)
+        var nativeUsage: TokenUsage? = null
         val toolSeq = AtomicInteger(0)
         val callback = object : ChatCallback {
             override fun onDelta(kind: Int, text: String) {
@@ -180,6 +187,19 @@ class GenerationHandler(
                 }
                 if (parsed != null && !parsed.optBoolean("ok", true)) {
                     channel.trySend(Evt.Finish(false, parsed.optString("error", "engine error")))
+                } else if (parsed != null) {
+                    // token 用量统计(引擎流式 usage)
+                    parsed.optJSONObject("usage")?.let { u ->
+                        val p = u.optInt("prompt_tokens", 0)
+                        val c = u.optInt("completion_tokens", 0)
+                        if (p > 0 || c > 0) {
+                            nativeUsage = TokenUsage(
+                                promptTokens = p,
+                                completionTokens = c,
+                                totalTokens = p + c,
+                            )
+                        }
+                    }
                 }
             } catch (e: Throwable) {
                 logErr(TAG, "nativeChat failed", e)
@@ -257,6 +277,10 @@ class GenerationHandler(
             }
         }
         job.join()
+        // 引擎返回 JSON 里的 usage(Finish 事件后到达) → 重新 emit 带用量统计的最终消息
+        nativeUsage?.let { usage ->
+            emit(emitChunk(messages, currentParts, usage))
+        }
         logMsg(TAG, "generateText done: parts=${currentParts.size}")
         }
         processingStatus.value = null
@@ -305,8 +329,40 @@ class GenerationHandler(
         if (text != null) emit(text) else error("translation failed")
     }
 
-    private fun emitChunk(base: List<UIMessage>, parts: List<UIMessagePart>): GenerationChunk {
-        return GenerationChunk.Messages(base + UIMessage(role = MessageRole.ASSISTANT, parts = parts.toList()))
+    private fun emitChunk(
+        base: List<UIMessage>,
+        parts: List<UIMessagePart>,
+        usage: TokenUsage? = null,
+    ): GenerationChunk {
+        return GenerationChunk.Messages(
+            base + UIMessage(role = MessageRole.ASSISTANT, parts = parts.toList(), usage = usage),
+        )
+    }
+
+    /** 思考模式参数(与 turbo ai 模块的 ChatCompletionsAPI 分派对齐)。
+     * 返回 (reasoning_effort, thinking_enabled)。 */
+    private fun reasoningArgs(baseUrl: String, level: ReasoningLevel): Pair<String?, Boolean> {
+        if (level == ReasoningLevel.AUTO && !baseUrl.contains("deepseek")) {
+            return null to false
+        }
+        val host = runCatching { java.net.URI(baseUrl).host ?: "" }.getOrDefault("")
+        return when {
+            host.contains("deepseek") -> when (level) {
+                ReasoningLevel.OFF -> null to false
+                ReasoningLevel.AUTO -> null to true
+                ReasoningLevel.XHIGH -> "max" to true
+                ReasoningLevel.MEDIUM -> "high" to true
+                else -> level.effort to true
+            }
+            host.contains("moonshot") -> null to (level != ReasoningLevel.OFF)
+            host.contains("nvidia") -> when (level) {
+                ReasoningLevel.OFF -> "none" to false
+                ReasoningLevel.XHIGH -> "max" to false
+                else -> "high" to false
+            }
+            host.contains("opencode") -> level.effort to false
+            else -> (if (level.effort == "none") "low" else level.effort) to false
+        }
     }
 }
 

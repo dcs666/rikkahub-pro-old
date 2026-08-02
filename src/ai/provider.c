@@ -233,7 +233,16 @@ int rp_build_request(const RikkaProviderCfg *cfg,
             if (i) buf_append_str(out, ",");
             openai_msg(out, msgs[i]);
         }
-        buf_append_str(out, "]}");
+        buf_append_str(out, "]");
+        /* 思考模式: DeepSeek 等支持 reasoning_effort / thinking */
+        if (cfg->reasoning_effort && cfg->reasoning_effort[0]) {
+            buf_append_str(out, ",\"reasoning_effort\":");
+            jstrz(out, cfg->reasoning_effort);
+        }
+        if (cfg->thinking_enabled) {
+            buf_append_str(out, ",\"thinking\":{\"type\":\"enabled\"}");
+        }
+        buf_append_str(out, "}");
         if (cfg->tools_json && cfg->tools_json[0]) {
             buf_append_str(out, ",\"tools\":");
             buf_append_str(out, cfg->tools_json);
@@ -514,6 +523,27 @@ static void run_extract(RJsonStream *js, const char *data, size_t len) {
     rjson_stream_finish(js);
 }
 
+/* 解析流式 usage(OpenAI 顶层 usage / Anthropic message_delta.usage) */
+static void parse_usage(RikkaStreamSession *ss, const char *data, size_t len,
+                        int openai_style) {
+    Arena *ta = arena_create(0);
+    size_t je = 0;
+    RJson *v = rjson_parse(ta, data, len, &je);
+    if (!v) { arena_destroy(ta); return; }
+    const RJson *u = rjson_obj_get(v, "usage");
+    if (!u || u->type != RJSON_OBJECT) { arena_destroy(ta); return; }
+    if (openai_style) {
+        const RJson *pt = rjson_obj_get(u, "prompt_tokens");
+        const RJson *ct = rjson_obj_get(u, "completion_tokens");
+        if (pt && pt->type == RJSON_NUMBER) ss->stats.prompt_tokens = (int)pt->u.number;
+        if (ct && ct->type == RJSON_NUMBER) ss->stats.completion_tokens = (int)ct->u.number;
+    } else {
+        const RJson *ot = rjson_obj_get(u, "output_tokens");
+        if (ot && ot->type == RJSON_NUMBER) ss->stats.completion_tokens = (int)ot->u.number;
+    }
+    arena_destroy(ta);
+}
+
 static void on_sse_event(void *ctx, const char *event, const char *data, size_t len,
                          const char *id, long long retry_ms) {
     (void)id; (void)retry_ms;
@@ -529,7 +559,10 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
             run_extract(ss->js_reason, data, len);
             /* tool_calls delta（并行多 index 专用解析） */
             oai_parse_tool_calls(ss, data, len);
-
+            /* 流式 usage（DeepSeek/OpenAI 在最后一条 message 的顶层 usage 字段） */
+            if (strstr(data, "\"usage\"")) {
+                parse_usage(ss, data, len, 1);
+            }
         }
         break;
     case RIKKA_PROVIDER_CLAUDE:
@@ -551,6 +584,11 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
                 run_extract(ss->js_text, data, len);
             } else if (is_thinking) {
                 run_extract(ss->js_reason, data, len);
+            }
+        } else if (strcmp(event, "message_delta") == 0) {
+            /* Anthropic 流式 usage: {"type":"message_delta","usage":{"output_tokens":N}} */
+            if (strstr(data, "\"usage\"")) {
+                parse_usage(ss, data, len, 0);
             }
         } else if (strcmp(event, "error") == 0) {
             ss->stats.error_events++;

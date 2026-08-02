@@ -66,6 +66,7 @@ void rk_chat_think_feed(RkThinkState *st, const char *data, size_t len,
  * -1 失败（error_out 为错误详情 malloc，可 NULL）。 */
 int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
                 const RikkaMessage *const *msgs, size_t n,
-                char **final_text_out, char **error_out);
+                char **final_text_out, char **error_out,
+                RikkaSessionStats *stats_out);
 
 #endif /* RIKKA_AI_CHAT_H */

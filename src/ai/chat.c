@@ -170,7 +170,8 @@ static void jstrz_buf(Buf *out, const char *s) {
 
 int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
                 const RikkaMessage *const *msgs, size_t n,
-                char **final_text_out, char **error_out) {
+                char **final_text_out, char **error_out,
+                RikkaSessionStats *stats_out) {
     if (final_text_out) *final_text_out = NULL;
     if (error_out) *error_out = NULL;
     if (!cfg || !msgs || n == 0) return -1;
@@ -242,7 +243,7 @@ int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
         buf_init(&br.out_reason);
         char *detail = NULL;
         rc = rp_chat_stream_cb(&pcfg, arr, work.count, &out, timeout,
-                               delta_bridge, &br, cfg->cancel_flag, NULL,
+                               delta_bridge, &br, cfg->cancel_flag, stats_out,
                                &detail);
         buf_free(&br.out_text);
         buf_free(&br.out_reason);

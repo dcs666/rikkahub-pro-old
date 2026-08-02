@@ -541,6 +541,9 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
                              api_key ? api_key : "",
                              model ? model : "",
                              4096, 0, NULL, {0}};
+    /* 思考模式(DeepSeek 等): reasoning_effort / thinking */
+    pcfg.reasoning_effort = jstr(pv, "reasoning_effort");
+    if (jstr(pv, "thinking")) pcfg.thinking_enabled = 1;
 
     const RikkaMessage *msgs[64];
     size_t n_msgs = 0;
@@ -594,8 +597,10 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
 
     char *final_text = NULL;
     char *chat_err = NULL;
+    RikkaSessionStats cstats;
+    memset(&cstats, 0, sizeof(cstats));
     g_cancel = 0;
-    int rc = err ? -1 : rk_chat_run(&cc, &cbs, msgs, n_msgs, &final_text, &chat_err);
+    int rc = err ? -1 : rk_chat_run(&cc, &cbs, msgs, n_msgs, &final_text, &chat_err, &cstats);
 
     /* 完成回调 */
     jstring ferr = (rc != 0 && chat_err) ? (*env)->NewStringUTF(env, chat_err) : NULL;
@@ -623,6 +628,13 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
             }
         }
         buf_append_byte(&out, '"');
+        if (cstats.prompt_tokens > 0 || cstats.completion_tokens > 0) {
+            char ub[128];
+            int uk = snprintf(ub, sizeof(ub),
+                              ",\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":%d}",
+                              cstats.prompt_tokens, cstats.completion_tokens);
+            buf_append(&out, ub, (size_t)uk);
+        }
         buf_append_str(&out, "}");
     } else {
         buf_append_str(&out, "{\"ok\":false,\"error\":");

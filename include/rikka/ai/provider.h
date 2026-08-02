@@ -39,6 +39,10 @@ typedef struct {
         int base_delay_ms;  /* 0 = 用默认 100 */
         int max_delay_ms;   /* 0 = 用默认 2000 */
     } retry;
+    /* 思考模式（DeepSeek 等）: reasoning_effort="low"/"high"/"max"(NULL=不写);
+     * thinking_enabled=1 时写 thinking:{type:"enabled"} (DeepSeek/Moonshot) */
+    const char *reasoning_effort;
+    int thinking_enabled;
 } RikkaProviderCfg;
 
 /* 构建 chat completion 请求体（stream=1 时含 stream:true）。返回 0 成功 */
@@ -57,6 +61,9 @@ typedef struct {
     uint64_t reasoning_chunks;
     uint64_t error_events;
     uint64_t bytes_received;
+    /* token 用量(流式 usage 解析; 0=未上报) */
+    int prompt_tokens;
+    int completion_tokens;
 } RikkaSessionStats;
 
 RikkaStreamSession *rp_session_create(const RikkaProviderCfg *cfg);
