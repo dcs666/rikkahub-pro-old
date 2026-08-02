@@ -984,6 +984,13 @@ const RikkaSessionStats *rp_session_stats(const RikkaStreamSession *ss) {
 /* B3 重试中间件：仅对"连接失败/5xx"重试（start 阶段，未开始累积无重复风险）；
  * 4xx 与 pump 中途失败不重试（部分内容已累积）。 */
 #define RIKKA_MAX_RETRIES 3
+/* 单调时钟毫秒(请求耗时统计) */
+static long now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long)ts.tv_sec * 1000 + (long)(ts.tv_nsec / 1000000);
+}
+
 int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
                       const RikkaMessage *const *msgs, size_t n,
                       RikkaStream *out, int timeout_ms,
@@ -996,6 +1003,7 @@ int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
     if (rp_build_request(cfg, msgs, n, 1, &body) != 0) { buf_free(&body); return -1; }
     int rc = -1;
     int status = 0;
+    long t0 = now_ms();
     for (int attempt = 0; attempt < RIKKA_MAX_RETRIES; attempt++) {
         if (cancel && *cancel) break; /* 取消 */
         RikkaStreamSession *ss = rp_session_create(cfg);
@@ -1017,6 +1025,10 @@ int rp_chat_stream_cb(const RikkaProviderCfg *cfg,
         rp_session_destroy(ss);
         if (status >= 400 && status < 500) break; /* 4xx 不重试 */
         if (attempt + 1 < RIKKA_MAX_RETRIES) pm_msleep(100L << attempt); /* 指数退避 */
+    }
+    if (stats_out) {
+        stats_out->http_status = status;
+        stats_out->duration_ms = now_ms() - t0;
     }
     buf_free(&body);
     return rc;

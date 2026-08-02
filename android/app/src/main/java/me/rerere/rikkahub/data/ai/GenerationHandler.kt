@@ -20,6 +20,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.Tool
+import me.rerere.common.android.Logging
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
@@ -180,6 +181,22 @@ class GenerationHandler(
                 )
                 // nativeChat 返回后检查结果（防止回调遗漏导致死等）
                 logMsg(TAG, "nativeChat returned: ${nativeResult.take(200)}")
+                // 请求日志(诊断): C 引擎请求摘要写入 App 日志页
+                runCatching {
+                    val rp = JSONObject(nativeResult)
+                    rp.optJSONObject("request")?.let { req ->
+                        Logging.log(
+                            TAG,
+                            "request: POST ${baseUrl} -> ${req.optInt("status")} " +
+                                "(${req.optLong("duration_ms")}ms)" +
+                                (rp.optJSONObject("usage")?.let {
+                                    " | tokens: in=${it.optInt("prompt_tokens")} " +
+                                        "out=${it.optInt("completion_tokens")} " +
+                                        "cached=${it.optInt("cached_tokens")}"
+                                } ?: ""),
+                        )
+                    }
+                }
                 val parsed = try {
                     JSONObject(nativeResult)
                 } catch (_: Exception) {

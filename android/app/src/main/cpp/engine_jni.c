@@ -636,6 +636,13 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
                               cstats.cached_tokens);
             buf_append(&out, ub, (size_t)uk);
         }
+        if (cstats.http_status > 0) {
+            char rb[96];
+            int rk2 = snprintf(rb, sizeof(rb),
+                               ",\"request\":{\"status\":%d,\"duration_ms\":%ld}",
+                               cstats.http_status, cstats.duration_ms);
+            buf_append(&out, rb, (size_t)rk2);
+        }
         buf_append_str(&out, "}");
     } else {
         buf_append_str(&out, "{\"ok\":false,\"error\":");

@@ -65,6 +65,9 @@ typedef struct {
     int prompt_tokens;
     int completion_tokens;
     int cached_tokens;
+    /* 请求日志(诊断): 最后一次 HTTP 状态 + 总耗时(ms) */
+    int http_status;
+    long duration_ms;
 } RikkaSessionStats;
 
 RikkaStreamSession *rp_session_create(const RikkaProviderCfg *cfg);
