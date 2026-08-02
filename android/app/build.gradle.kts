@@ -1,5 +1,4 @@
 import com.android.build.api.dsl.Packaging
-import java.util.Base64
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
@@ -61,38 +60,25 @@ android {
 
     signingConfigs {
         create("release") {
-            // [CE] 优先 GitHub Secrets 注入的正式 keystore
-            val ksB64 = System.getenv("RIKKA_CE_KEYSTORE_B64")
-            if (ksB64 != null) {
-                val ksFile = File(
-                    System.getenv("RUNNER_TEMP") ?: "/tmp",
-                    "rikkahub-ce.keystore",
-                )
-                ksFile.writeBytes(java.util.Base64.getDecoder().decode(ksB64))
-                storeFile = ksFile
-                storePassword = System.getenv("RIKKA_CE_KEYSTORE_PASS")
-                keyAlias = System.getenv("RIKKA_CE_KEY_ALIAS") ?: "rikkahub-ce"
-                keyPassword = System.getenv("RIKKA_CE_KEY_PASS")
-            } else {
-                val localProperties = Properties()
-                val localPropertiesFile = rootProject.file("local.properties")
+            // [CE] keystore 由 CI 解码到 local.properties（RIKKA_CE_* secrets）
+            val localProperties = Properties()
+            val localPropertiesFile = rootProject.file("local.properties")
 
-                if (localPropertiesFile.exists()) {
-                    localProperties.load(FileInputStream(localPropertiesFile))
+            if (localPropertiesFile.exists()) {
+                localProperties.load(FileInputStream(localPropertiesFile))
 
-                    val storeFilePath = localProperties.getProperty("storeFile")
-                    val storePasswordValue = localProperties.getProperty("storePassword")
-                    val keyAliasValue = localProperties.getProperty("keyAlias")
-                    val keyPasswordValue = localProperties.getProperty("keyPassword")
+                val storeFilePath = localProperties.getProperty("storeFile")
+                val storePasswordValue = localProperties.getProperty("storePassword")
+                val keyAliasValue = localProperties.getProperty("keyAlias")
+                val keyPasswordValue = localProperties.getProperty("keyPassword")
 
-                    if (storeFilePath != null && storePasswordValue != null &&
-                        keyAliasValue != null && keyPasswordValue != null
-                    ) {
-                        storeFile = file(storeFilePath)
-                        storePassword = storePasswordValue
-                        keyAlias = keyAliasValue
-                        keyPassword = keyPasswordValue
-                    }
+                if (storeFilePath != null && storePasswordValue != null &&
+                    keyAliasValue != null && keyPasswordValue != null
+                ) {
+                    storeFile = file(storeFilePath)
+                    storePassword = storePasswordValue
+                    keyAlias = keyAliasValue
+                    keyPassword = keyPasswordValue
                 }
             }
         }

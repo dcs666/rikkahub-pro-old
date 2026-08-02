@@ -23,12 +23,22 @@ jobs:
         uses: android-actions/setup-android@v3
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
-      - name: Build release APK (signed)
+      - name: Prepare keystore (RIKKA_CE secrets → local.properties)
         env:
           RIKKA_CE_KEYSTORE_B64: ${{ secrets.RIKKA_CE_KEYSTORE_B64 }}
           RIKKA_CE_KEYSTORE_PASS: ${{ secrets.RIKKA_CE_KEYSTORE_PASS }}
           RIKKA_CE_KEY_ALIAS: ${{ secrets.RIKKA_CE_KEY_ALIAS }}
           RIKKA_CE_KEY_PASS: ${{ secrets.RIKKA_CE_KEY_PASS }}
+        run: |
+          echo "$RIKKA_CE_KEYSTORE_B64" | base64 -d > /tmp/rikkahub-ce.keystore
+          {
+            echo "storeFile=/tmp/rikkahub-ce.keystore"
+            echo "storePassword=$RIKKA_CE_KEYSTORE_PASS"
+            echo "keyAlias=$RIKKA_CE_KEY_ALIAS"
+            echo "keyPassword=$RIKKA_CE_KEY_PASS"
+          } > android/local.properties
+          cat android/local.properties | sed 's/=.*/=<hidden>/'
+      - name: Build release APK (signed)
         run: |
           cd android && ./gradlew :app:assembleRelease --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -100 /tmp/gradle.log; exit 1; }
           ls -la app/build/outputs/apk/release/
