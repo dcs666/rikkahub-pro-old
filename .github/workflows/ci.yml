@@ -59,6 +59,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --build android/build -j2 2>&1 | tee /tmp/android_build.log
           if grep -E 'warning' /tmp/android_build.log; then echo "WARNINGS PRESENT" && exit 1; fi
+          echo "=== DT_NEEDED check (must include libssl.so/libcrypto.so) ==="
+          readelf -d android/build/librikka.so | grep NEEDED
           ls -la android/build/librikka.so
       - name: Build OpenSSL for Android (jniLibs)
         run: bash android/scripts/build_openssl.sh
