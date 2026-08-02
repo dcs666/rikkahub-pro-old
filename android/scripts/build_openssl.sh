@@ -44,7 +44,7 @@ build_abi() {
   local work="/tmp/ossl-$abi"
   echo "Building OpenSSL for $abi ($target)..."
   rm -rf "$work"; mkdir -p "$work"; cd "$work"
-  perl "$SRC/Configure" "$target" -D__ANDROID_API__=26 shared no-tests no-docs --prefix="$work/out" > "/tmp/ossl-$abi-config.log" 2>&1 || {
+  perl "$SRC/Configure" "$target" -D__ANDROID_API__=26 shared no-tests --prefix="$work/out" > "/tmp/ossl-$abi-config.log" 2>&1 || {
     echo "Configure failed for $abi:"; tail -40 "/tmp/ossl-$abi-config.log"; exit 1; }
   # SONAME 去版本号: libssl.so / libcrypto.so (.so.3 不被 AGP 打包)
   sed -i 's/-Wl,-soname,libssl\.so\.3/-Wl,-soname,libssl.so/; s/-Wl,-soname,libcrypto\.so\.3/-Wl,-soname,libcrypto.so/' Makefile
