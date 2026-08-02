@@ -4,6 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import java.util.Base64
+
 android {
     namespace = "dev.rikkahub.ce"
     compileSdk = 34
@@ -17,7 +19,7 @@ android {
                     System.getenv("RUNNER_TEMP") ?: "/tmp",
                     "rikkahub-ce.keystore",
                 )
-                ksFile.writeBytes(java.util.Base64.getDecoder().decode(ksB64))
+                ksFile.writeBytes(Base64.getDecoder().decode(ksB64))
                 storeFile = ksFile
                 storePassword = System.getenv("RIKKA_CE_KEYSTORE_PASS")
                 keyAlias = System.getenv("RIKKA_CE_KEY_ALIAS") ?: "rikkahub-ce"
