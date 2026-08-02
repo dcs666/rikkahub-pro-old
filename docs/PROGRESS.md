@@ -210,3 +210,28 @@
   SSE 8MB 上限/图片 16MB 限制/ExceptionClear —— 均已在 53ed1d6/81cb044 提交
 - 待 CI(53ed1d6 → 81cb044)全绿 → 打 tag v0.7.8-ce 发布(版本号已升 0.7.8/708)
 - 发布验证: APK 下载后 zipfile 检查 librikka.so/libssl.so/libcrypto.so
+
+### 25轮深度优化(发布前第三批) — 全部已提交, 53a76f4 验证中
+**重大功能缺口修复(移植丢失):**
+- 多模态图片直传: content://(PhotoPicker 主流)/file:/data:/裸路径 全格式进引擎
+  (原只传 http URL → 支持 IMAGE 的模型本地图片全部丢失);
+  C 引擎加 image_data data:URI 分支; content:// 复制 cacheDir + 16MB 限制
+- OcrTransformer content:// 支持(不支持 IMAGE 模型 OCR 流程补齐)
+- DocumentAsPromptTransformer content:// 支持(SAF 文档不再丢失; +KoinComponent)
+- system prompt 补齐: assistant.systemPrompt/allowConversationSystemPrompt/enableMemory
+  记忆注入(buildMemoryPrompt)/contextMessageLimit 截断(limitContext) — 原 CE 版全丢
+- search_web JNI 反调桥(DeviceTools.webSearch → SearchService.runBlocking;
+  引擎 TOOL_SEARCH_WEB 早已定义但 env->web_search 反调缺失从未注册)
+- memory_tool 反调落库(MemoryRepository; assistant_id 经 providerJson;
+  useGlobalMemory → GLOBAL_MEMORY_ID)
+- **设备工具注册(重大): ask_user/clipboard_tool/text_to_speech/calendar_query/
+  get_screen_time/eval_javascript — 反调桥早已存在但从未注册为工具(模型看不到)**
+**健壮性:**
+- JSON 转义统一 jesc(6 处循环)补 \t/\b/\f/控制字符 \uXXXX(防 Kotlin 解析失败)
+- jni_delta 大块不截断(4096 曾丢流式内容)+ malloc 失败 Detach 防线程泄漏
+- baseUrl 尾斜杠去重 / Host 头非默认端口带端口 / SSE data 8MB 上限
+**确认/待办:**
+- 设备工具 6 个全部反调对齐; calendar_create 反调缺失(待办)
+- MCP Android 接线待办(引擎 mcp.c 完备, engine_jni 未接线)
+- 建议生成/ProviderConnectionTester 仍走 JVM 路径(C 化待办)
+- IPv6 URL 不支持(罕见)
