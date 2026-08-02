@@ -18,23 +18,36 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.memory.MemoryRepository
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.utils.applyPlaceholders
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import dev.rikkahub.ce.Engine
 import dev.rikkahub.ce.ChatCallback
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
 
 private const val TAG = "GenerationHandler(CE)"
+
+/* C 引擎回调事件（文件级，Kotlin 不允许局部 interface） */
+private sealed interface Evt {
+    class Delta(val kind: Int, val text: String) : Evt
+    class ToolCall(val name: String, val args: String) : Evt
+    class ToolResult(val name: String, val result: String) : Evt
+    class Finish(val ok: Boolean, val err: String?) : Evt
+}
 
 sealed interface GenerationChunk {
     data class Messages(
@@ -110,31 +123,26 @@ class GenerationHandler(
             }
         }
 
-        // ---- 回调事件 ----
-        sealed interface Evt
-        class DeltaEvt(val kind: Int, val text: String) : Evt
-        class ToolCallEvt(val name: String, val args: String) : Evt
-        class ToolResultEvt(val name: String, val result: String) : Evt
-        class FinishEvt(val ok: Boolean, val err: String?) : Evt
-
+        // ---- 回调事件（文件级 Evt） ----
         val channel = Channel<Evt>(Channel.UNLIMITED)
         val toolSeq = AtomicInteger(0)
         val callback = object : ChatCallback {
             override fun onDelta(kind: Int, text: String) {
-                channel.trySend(DeltaEvt(kind, text))
+                channel.trySend(Evt.Delta(kind, text))
             }
             override fun onToolCall(name: String, args: String) {
-                channel.trySend(ToolCallEvt(name, args))
+                channel.trySend(Evt.ToolCall(name, args))
             }
             override fun onToolResult(name: String, result: String) {
-                channel.trySend(ToolResultEvt(name, result))
+                channel.trySend(Evt.ToolResult(name, result))
             }
             override fun onFinish(ok: Boolean, error: String?) {
-                channel.trySend(FinishEvt(ok, error))
+                channel.trySend(Evt.Finish(ok, error))
             }
         }
 
-        // ---- C 引擎生成（IO 线程阻塞） ----
+        // ---- C 引擎生成（IO 线程阻塞）+ 事件消费 ----
+        kotlinx.coroutines.coroutineScope {
         val job = launch(Dispatchers.IO) {
             try {
                 Engine.nativeChat(
@@ -145,7 +153,7 @@ class GenerationHandler(
                 )
             } catch (e: Throwable) {
                 Log.e(TAG, "nativeChat failed", e)
-                channel.trySend(FinishEvt(false, e.message ?: "engine error"))
+                channel.trySend(Evt.Finish(false, e.message ?: "engine error"))
             }
         }
 
@@ -154,7 +162,7 @@ class GenerationHandler(
         while (true) {
             val evt = channel.receiveCatching().getOrNull() ?: break
             when (evt) {
-                is DeltaEvt -> {
+                is Evt.Delta -> {
                     if (evt.kind == 1) {
                         // reasoning
                         val last = currentParts.lastOrNull()
@@ -175,7 +183,7 @@ class GenerationHandler(
                     }
                     emitChunk(messages, currentParts).let { emit(it) }
                 }
-                is ToolCallEvt -> {
+                is Evt.ToolCall -> {
                     currentParts.add(
                         UIMessagePart.Tool(
                             toolCallId = "tool-${toolSeq.incrementAndGet()}",
@@ -186,7 +194,7 @@ class GenerationHandler(
                     )
                     emitChunk(messages, currentParts).let { emit(it) }
                 }
-                is ToolResultEvt -> {
+                is Evt.ToolResult -> {
                     val idx = currentParts.indexOfLast {
                         it is UIMessagePart.Tool && it.toolName == evt.name && !it.isExecuted
                     }
@@ -198,7 +206,7 @@ class GenerationHandler(
                     }
                     emitChunk(messages, currentParts).let { emit(it) }
                 }
-                is FinishEvt -> {
+                is Evt.Finish -> {
                     if (!evt.ok && currentParts.isEmpty()) {
                         currentParts.add(UIMessagePart.Text(evt.err ?: "生成失败"))
                         emitChunk(messages, currentParts).let { emit(it) }
@@ -208,6 +216,7 @@ class GenerationHandler(
             }
         }
         job.join()
+        }
         processingStatus.value = null
         Log.i(TAG, "generateText done: parts=${currentParts.size}")
     }
@@ -218,37 +227,72 @@ class GenerationHandler(
 
     fun translateText(
         settings: Settings,
-        model: Model,
-        text: String,
-        targetLanguage: String,
+        sourceText: String,
+        targetLanguage: Locale,
+        onStreamUpdate: ((String) -> Unit)? = null
     ): Flow<String> = flow {
-        val provider = model.findProvider(settings.providers) ?: error("Provider not found")
-        val providerJson = JSONObject()
-            .put("base_url", provider.baseUrl.trimEnd('/'))
-            .put("api_key", provider.apiKey)
-            .put("model", model.id)
-        val prompt = "Translate the following text to $targetLanguage. Output only the translation:\n\n$text"
-        val history = JSONArray()
-            .put(JSONObject().put("role", "user").put("content", prompt))
-        val result = withContext(Dispatchers.IO) {
-            Engine.nativeChat(
-                providerJson.toString(),
-                history.toString(),
-                null,
-                object : ChatCallback {
-                    override fun onDelta(kind: Int, text: String) {}
-                    override fun onToolCall(name: String, args: String) {}
-                    override fun onToolResult(name: String, result: String) {}
-                    override fun onFinish(ok: Boolean, error: String?) {}
-                },
+        val model = settings.providers.findModelById(settings.translateModeId)
+            ?: error("Translation model not found")
+        val provider = model.findProvider(settings.providers)
+            ?: error("Translation provider not found")
+
+        val providerHandler = providerManager.getProviderByType(provider)
+
+        if (!ModelRegistry.QWEN_MT.match(model.modelId)) {
+            // Use regular translation with prompt
+            val prompt = settings.translatePrompt.applyPlaceholders(
+                "source_text" to sourceText,
+                "target_lang" to targetLanguage.toString(),
             )
+
+            var messages = listOf(UIMessage.user(prompt))
+            var translatedText = ""
+
+            providerHandler.streamText(
+                providerSetting = provider,
+                messages = messages,
+                params = TextGenerationParams(
+                    model = model,
+                    reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
+                ),
+            ).collect { chunk ->
+                messages = messages.handleMessageChunk(chunk)
+                translatedText = messages.lastOrNull()?.toText() ?: ""
+
+                if (translatedText.isNotBlank()) {
+                    onStreamUpdate?.invoke(translatedText)
+                    emit(translatedText)
+                }
+            }
+        } else {
+            // Use Qwen MT model with special translation options
+            val messages = listOf(UIMessage.user(sourceText))
+            val chunk = providerHandler.generateText(
+                providerSetting = provider,
+                messages = messages,
+                params = TextGenerationParams(
+                    model = model,
+                    temperature = 0.3f,
+                    topP = 0.95f,
+                    customBody = listOf(
+                        CustomBody(
+                            key = "translation_options",
+                            value = buildJsonObject {
+                                put("source_lang", JsonPrimitive("auto"))
+                                put(
+                                    "target_lang",
+                                    JsonPrimitive(targetLanguage.getDisplayLanguage(Locale.ENGLISH))
+                                )
+                            }
+                        )
+                    )
+                ),
+            )
+            val translatedText = chunk.choices.firstOrNull()?.message?.toText() ?: ""
+
+            if (translatedText.isNotBlank()) {
+                onStreamUpdate?.invoke(translatedText)
+                emit(translatedText)
+            }
         }
-        val parsed = try {
-            JSONObject(result)
-        } catch (_: Exception) {
-            null
-        }
-        val text2 = parsed?.optString("text")
-        if (text2 != null) emit(text2) else error("translation failed")
-    }
-}
+    }.flowOn(Dispatchers.IO)
