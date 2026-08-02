@@ -42,7 +42,15 @@ SSL_CTX *SSL_CTX_new(const SSL_METHOD *meth);
 void SSL_CTX_free(SSL_CTX *ctx);
 void SSL_CTX_set_default_verify_paths(SSL_CTX *ctx);
 void SSL_CTX_set_verify(SSL_CTX *ctx, int mode, void *callback);
-int SSL_CTX_set_min_proto_version(SSL_CTX *ctx, long version);
+/* 3.x 中 set_min/max_proto_version 是宏 → SSL_CTX_ctrl, 不能声明为函数
+   (libssl.so 不导出该符号, 会 dlopen 失败) */
+long SSL_CTX_ctrl(SSL_CTX *ctx, int cmd, long larg, void *parg);
+#define SSL_CTRL_SET_MIN_PROTO_VERSION 123
+#define SSL_CTRL_SET_MAX_PROTO_VERSION 124
+#define SSL_CTX_set_min_proto_version(ctx, version) \
+    SSL_CTX_ctrl((ctx), SSL_CTRL_SET_MIN_PROTO_VERSION, (long)(version), NULL)
+#define SSL_CTX_set_max_proto_version(ctx, version) \
+    SSL_CTX_ctrl((ctx), SSL_CTRL_SET_MAX_PROTO_VERSION, (long)(version), NULL)
 
 SSL *SSL_new(SSL_CTX *ctx);
 void SSL_free(SSL *ssl);
