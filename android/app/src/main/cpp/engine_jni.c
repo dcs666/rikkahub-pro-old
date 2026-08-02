@@ -193,6 +193,30 @@ static int parse_history(Arena *a, const char *history_json,
     return n == 0 ? -1 : 0;
 }
 
+/* JSON 字符串转义(追加到 Buf): 引号/反斜杠/全部控制字符 */
+static void jesc(Buf *out, const char *s) {
+    for (const char *q = s; *q; q++) {
+        unsigned char ch = (unsigned char)*q;
+        switch (ch) {
+            case '"':  buf_append_str(out, "\\\""); break;
+            case '\\': buf_append_str(out, "\\\\"); break;
+            case '\n': buf_append_str(out, "\\n"); break;
+            case '\r': buf_append_str(out, "\\r"); break;
+            case '\t': buf_append_str(out, "\\t"); break;
+            case '\b': buf_append_str(out, "\\b"); break;
+            case '\f': buf_append_str(out, "\\f"); break;
+            default:
+                if (ch < 0x20) {
+                    char ub[8];
+                    int uk = snprintf(ub, sizeof(ub), "\\u%04x", ch);
+                    buf_append(out, ub, (size_t)uk);
+                } else {
+                    buf_append_byte(out, ch);
+                }
+        }
+    }
+}
+
 /* ---------- 设备工具（JNI 反调 Kotlin DeviceTools） ---------- */
 
 static jclass g_dev_cls = NULL;
@@ -512,36 +536,14 @@ Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
     if (rc == 0 && text) {
         buf_append_str(&out, "{\"ok\":true,\"text\":");
         buf_append_byte(&out, '"');
-        for (const char *q = text; *q; q++) {
-            if (*q == '"' || *q == '\\') {
-                buf_append_byte(&out, '\\');
-                buf_append_byte(&out, (uint8_t)*q);
-            } else if (*q == '\n') {
-                buf_append_str(&out, "\\n");
-            } else if (*q == '\r') {
-                buf_append_str(&out, "\\r");
-            } else if (*q == '\t') {
-                buf_append_str(&out, "\\t");
-            } else {
-                buf_append_byte(&out, (uint8_t)*q);
-            }
-        }
+                jesc(&out, text);
         buf_append_byte(&out, '"');
         buf_append_str(&out, "}");
     } else {
         const char *msg = (detail && detail[0]) ? detail : "ocr failed";
         buf_append_str(&out, "{\"ok\":false,\"error\":");
         buf_append_byte(&out, '"');
-        for (const char *q = msg; *q; q++) {
-            if (*q == '"' || *q == '\\') {
-                buf_append_byte(&out, '\\');
-                buf_append_byte(&out, (uint8_t)*q);
-            } else if (*q == '\n') {
-                buf_append_str(&out, "\\n");
-            } else {
-                buf_append_byte(&out, (uint8_t)*q);
-            }
-        }
+                jesc(&out, msg);
         buf_append_byte(&out, '"');
         buf_append_str(&out, "}");
     }
@@ -619,30 +621,14 @@ Java_dev_rikkahub_ce_Engine_nativeGenerateTitle(JNIEnv *env, jclass cls,
     if (text && text[0]) {
         buf_append_str(&out_json, "{\"ok\":true,\"title\":");
         buf_append_byte(&out_json, '"');
-        for (const char *q = text; *q; q++) {
-            if (*q == '"' || *q == '\\') {
-                buf_append_byte(&out_json, '\\');
-                buf_append_byte(&out_json, (uint8_t)*q);
-            } else {
-                buf_append_byte(&out_json, (uint8_t)*q);
-            }
-        }
+        jesc(&out_json, text);
         buf_append_byte(&out_json, '"');
         buf_append_str(&out_json, "}");
     } else {
         const char *msg = (detail && detail[0]) ? detail : "title generation failed";
         buf_append_str(&out_json, "{\"ok\":false,\"error\":");
         buf_append_byte(&out_json, '"');
-        for (const char *q = msg; *q; q++) {
-            if (*q == '"' || *q == '\\') {
-                buf_append_byte(&out_json, '\\');
-                buf_append_byte(&out_json, (uint8_t)*q);
-            } else if (*q == '\n') {
-                buf_append_str(&out_json, "\\n");
-            } else {
-                buf_append_byte(&out_json, (uint8_t)*q);
-            }
-        }
+                jesc(&out_json, msg);
         buf_append_byte(&out_json, '"');
         buf_append_str(&out_json, "}");
     }
@@ -771,20 +757,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     if (rc == 0 && final_text) {
         buf_append_str(&out, "{\"ok\":true,\"text\":");
         buf_append_byte(&out, '"');
-        for (const char *q = final_text; *q; q++) {
-            if (*q == '"' || *q == '\\') {
-                buf_append_byte(&out, '\\');
-                buf_append_byte(&out, (uint8_t)*q);
-            } else if (*q == '\n') {
-                buf_append_str(&out, "\\n");
-            } else if (*q == '\r') {
-                buf_append_str(&out, "\\r");
-            } else if (*q == '\t') {
-                buf_append_str(&out, "\\t");
-            } else {
-                buf_append_byte(&out, (uint8_t)*q);
-            }
-        }
+                jesc(&out, final_text);
         buf_append_byte(&out, '"');
         if (cstats.prompt_tokens > 0 || cstats.completion_tokens > 0) {
             char ub[192];
@@ -807,16 +780,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
         jstring es = (*env)->NewStringUTF(env, chat_err ? chat_err : (err ? err : "chat failed"));
         const char *es_c = (*env)->GetStringUTFChars(env, es, NULL);
         buf_append_byte(&out, '"');
-        for (const char *q = es_c; *q; q++) {
-            if (*q == '"' || *q == '\\') {
-                buf_append_byte(&out, '\\');
-                buf_append_byte(&out, (uint8_t)*q);
-            } else if (*q == '\n') {
-                buf_append_str(&out, "\\n");
-            } else {
-                buf_append_byte(&out, (uint8_t)*q);
-            }
-        }
+                jesc(&out, es_c);
         buf_append_byte(&out, '"');
         buf_append_str(&out, "}");
         (*env)->ReleaseStringUTFChars(env, es, es_c);
