@@ -446,15 +446,15 @@ object DeviceTools {
         return runCatching {
             val memoryRepo = org.koin.java.KoinJavaComponent.getKoin()
                 .get<me.rerere.rikkahub.data.repository.MemoryRepository>()
-            kotlinx.coroutines.runBlocking {
+            val ok = kotlinx.coroutines.runBlocking {
                 when (action) {
-                    "create" -> memoryRepo.addMemory(assistantId, content)
-                    "edit" -> memoryRepo.updateContent(id.toInt(), content)
-                    "delete" -> memoryRepo.deleteMemory(id.toInt())
-                    else -> return null
+                    "create" -> { memoryRepo.addMemory(assistantId, content); true }
+                    "edit" -> { memoryRepo.updateContent(id.toInt(), content); true }
+                    "delete" -> { memoryRepo.deleteMemory(id.toInt()); true }
+                    else -> null
                 }
-            }
-            JSONObject().put("ok", true).toString()
+            } ?: return null
+            JSONObject().put("ok", ok).toString()
         }.getOrNull()
     }
 
