@@ -149,3 +149,9 @@
   - 修复: android/scripts/build_openssl.sh — CI 编译 OpenSSL 3.0.13
     (arm64-v8a + x86_64, SONAME 去版本号) 进 jniLibs; release.yml/ci.yml 调用
   - 踩坑: GitHub archive 解压目录名 openssl-openssl-3.0.13; no-docs 是 3.1+ 选项
+
+- **v0.7.7-ce 发布成功!** (2026-08-02) SSL_CTX_set_min_proto_version 宏修复
+  - 根因: OpenSSL 3.0 中 set_min/max_proto_version 是宏(SSL_CTRL_SET_MIN_PROTO_VERSION
+    =123 → SSL_CTX_ctrl), libssl.so 不导出; shim 头误声明为函数 → dlopen 失败
+  - 修复: ndk-include/openssl/ssl.h 声明 SSL_CTX_ctrl + 按官方宏定义
+  - 依赖链已完整: R8 keep ✓ + DT_NEEDED libssl/libcrypto ✓ + 符号全部可解析 ✓
