@@ -34,6 +34,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // 临时：发布版用 debug 签名（正式签名待提供 keystore 后替换）
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
