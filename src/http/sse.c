@@ -79,6 +79,8 @@ static void handle_line(RsseParser *p, const char *line, size_t len) {
         value_len = 0;
     }
     if (field_len == 4 && memcmp(field, "data", 4) == 0) {
+        /* 单事件 data 上限 8MB（防恶意/异常服务器无限累积内存） */
+        if (p->data.len + value_len > 8 * 1024 * 1024) return;
         if (p->data.len > 0) buf_append_byte(&p->data, '\n'); /* 多行拼接 */
         buf_append(&p->data, value, value_len);
     } else if (field_len == 5 && memcmp(field, "event", 5) == 0) {
