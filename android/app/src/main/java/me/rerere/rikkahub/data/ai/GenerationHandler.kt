@@ -87,9 +87,9 @@ class GenerationHandler(
 
         // ---- 组装 C 引擎输入 ----
         val providerJson = JSONObject()
-            .put("base_url", provider.baseUrl.trimEnd('/'))
-            .put("api_key", provider.apiKey)
-            .put("model", model.id)
+            .put("base_url", provider.baseUrlOr().trimEnd('/'))
+            .put("api_key", provider.apiKeyOr())
+            .put("model", model.modelId)
 
         val history = JSONArray()
         if (!conversationSystemPrompt.isNullOrBlank()) {
@@ -221,78 +221,67 @@ class GenerationHandler(
         Log.i(TAG, "generateText done: parts=${currentParts.size}")
     }
 
-    private fun emitChunk(base: List<UIMessage>, parts: List<UIMessagePart>): GenerationChunk {
-        return GenerationChunk.Messages(base + UIMessage(role = MessageRole.ASSISTANT, parts = parts.toList()))
-    }
-
+    /** [CE] 翻译：走 C 引擎单轮生成 */
     fun translateText(
         settings: Settings,
         sourceText: String,
         targetLanguage: Locale,
-        onStreamUpdate: ((String) -> Unit)? = null
+        onStreamUpdate: ((String) -> Unit)? = null,
     ): Flow<String> = flow {
         val model = settings.providers.findModelById(settings.translateModeId)
             ?: error("Translation model not found")
         val provider = model.findProvider(settings.providers)
             ?: error("Translation provider not found")
-
-        val providerHandler = providerManager.getProviderByType(provider)
-
-        if (!ModelRegistry.QWEN_MT.match(model.modelId)) {
-            // Use regular translation with prompt
-            val prompt = settings.translatePrompt.applyPlaceholders(
-                "source_text" to sourceText,
-                "target_lang" to targetLanguage.toString(),
+        val prompt = "Translate the following text to ${targetLanguage.displayName}. " +
+            "Output only the translation, no explanation:\n\n$sourceText"
+        val history = JSONArray()
+            .put(JSONObject().put("role", "user").put("content", prompt))
+        val result = withContext(Dispatchers.IO) {
+            Engine.nativeChat(
+                JSONObject()
+                    .put("base_url", provider.baseUrlOr().trimEnd('/'))
+                    .put("api_key", provider.apiKeyOr())
+                    .put("model", model.modelId)
+                    .toString(),
+                history.toString(),
+                null,
+                object : ChatCallback {
+                    override fun onDelta(kind: Int, text: String) {
+                        onStreamUpdate?.invoke(text)
+                    }
+                    override fun onToolCall(name: String, args: String) {}
+                    override fun onToolResult(name: String, result: String) {}
+                    override fun onFinish(ok: Boolean, error: String?) {}
+                },
             )
-
-            var messages = listOf(UIMessage.user(prompt))
-            var translatedText = ""
-
-            providerHandler.streamText(
-                providerSetting = provider,
-                messages = messages,
-                params = TextGenerationParams(
-                    model = model,
-                    reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
-                ),
-            ).collect { chunk ->
-                messages = messages.handleMessageChunk(chunk)
-                translatedText = messages.lastOrNull()?.toText() ?: ""
-
-                if (translatedText.isNotBlank()) {
-                    onStreamUpdate?.invoke(translatedText)
-                    emit(translatedText)
-                }
-            }
-        } else {
-            // Use Qwen MT model with special translation options
-            val messages = listOf(UIMessage.user(sourceText))
-            val chunk = providerHandler.generateText(
-                providerSetting = provider,
-                messages = messages,
-                params = TextGenerationParams(
-                    model = model,
-                    temperature = 0.3f,
-                    topP = 0.95f,
-                    customBody = listOf(
-                        CustomBody(
-                            key = "translation_options",
-                            value = buildJsonObject {
-                                put("source_lang", JsonPrimitive("auto"))
-                                put(
-                                    "target_lang",
-                                    JsonPrimitive(targetLanguage.getDisplayLanguage(Locale.ENGLISH))
-                                )
-                            }
-                        )
-                    )
-                ),
-            )
-            val translatedText = chunk.choices.firstOrNull()?.message?.toText() ?: ""
-
-            if (translatedText.isNotBlank()) {
-                onStreamUpdate?.invoke(translatedText)
-                emit(translatedText)
-            }
         }
-    }.flowOn(Dispatchers.IO)
+        val parsed = try {
+            JSONObject(result)
+        } catch (_: Exception) {
+            null
+        }
+        val text = parsed?.optString("text")
+        if (text != null) emit(text) else error("translation failed")
+    }
+
+    private fun emitChunk(base: List<UIMessage>, parts: List<UIMessagePart>): GenerationChunk {
+        return GenerationChunk.Messages(base + UIMessage(role = MessageRole.ASSISTANT, parts = parts.toList()))
+    }
+}
+
+/** [CE] ProviderSetting 具体子类字段提取（baseUrl/apiKey 在子类） */
+private fun ProviderSetting.baseUrlOr(): String = when (this) {
+    is ProviderSetting.OpenAI -> baseUrl
+    is ProviderSetting.Google -> baseUrl
+    is ProviderSetting.Claude -> baseUrl
+    else -> ""
+}
+
+private fun ProviderSetting.apiKeyOr(): String = when (this) {
+    is ProviderSetting.OpenAI -> apiKey
+    is ProviderSetting.Google -> apiKey
+    is ProviderSetting.Claude -> apiKey
+    else -> ""
+}
+
+.flowOn(Dispatchers.IO)
