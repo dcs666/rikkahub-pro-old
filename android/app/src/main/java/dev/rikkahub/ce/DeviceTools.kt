@@ -43,29 +43,80 @@ object DeviceTools {
         appContext = context.applicationContext
     }
 
-    /** 向用户提问（模态对话框，阻塞等待回答） */
+    /** 向用户提问（模态对话框，阻塞等待回答；支持 questions 数组：多问题 + options 快捷选择） */
     @JvmStatic
     fun askUser(question: String): String? {
         val ctx = appContext ?: return err("no context")
         val latch = CountDownLatch(1)
         val answer = AtomicReference<String?>(null)
+        // 解析 questions 数组（引擎传入 JSON）；失败则当单问题纯文本
+        data class Q(val id: String?, val text: String, val options: List<String>)
+        val questions: List<Q> = try {
+            val arr = JSONObject(question).optJSONArray("questions")
+            if (arr != null && arr.length() > 0) {
+                (0 until arr.length()).map { i ->
+                    val o = arr.getJSONObject(i)
+                    val opts = o.optJSONArray("options")
+                    Q(
+                        o.optString("id").takeIf { it.isNotBlank() },
+                        o.optString("question"),
+                        if (opts != null) (0 until opts.length()).map { opts.getString(it) } else emptyList(),
+                    )
+                }
+            } else emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val qs = if (questions.isNotEmpty()) questions else listOf(Q(null, question, emptyList()))
         mainHandler.post {
             val dlg = Dialog(ctx)
             val root = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(48, 32, 48, 32)
             }
-            root.addView(TextView(ctx).apply {
-                text = question
-                textSize = 16f
-            })
-            val input = EditText(ctx)
-            root.addView(input, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT))
+            val inputs = mutableMapOf<Int, EditText>()
+            qs.forEachIndexed { idx, q ->
+                root.addView(TextView(ctx).apply {
+                    text = q.text
+                    textSize = 16f
+                    setPadding(0, if (idx > 0) 24 else 0, 0, 8)
+                })
+                val input = EditText(ctx)
+                inputs[idx] = input
+                root.addView(input, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT))
+                // 选项快捷按钮（单选：点击填充输入框）
+                if (q.options.isNotEmpty()) {
+                    val row = LinearLayout(ctx).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                    }
+                    q.options.forEach { opt ->
+                        row.addView(Button(ctx).apply {
+                            text = opt
+                            textSize = 12f
+                            setOnClickListener {
+                                input.setText(opt)
+                                input.setSelection(opt.length)
+                            }
+                        })
+                    }
+                    root.addView(row)
+                }
+            }
             val send = Button(ctx).apply { text = "回答" }
             send.setOnClickListener {
-                answer.set(input.text.toString())
+                if (qs.size == 1) {
+                    answer.set(inputs[0]?.text?.toString() ?: "")
+                } else {
+                    // 多问题：{id: answer, ...} 对象；无 id 用索引
+                    val obj = JSONObject()
+                    qs.forEachIndexed { idx, q ->
+                        val v = inputs[idx]?.text?.toString() ?: ""
+                        if (q.id != null) obj.put(q.id, v) else obj.put(idx.toString(), v)
+                    }
+                    answer.set(obj.toString())
+                }
                 dlg.dismiss()
                 latch.countDown()
             }
