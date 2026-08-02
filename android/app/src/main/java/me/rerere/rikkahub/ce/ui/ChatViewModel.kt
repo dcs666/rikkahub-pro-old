@@ -235,7 +235,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
             .apply()
     }
 
-    fun setAutoTts(on: Boolean) {
+    fun updateAutoTts(on: Boolean) {
         autoTts = on
         prefs.edit().putBoolean("auto_tts", on).apply()
     }

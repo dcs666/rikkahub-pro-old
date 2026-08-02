@@ -264,7 +264,7 @@ private fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                     Text("朗读回复", modifier = Modifier.weight(1f))
                     Switch(
                         checked = vm.autoTts,
-                        onCheckedChange = { vm.setAutoTts(it) },
+                        onCheckedChange = { vm.updateAutoTts(it) },
                     )
                 }
             }
