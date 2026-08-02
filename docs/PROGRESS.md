@@ -136,3 +136,9 @@
 - **v0.7.3-ce 发布成功!** (2026-08-02) 诊断日志入 App 内日志页
   - GenerationHandler 日志双写 (android.util.Log + turbo Logging)
   - 用户免 adb: 设置 → 日志 直接查看诊断信息
+
+- **v0.7.4-ce 发布成功!** (2026-08-02) 根因修复版
+  - **R8 keep JNI 引擎类 (dev.rikkahub.ce.Engine/ChatCallback)** — 根治"助手不回复 + 标题失败"
+    - 根因: release isMinifyEnabled=true 把 Engine 类裁剪 → NoClassDefFoundError
+  - 日志页 TextLog 可点击查看详情
+  - generateTitle 异常写入 App 日志页
