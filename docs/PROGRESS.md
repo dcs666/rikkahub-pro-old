@@ -189,3 +189,10 @@
 5. **tools JSON 非法修复(重大潜伏 bug)**
 6. strstr 越界修复(ASan)/MIME 魔数/OCR 错误详情/AUTO 修复
 7. ci.yml concurrency cancel-in-progress
+
+### v0.7.8 追加修复(发布前审查发现)
+- **重大: JNI 回调线程修复** — 流式 Delta/工具回调由引擎异步流水线
+  (pipe_processor 线程)触发, 原用 nativeChat 调用线程的 JNIEnv → 非 Java 线程
+  用 JNIEnv = 未定义行为(流式输出可能从未真正回调到 Kotlin!)
+  修: jni_thread_env() = GetEnv 优先 + AttachCurrentThread + 回调后 Detach;
+  回调开头 ExceptionClear
