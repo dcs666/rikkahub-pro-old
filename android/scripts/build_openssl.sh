@@ -40,10 +40,11 @@ build_abi() {
   local work="/tmp/ossl-$abi"
   echo "Building OpenSSL for $abi ($target)..."
   rm -rf "$work"; mkdir -p "$work"; cd "$work"
-  perl "$SRC/Configure" "$target" -D__ANDROID_API__=26 shared no-tests no-docs --prefix="$work/out" >/dev/null
+  perl "$SRC/Configure" "$target" -D__ANDROID_API__=26 shared no-tests no-docs --prefix="$work/out" > "/tmp/ossl-$abi-config.log" 2>&1 || {
+    echo "Configure failed for $abi:"; tail -40 "/tmp/ossl-$abi-config.log"; exit 1; }
   # SONAME 去版本号: libssl.so / libcrypto.so (.so.3 不被 AGP 打包)
   sed -i 's/-Wl,-soname,libssl\.so\.3/-Wl,-soname,libssl.so/; s/-Wl,-soname,libcrypto\.so\.3/-Wl,-soname,libcrypto.so/' Makefile
-  make -j"$(nproc)" build_libs > "/tmp/ossl-$abi.log" 2>&1 || { echo "make build_libs failed, trying libs"; make -j"$(nproc)" libs >> "/tmp/ossl-$abi.log" 2>&1; }
+  make -j"$(nproc)" build_libs > "/tmp/ossl-$abi.log" 2>&1 || { echo "make failed for $abi:"; tail -40 "/tmp/ossl-$abi.log"; exit 1; }
   cp -f libssl.so libcrypto.so "$JNI/$abi/"
   echo "  -> $JNI/$abi/: $(ls libssl.so libcrypto.so)"
 }
