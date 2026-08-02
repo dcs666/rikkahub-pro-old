@@ -22,6 +22,7 @@ data class ChatMsg(
     val reasoning: String = "",  // 推理过程（流式累积，UI 折叠显示）
     val streaming: Boolean = false,
     val isError: Boolean = false,
+    val imagePath: String? = null,  // 本地图片路径（消息附带展示）
 )
 
 data class ChatSession(
@@ -132,7 +133,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         if (ok && autoTts) {
             val last = messages.lastOrNull { it.role == "assistant" && !it.isError }
             if (last != null) {
-                me.rerere.rikkahub.ce.DeviceTools.ttsSpeak(last.text.take(500))
+                DeviceTools.ttsSpeak(last.text.take(500))
             }
         }
         if (ok) {
