@@ -101,3 +101,8 @@
   - translateText 同步 C 化
   - C 侧 parse_history 支持 image_url (http 图片直传)
   - 待验证: CI 编译 + 真机行为
+
+- **46b845b: CI 全绿 — GenerationHandler C 化完成!** (2026-08-02)
+  - generateText/translateText 内部走 JNI → C 引擎 rk_chat
+  - turbo UI(5.9万行) + C 引擎完整构建成功
+  - v0.6.0-ce 的 Release 失败待重发 (签名流程已改为 local.properties)
