@@ -112,3 +112,8 @@
   - ChatService 会话标题 → Engine.nativeGenerateTitle
   - ProviderExt.kt 公共 baseUrlOr/apiKeyOr 扩展
   - v0.7.0-ce 发布中 (turbo UI + C 引擎全链路)
+
+- **v0.7.0-ce 发布成功!** (2026-08-02)
+  - turbo UI(5.9万行) + 纯 C 引擎(JNI)全链路 APK
+  - 发布流程修: splits 输出 APK 名 (app-universal-release.apk)
+  - 下载: https://github.com/dcs666/rikkahub-pro-old/releases/tag/v0.7.0-ce
