@@ -351,6 +351,12 @@ int rhttp_send(RHttpConn *c, const char *method, const char *path,
     buf_append_str(&req, path);
     buf_append_str(&req, " HTTP/1.1\r\nHost: ");
     buf_append_str(&req, c->host);
+    /* 非默认端口必须写进 Host(否则虚拟主机/严格服务器 400) */
+    if (c->port != 80 && c->port != 443) {
+        char pt[8];
+        int pn = snprintf(pt, sizeof(pt), ":%u", (unsigned)c->port);
+        buf_append(&req, pt, (size_t)pn);
+    }
     buf_append_str(&req, "\r\nUser-Agent: rikkahub-engine/0.1\r\nAccept: */*\r\n");
     int has_cl = 0, has_conn = 0;
     if (headers) {

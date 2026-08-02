@@ -707,6 +707,9 @@ static int start_once(RikkaStreamSession *ss, const char *path,
                         prefix, sizeof(prefix)) != 0)
         return -1;
     if (!path) {
+        /* baseUrl 尾斜杠(如 https://x/v1/)时去掉，防拼接双斜杠 */
+        size_t pl = strlen(prefix);
+        while (pl > 1 && prefix[pl - 1] == '/') prefix[--pl] = '\0';
         if (ss->cfg.id == RIKKA_PROVIDER_GOOGLE) {
             /* 字面量格式串：model 作为 %.240s 参数（防 model 含 % 被当格式符） */
             snprintf(full, sizeof(full),
