@@ -14,7 +14,6 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import dev.rikkahub.ce.ChatCallback
-import dev.rikkahub.ce.Engine
 import org.json.JSONArray
 import org.json.JSONObject
 
