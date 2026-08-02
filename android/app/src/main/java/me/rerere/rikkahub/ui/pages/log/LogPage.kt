@@ -100,7 +100,7 @@ private fun UnifiedLogList(
     onRequestLoggingChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedLog by remember { mutableStateOf<LogEntry.RequestLog?>(null) }
+    var selectedLog by remember { mutableStateOf<LogEntry?>(null) }
     val sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
     val scope = rememberCoroutineScope()
     val sortedLogs = remember(logs) { logs.sortedByDescending { it.timestamp } }
@@ -127,7 +127,13 @@ private fun UnifiedLogList(
                     }
                 )
 
-                is LogEntry.TextLog -> TextLogCard(log = log)
+                is LogEntry.TextLog -> TextLogCard(
+                    log = log,
+                    onClick = {
+                        selectedLog = log
+                        scope.launch { sheetState.show() }
+                    }
+                )
             }
         }
     }
@@ -137,7 +143,10 @@ private fun UnifiedLogList(
             onDismissRequest = { selectedLog = null },
             sheetState = sheetState
         ) {
-            RequestLogDetail(log)
+            when (log) {
+                is LogEntry.RequestLog -> RequestLogDetail(log)
+                is LogEntry.TextLog -> TextLogDetail(log)
+            }
         }
     }
 }
@@ -472,11 +481,13 @@ private fun HeaderItem(key: String, value: String) {
 }
 
 @Composable
-private fun TextLogCard(log: LogEntry.TextLog) {
+private fun TextLogCard(log: LogEntry.TextLog, onClick: () -> Unit) {
     val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         SelectionContainer {
@@ -502,6 +513,36 @@ private fun TextLogCard(log: LogEntry.TextLog) {
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = JetbrainsMono
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextLogDetail(log: LogEntry.TextLog) {
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
+
+    SelectionContainer {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Text(
+                    text = "Log Details",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            item {
+                DetailSection("Tag", log.tag)
+            }
+            item {
+                DetailSection("Time", dateFormat.format(Date(log.timestamp)))
+            }
+            item {
+                DetailSection("Message", log.message)
             }
         }
     }
