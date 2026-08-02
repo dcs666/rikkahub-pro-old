@@ -137,6 +137,9 @@ class GenerationHandler(
         )
         // 工具白名单(对齐 turbo 的 localTools/enableMemory/enabledSkills 开关)
         providerJson.put("tool_whitelist", buildToolWhitelist(assistant))
+        // 搜索/会话引用开关(对齐 turbo: enableWebSearch / enableRecentChatsReference)
+        providerJson.put("enable_web_search", assistant.enableWebSearch)
+        providerJson.put("enable_recent_chats", assistant.enableRecentChatsReference)
         // 记忆库目标(对齐 turbo: enableMemory 时 memory_tool 反调落库)
         if (assistant.enableMemory) {
             providerJson.put(

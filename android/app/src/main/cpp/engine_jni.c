@@ -776,9 +776,14 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.calendar_query = jni_calendar_query;
     tenv.screen_time_query = jni_screen_time_query;
     tenv.javascript_eval = jni_javascript_eval;
-    tenv.recent_chats = jni_recent_chats;
-    tenv.conversation_search = jni_conversation_search;
-    tenv.web_search = jni_web_search;
+    /* 会话/搜索开关(对齐 turbo: enableWebSearch / enableRecentChatsReference) */
+    const RJson *e_ws = rjson_get(pv, "enable_web_search");
+    const RJson *e_rc = rjson_get(pv, "enable_recent_chats");
+    int enable_web_search = !e_ws || rjson_is_true(e_ws);
+    int enable_recent = !e_rc || rjson_is_true(e_rc);
+    tenv.recent_chats = enable_recent ? jni_recent_chats : NULL;
+    tenv.conversation_search = enable_recent ? jni_conversation_search : NULL;
+    tenv.web_search = enable_web_search ? jni_web_search : NULL;
     tenv.memory_create = jni_memory_create;
     tenv.memory_edit = jni_memory_edit;
     tenv.memory_delete = jni_memory_delete;
