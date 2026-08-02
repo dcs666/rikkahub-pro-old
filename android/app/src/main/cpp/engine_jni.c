@@ -2,7 +2,8 @@
  * RikkaHub CE: 引擎 JNI 桥。
  * 暴露: nativeChat(providerJson, historyJson, callback) / nativeSetCancel(v)
  * 线程模型: nativeChat 阻塞调用方线程（Kotlin 侧放协程 IO 线程）;
- * 回调在调用线程同步触发（增量/工具/完成）。
+ * 回调可能由引擎流水线线程(pipe_processor)触发 —— 统一经 jni_thread_env
+ * (GetEnv 优先 + AttachCurrentThread + 调用后 Detach) 保证 JNIEnv 合法。
  */
 #include <jni.h>
 #include <stdio.h>
