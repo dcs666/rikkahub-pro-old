@@ -233,7 +233,7 @@ static void jesc(Buf *out, const char *s) {
 /* ---------- 设备工具（JNI 反调 Kotlin DeviceTools） ---------- */
 
 static jclass g_dev_cls = NULL;
-static jmethodID g_dev_ask_user, g_dev_clip, g_dev_tts, g_dev_cal, g_dev_cal_create,
+static jmethodID g_dev_ask_user, g_dev_clip, g_dev_clip_read, g_dev_tts, g_dev_cal, g_dev_cal_create,
                  g_dev_st, g_dev_js, g_dev_web_search, g_dev_mem;
 static jclass g_store_cls = NULL;
 static jmethodID g_store_recent, g_store_search;
@@ -358,6 +358,34 @@ static void ensure_store_cls(JNIEnv *env) {
     g_store_search = (*env)->GetStaticMethodID(env, g_store_cls, "conversationSearch",
                                                "(Ljava/lang/String;)Ljava/lang/String;");
     (*env)->DeleteLocalRef(env, c);
+}
+
+static char *jni_clipboard_read(void *ud) {
+    (void)ud;
+    JNIEnv *env = env_of();
+    if (!env) return NULL;
+    if (!g_dev_cls) {
+        jclass c = (*env)->FindClass(env, "dev/rikkahub/ce/DeviceTools");
+        if (!c) return NULL;
+        g_dev_cls = (*env)->NewGlobalRef(env, c);
+    }
+    if (!g_dev_clip_read) {
+        g_dev_clip_read = (*env)->GetStaticMethodID(env, g_dev_cls, "clipboardRead",
+                                                    "()Ljava/lang/String;");
+        if (!g_dev_clip_read) return NULL;
+    }
+    jstring jr = (jstring)(*env)->CallStaticObjectMethod(env, g_dev_cls, g_dev_clip_read);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    if (!jr) return NULL;
+    const char *r = (*env)->GetStringUTFChars(env, jr, NULL);
+    if (!r) return NULL;
+    char *out = strdup(r);
+    (*env)->ReleaseStringUTFChars(env, jr, r);
+    (*env)->DeleteLocalRef(env, jr);
+    return out;
 }
 
 static char *jni_calendar_create(const char *args, void *ud) {
@@ -750,6 +778,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.memory_edit = jni_memory_edit;
     tenv.memory_delete = jni_memory_delete;
     tenv.calendar_create = jni_calendar_create;
+    tenv.clipboard_read = jni_clipboard_read;
     rk_tools_init(&reg);
     rk_tools_register_builtin(&reg, &tenv);
 

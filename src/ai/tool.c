@@ -701,13 +701,25 @@ static int tool_ask_user(const RkTool *t, const char *args_json, const RkToolEnv
 static int tool_clipboard(const RkTool *t, const char *args_json, const RkToolEnv *env,
                           char **result) {
     (void)t;
+    char action[8] = "write";
+    rk_tool_arg_str(args_json, "action", action, sizeof(action));
+    if (strcmp(action, "read") == 0) {
+        if (!env || !env->clipboard_read) {
+            if (result) *result = rk_tool_result_error("clipboard unavailable");
+            return -1;
+        }
+        char *r = env->clipboard_read(env->ud);
+        if (!r) { if (result) *result = rk_tool_result_error("clipboard read failed"); return -1; }
+        *result = r;
+        return 0;
+    }
     if (!env || !env->clipboard_write) {
         if (result) *result = rk_tool_result_error("clipboard unavailable");
         return -1;
     }
     char text[8192];
     if (rk_tool_arg_str(args_json, "text", text, sizeof(text)) != 0) {
-        if (result) *result = rk_tool_result_error("text is required");
+        if (result) *result = rk_tool_result_error("text is required for write");
         return -1;
     }
     if (env->clipboard_write(text, env->ud) != 0) {
@@ -811,7 +823,7 @@ static const RkTool TOOL_CLIPBOARD = {
     "Read or write plain text from the device clipboard. Use action: read or write. "
     "For write, provide text. Do NOT write to the clipboard unless the user has explicitly "
     "requested it.",
-    "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"Text to write to the clipboard\"}},\"required\":[\"text\"]}",
+    "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"read\",\"write\"]},\"text\":{\"type\":\"string\",\"description\":\"Text to write (required for write)\"}},\"required\":[\"action\"]}",
     tool_clipboard,
 };
 

@@ -38,6 +38,7 @@ struct RkToolEnv {
     char *(*calendar_create)(const char *args_json, void *ud);
     char *(*screen_time_query)(const char *args_json, void *ud);
     int (*clipboard_write)(const char *text, void *ud);
+    char *(*clipboard_read)(void *ud);                 /* 剪贴板文本（malloc） */
     int (*tts_speak)(const char *text, void *ud);
     char *(*javascript_eval)(const char *code, void *ud);
     char *(*web_search)(const char *query, void *ud);

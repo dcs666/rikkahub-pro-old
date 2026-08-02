@@ -295,6 +295,17 @@ object DeviceTools {
         }.getOrNull()
     }
 
+    /** [CE] clipboard read 引擎反调桥：读剪贴板文本（引擎工作线程调用） */
+    @JvmStatic
+    fun clipboardRead(): String? {
+        val ctx = appContext ?: return null
+        return runCatching {
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+            cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()
+        }.getOrNull()
+    }
+
     /** [CE] calendar_create 引擎反调桥：插入系统日历事件（引擎工作线程调用） */
     @JvmStatic
     fun calendarCreate(args: String): String? {
