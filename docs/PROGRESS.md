@@ -159,3 +159,14 @@
 ### 已知限制(待办)
 - engine_jni.c 的 g_cancel 是全局变量: 多会话并发生成时, 取消一个会话会影响另一个
   (v0.7.8 记录; 修复方案: nativeChat 返回会话 token, nativeSetCancel(token, cancel))
+
+### v0.7.8 待发布 — 功能对齐 turbo(思考模式 + 用量统计 + 请求日志)
+- 思考模式: GenerationHandler 按 turbo host 分派(DeepSeek XHIGH→max/MEDIUM→high、
+  Moonshot thinking、NVIDIA、opencode、默认) → C 引擎 rp_build_request 写入
+- Token 用量: C 引擎解析流式 usage(OpenAI 顶层/Anthropic message_delta) +
+  cached_tokens(prompt_tokens_details) → JNI 返回 → UIMessage.usage
+- 请求日志: stats 加 http_status/duration_ms → JNI request 对象 →
+  GenerationHandler 写 Logging(日志页可见)
+- 测试: reasoning_body / stream_usage 双协议
+- 修: SSE data 非 NUL 结尾 strstr 越界(ASan 抓到)→ contains_usage
+- 功能差异已清零(除: Moonshot keep:all 未传、NVIDIA 非 v4 模型简化、reasoning_tokens 未解析)
