@@ -23,6 +23,19 @@ jobs:
         uses: android-actions/setup-android@v3
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
+      - name: Set up pnpm (web-ui 前端构建依赖)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: android/web-ui/pnpm-lock.yaml
+      - name: Install web-ui dependencies
+        working-directory: android/web-ui
+        run: pnpm install --frozen-lockfile
       - name: Prepare keystore (RIKKA_CE secrets → local.properties)
         env:
           RIKKA_CE_KEYSTORE_B64: ${{ secrets.RIKKA_CE_KEYSTORE_B64 }}

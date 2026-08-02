@@ -62,6 +62,19 @@ jobs:
           ls -la android/build/librikka.so
       - name: Build APK (Gradle)
         uses: gradle/actions/setup-gradle@v3
+      - name: Set up pnpm (web-ui 前端构建依赖)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: android/web-ui/pnpm-lock.yaml
+      - name: Install web-ui dependencies
+        working-directory: android/web-ui
+        run: pnpm install --frozen-lockfile
       - name: Assemble debug APK
         run: |
           cd android && ./gradlew :app:assembleDebug --no-daemon > /tmp/gradle.log 2>&1 || { echo "GRADLE FAILED"; tail -100 /tmp/gradle.log; exit 1; }
