@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -84,14 +85,21 @@ class GenerationHandler(
         workspaceCwd: String? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
-        Log.i(TAG, "generateText: model=${model.id} messages=${messages.size}")
+        val baseUrl = provider.baseUrlOr().trimEnd('/')
+        val apiKey = provider.apiKeyOr()
+        val modelId = model.modelId
+        Log.i(TAG, "generateText: model=${model.modelId} messages=${messages.size} " +
+            "baseUrl=$baseUrl apiKey=${if (apiKey.isBlank()) "BLANK" else apiKey.take(4) + "***"} " +
+            "systemPrompt=${conversationSystemPrompt?.take(50)}")
+        if (baseUrl.isBlank()) error("Provider base URL is empty: ${provider.name}")
+        if (apiKey.isBlank()) error("Provider API key is empty: ${provider.name}")
         processingStatus.value = "生成中…"
 
         // ---- 组装 C 引擎输入 ----
         val providerJson = JSONObject()
-            .put("base_url", provider.baseUrlOr().trimEnd('/'))
-            .put("api_key", provider.apiKeyOr())
-            .put("model", model.modelId)
+            .put("base_url", baseUrl)
+            .put("api_key", apiKey)
+            .put("model", modelId)
 
         val history = JSONArray()
         if (!conversationSystemPrompt.isNullOrBlank()) {
@@ -147,22 +155,43 @@ class GenerationHandler(
         kotlinx.coroutines.coroutineScope {
         val job = launch(Dispatchers.IO) {
             try {
-                Engine.nativeChat(
+                val nativeResult = Engine.nativeChat(
                     providerJson.toString(),
                     history.toString(),
                     workspaceCwd,
                     callback,
                 )
+                // nativeChat 返回后检查结果（防止回调遗漏导致死等）
+                Log.i(TAG, "nativeChat returned: ${nativeResult.take(200)}")
+                val parsed = try {
+                    JSONObject(nativeResult)
+                } catch (_: Exception) {
+                    null
+                }
+                if (parsed != null && !parsed.optBoolean("ok", true)) {
+                    channel.trySend(Evt.Finish(false, parsed.optString("error", "engine error")))
+                }
             } catch (e: Throwable) {
                 Log.e(TAG, "nativeChat failed", e)
                 channel.trySend(Evt.Finish(false, e.message ?: "engine error"))
             }
         }
 
-        // ---- 消费事件 → 组装 UI 消息 ----
+        // ---- 消费事件 → 组装 UI 消息（90s 无事件超时保护） ----
         val currentParts = mutableListOf<UIMessagePart>()
+        val deadline = System.currentTimeMillis() + 90_000L
         while (true) {
-            val evt = channel.receiveCatching().getOrNull() ?: break
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) {
+                Log.w(TAG, "generateText: timeout waiting for engine events")
+                channel.trySend(Evt.Finish(false, "engine timeout"))
+            }
+            val evt = withTimeoutOrNull(remaining) {
+                channel.receiveCatching().getOrNull()
+            } ?: run {
+                Log.w(TAG, "generateText: channel closed or timeout, stopping")
+                break
+            }
             when (evt) {
                 is Evt.Delta -> {
                     if (evt.kind == 1) {
