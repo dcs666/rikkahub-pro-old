@@ -290,3 +290,7 @@
 - askUser 用 Activity context(Dialog 需窗口 token; RikkaHubApp 生命周期跟踪 currentActivity)
 - memory 反调 assistant_id per-call 传递(ud→JniCb.mem_aid; 原全局 jni_ctx_mem_aid 多会话竞态)
 - 确认: 工具反调链路(env->ud)/内存/引用清理
+
+### 25轮深度优化(第十一批) — 已提交
+- ndk-include shim 补 SSL_set1_host/X509_V_OK(NDK 编译失败修复)
+- 确认: NDK 用 shim 头(非系统 openssl)/链接真 OpenSSL 3 so/SONAME 无版本
