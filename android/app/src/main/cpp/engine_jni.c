@@ -798,6 +798,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.calendar_create = jni_calendar_create;
     tenv.clipboard_read = jni_clipboard_read;
     tenv.skills_root = skills_root;
+    tenv.tool_whitelist = jstr(pv, "tool_whitelist");
     rk_tools_init(&reg);
     rk_tools_register_builtin(&reg, &tenv);
 
