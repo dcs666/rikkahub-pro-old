@@ -43,6 +43,10 @@ typedef struct {
      * thinking_enabled=1 时写 thinking:{type:"enabled"} (DeepSeek/Moonshot) */
     const char *reasoning_effort;
     int thinking_enabled;
+    /* 采样参数与附加 body（<0 = 不写；custom_body 为不带前导逗号的 JSON 片段） */
+    float temperature;
+    float top_p;
+    const char *custom_body;
 } RikkaProviderCfg;
 
 /* 构建 chat completion 请求体（stream=1 时含 stream:true）。返回 0 成功 */

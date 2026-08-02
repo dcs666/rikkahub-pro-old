@@ -750,6 +750,14 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     /* 思考模式(DeepSeek 等): reasoning_effort / thinking */
     pcfg.reasoning_effort = jstr(pv, "reasoning_effort");
     if (jstr(pv, "thinking")) pcfg.thinking_enabled = 1;
+    /* 采样参数与附加 body(QWEN_MT 翻译等; 缺省不写) */
+    pcfg.temperature = -1;
+    pcfg.top_p = -1;
+    const RJson *j_temp = rjson_get(pv, "temperature");
+    if (j_temp && rjson_is_number(j_temp)) pcfg.temperature = (float)rjson_num(j_temp);
+    const RJson *j_tp = rjson_get(pv, "top_p");
+    if (j_tp && rjson_is_number(j_tp)) pcfg.top_p = (float)rjson_num(j_tp);
+    pcfg.custom_body = jstr(pv, "custom_body");
 
     /* memory_tool 反调目标 assistant_id(enableMemory 时 Kotlin 传入; 每轮重建) */
     free(jni_ctx_mem_aid);

@@ -415,17 +415,34 @@ class GenerationHandler(
             ?: error("Translation model not found")
         val provider = model.findProvider(settings.providers)
             ?: error("Translation provider not found")
-        val prompt = "Translate the following text to ${targetLanguage.displayName}. " +
-            "Output only the translation, no explanation:\n\n$sourceText"
+        val pv = JSONObject()
+            .put("base_url", provider.baseUrlOr().trimEnd('/'))
+            .put("api_key", provider.apiKeyOr())
+            .put("model", model.modelId)
+        val isQwenMt = me.rerere.ai.registry.ModelRegistry.QWEN_MT.match(model.modelId)
+        val prompt = if (isQwenMt) {
+            sourceText
+        } else {
+            // 对齐 turbo: 用户可配置翻译提示词模板
+            settings.translatePrompt.applyPlaceholders(
+                "source_text" to sourceText,
+                "target_lang" to targetLanguage.toString(),
+            )
+        }
+        if (isQwenMt) {
+            pv.put("temperature", 0.3)
+            pv.put("top_p", 0.95)
+            pv.put(
+                "custom_body",
+                "\"translation_options\":{\"source_lang\":\"auto\"," +
+                    "\"target_lang\":\"${targetLanguage.getDisplayLanguage(java.util.Locale.ENGLISH)}\"}",
+            )
+        }
         val history = JSONArray()
             .put(JSONObject().put("role", "user").put("content", prompt))
         val result = withContext(Dispatchers.IO) {
             Engine.nativeChat(
-                JSONObject()
-                    .put("base_url", provider.baseUrlOr().trimEnd('/'))
-                    .put("api_key", provider.apiKeyOr())
-                    .put("model", model.modelId)
-                    .toString(),
+                pv.toString(),
                 history.toString(),
                 null,
                 object : ChatCallback {

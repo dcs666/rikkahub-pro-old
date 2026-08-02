@@ -242,6 +242,22 @@ int rp_build_request(const RikkaProviderCfg *cfg,
         if (cfg->thinking_enabled) {
             buf_append_str(out, ",\"thinking\":{\"type\":\"enabled\"}");
         }
+        /* 采样参数（<0 = 不写） */
+        if (cfg->temperature >= 0) {
+            char tmp[32];
+            snprintf(tmp, sizeof(tmp), ",\"temperature\":%.2f", cfg->temperature);
+            buf_append_str(out, tmp);
+        }
+        if (cfg->top_p >= 0) {
+            char tmp[32];
+            snprintf(tmp, sizeof(tmp), ",\"top_p\":%.2f", cfg->top_p);
+            buf_append_str(out, tmp);
+        }
+        /* 附加 body（不带前导逗号） */
+        if (cfg->custom_body && cfg->custom_body[0]) {
+            buf_append_str(out, ",");
+            buf_append_str(out, cfg->custom_body);
+        }
         /* tools 必须在顶层对象闭合前追加(原版在 } 之后拼 tools → 非法 JSON) */
         if (cfg->tools_json && cfg->tools_json[0]) {
             buf_append_str(out, ",\"tools\":");
