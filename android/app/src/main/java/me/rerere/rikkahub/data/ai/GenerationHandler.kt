@@ -44,6 +44,16 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "GenerationHandler(CE)"
 
+/** 日志双写：android.util.Log + turbo Logging（设置页日志页可见） */
+private fun logMsg(tag: String, msg: String) {
+    android.util.Log.i(tag, msg)
+    me.rerere.common.android.Logging.log(tag, msg)
+}
+private fun logErr(tag: String, msg: String, e: Throwable? = null) {
+    android.util.Log.e(tag, msg, e)
+    me.rerere.common.android.Logging.log(tag, msg + (e?.let { " | " + it.message } ?: ""))
+}
+
 /* C 引擎回调事件（文件级，Kotlin 不允许局部 interface） */
 private sealed interface Evt {
     class Delta(val kind: Int, val text: String) : Evt
@@ -88,7 +98,7 @@ class GenerationHandler(
         val baseUrl = provider.baseUrlOr().trimEnd('/')
         val apiKey = provider.apiKeyOr()
         val modelId = model.modelId
-        Log.i(TAG, "generateText: model=${model.modelId} messages=${messages.size} " +
+        logMsg(TAG, "generateText: model=${model.modelId} messages=${messages.size} " +
             "baseUrl=$baseUrl apiKey=${if (apiKey.isBlank()) "BLANK" else apiKey.take(4) + "***"} " +
             "systemPrompt=${conversationSystemPrompt?.take(50)}")
         if (baseUrl.isBlank()) error("Provider base URL is empty: ${provider.name}")
@@ -162,7 +172,7 @@ class GenerationHandler(
                     callback,
                 )
                 // nativeChat 返回后检查结果（防止回调遗漏导致死等）
-                Log.i(TAG, "nativeChat returned: ${nativeResult.take(200)}")
+                logMsg(TAG, "nativeChat returned: ${nativeResult.take(200)}")
                 val parsed = try {
                     JSONObject(nativeResult)
                 } catch (_: Exception) {
@@ -172,7 +182,7 @@ class GenerationHandler(
                     channel.trySend(Evt.Finish(false, parsed.optString("error", "engine error")))
                 }
             } catch (e: Throwable) {
-                Log.e(TAG, "nativeChat failed", e)
+                logErr(TAG, "nativeChat failed", e)
                 channel.trySend(Evt.Finish(false, e.message ?: "engine error"))
             }
         }
@@ -183,13 +193,13 @@ class GenerationHandler(
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
-                Log.w(TAG, "generateText: timeout waiting for engine events")
+                logMsg(TAG, "generateText: timeout waiting for engine events")
                 channel.trySend(Evt.Finish(false, "engine timeout"))
             }
             val evt = withTimeoutOrNull(remaining) {
                 channel.receiveCatching().getOrNull()
             } ?: run {
-                Log.w(TAG, "generateText: channel closed or timeout, stopping")
+                logMsg(TAG, "generateText: channel closed or timeout, stopping")
                 break
             }
             when (evt) {
@@ -247,7 +257,7 @@ class GenerationHandler(
             }
         }
         job.join()
-        Log.i(TAG, "generateText done: parts=${currentParts.size}")
+        logMsg(TAG, "generateText done: parts=${currentParts.size}")
         }
         processingStatus.value = null
     }
