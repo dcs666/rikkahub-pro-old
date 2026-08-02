@@ -419,6 +419,13 @@ class GenerationHandler(
             .put("base_url", provider.baseUrlOr().trimEnd('/'))
             .put("api_key", provider.apiKeyOr())
             .put("model", model.modelId)
+        // 翻译思考预算(对齐 turbo: fromBudgetTokens → reasoningArgs)
+        val (trEffort, trThinking) = reasoningArgs(
+            provider.baseUrlOr(),
+            me.rerere.ai.core.ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
+        )
+        if (trEffort != null) pv.put("reasoning_effort", trEffort)
+        if (trThinking) pv.put("thinking", true)
         val isQwenMt = me.rerere.ai.registry.ModelRegistry.QWEN_MT.match(model.modelId)
         val prompt = if (isQwenMt) {
             sourceText
