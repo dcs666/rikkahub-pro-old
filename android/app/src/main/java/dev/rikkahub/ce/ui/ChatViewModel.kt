@@ -3,6 +3,8 @@ package dev.rikkahub.ce.ui
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import dev.rikkahub.ce.DeviceTools
+import dev.rikkahub.ce.Engine
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
