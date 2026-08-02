@@ -2,6 +2,8 @@ package dev.rikkahub.ce.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -135,13 +137,22 @@ private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(vm.messages) { msg ->
-            MessageBubble(msg)
+            MessageBubble(
+                msg,
+                onCopy = {
+                    val ctx = LocalContext.current
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                            as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("rikka", msg.text))
+                },
+                onRetry = { vm.retryLast() },
+            )
         }
     }
 }
 
 @Composable
-private fun MessageBubble(msg: ChatMsg) {
+private fun MessageBubble(msg: ChatMsg, onCopy: () -> Unit, onRetry: () -> Unit) {
     val isUser = msg.role == "user"
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -156,8 +167,36 @@ private fun MessageBubble(msg: ChatMsg) {
                 },
             ),
             shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.combinedClickable(
+                onClick = {},
+                onLongClick = onCopy,
+            ),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                if (msg.reasoning.isNotBlank()) {
+                    var showReason by remember { mutableStateOf(false) }
+                    TextButton(onClick = { showReason = !showReason }) {
+                        Text(
+                            if (showReason) "💭 收起推理" else "💭 推理过程",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                    if (showReason) {
+                        Text(
+                            msg.reasoning,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    MaterialTheme.colorScheme.surface,
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .padding(8.dp),
+                        )
+                    }
+                }
                 if (msg.text.startsWith("⚙️")) {
                     Text(
                         msg.text,
@@ -173,6 +212,12 @@ private fun MessageBubble(msg: ChatMsg) {
                         CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(6.dp))
                         Text("生成中…", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                    }
+                }
+                if (msg.isError) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("重试", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = onRetry) { Text("🔄") }
                     }
                 }
             }

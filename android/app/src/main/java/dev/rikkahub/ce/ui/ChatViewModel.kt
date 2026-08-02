@@ -19,6 +19,7 @@ import org.json.JSONObject
 data class ChatMsg(
     val role: String,          // user / assistant
     val text: String,
+    val reasoning: String = "",  // 推理过程（流式累积，UI 折叠显示）
     val streaming: Boolean = false,
     val isError: Boolean = false,
 )
@@ -93,8 +94,16 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         get() = messages.indexOfLast { it.role == "assistant" && it.streaming }
 
     override fun onDelta(kind: Int, text: String) {
-        if (kind != 0) return
         val idx = streamingIndex
+        if (kind == 1) {
+            // 推理内容：累积到当前 assistant 消息的 reasoning 字段
+            if (idx >= 0) {
+                messages[idx] = messages[idx].copy(reasoning = messages[idx].reasoning + text)
+            } else {
+                messages.add(ChatMsg("assistant", "", reasoning = text, streaming = true))
+            }
+            return
+        }
         if (idx >= 0) {
             messages[idx] = messages[idx].copy(text = messages[idx].text + text)
         } else {
@@ -144,6 +153,21 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
 
     fun cancel() {
         Engine.nativeSetCancel(true)
+    }
+
+    /** 重试：回到最后一条用户消息，清掉其后的 assistant 消息并重新生成 */
+    fun retryLast() {
+        if (busy) return
+        val session = currentSession ?: return
+        val lastUser = session.messages.indexOfLast { it.role == "user" && !it.isError }
+        if (lastUser < 0) return
+        while (session.messages.size > lastUser + 1) {
+            session.messages.removeAt(session.messages.size - 1)
+        }
+        val text = session.messages[lastUser].text
+        session.updatedAt = System.currentTimeMillis()
+        saveSession()
+        sendInternal(text)
     }
 
     /** 图片 OCR：识别文本作为用户消息自动发送 */
