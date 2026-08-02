@@ -81,6 +81,19 @@ static const char *jstr(const RJson *o, const char *key) {
     return NULL;
 }/* ---------- 消息解析 ---------- */
 
+/* 按魔数探测图片 MIME(默认 png; jpeg/gif/webp/heic 常见格式) */
+static const char *sniff_mime(const uint8_t *d, size_t n) {
+    if (n >= 3 && d[0] == 0xFF && d[1] == 0xD8) return "image/jpeg";
+    if (n >= 6 && d[0] == 'G' && d[1] == 'I' && d[2] == 'F') return "image/gif";
+    if (n >= 8 && d[0] == 0x89 && d[1] == 'P' && d[2] == 'N' && d[3] == 'G') return "image/png";
+    if (n >= 12 && d[0] == 'R' && d[1] == 'I' && d[2] == 'F' && d[3] == 'F') return "image/webp";
+    if (n >= 12 && d[0] == 0x00 && d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x18 &&
+        memcmp(d + 4, "ftypheic", 8) == 0) return "image/heic";
+    if (n >= 12 && d[0] == 0x00 && d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x18 &&
+        memcmp(d + 4, "ftypheix", 8) == 0) return "image/heic";
+    return "image/png";
+}
+
 static int parse_history(Arena *a, const char *history_json,
                          const RikkaMessage **out, size_t cap, size_t *n_out) {
     size_t err = 0;
@@ -114,12 +127,20 @@ static int parse_history(Arena *a, const char *history_json,
                 while ((rn = fread(rb, 1, sizeof(rb), f)) > 0) buf_append(&raw, rb, rn);
                 fclose(f);
                 if (raw.len > 0) {
+                    const char *mime = sniff_mime((const uint8_t *)raw.data, raw.len);
+                    size_t mlen = strlen(mime);          /* "image/jpeg" 等 */
+                    const char PREFIX[] = "data:;base64,";
+                    size_t pfx = sizeof(PREFIX) - 1 + mlen; /* 前缀总长 */
                     size_t cap_b64 = ((raw.len + 2) / 3) * 4 + 64;
-                    char *b64 = (char *)arena_alloc(a, 8, cap_b64);
-                    size_t b64len = b64_encode(raw.data, raw.len, b64);
-                    memmove(b64 + 22, b64, b64len);
-                    memcpy(b64, "data:image/png;base64,", 22);
-                    b64[22 + b64len] = '\0';
+                    char *b64 = (char *)arena_alloc(a, 8, cap_b64 + pfx);
+                    size_t b64len = b64_encode(raw.data, raw.len, b64 + pfx);
+                    memcpy(b64, "data:", 5);
+                    memcpy(b64 + 5, mime, mlen);
+                    memcpy(b64 + 5 + mlen, ";base64,", 8);
+                    b64[pfx + b64len] = '\0';
+                    RikkaPart *ip = rmsg_add_part(a, m, RIKKA_PART_IMAGE);
+                    ip->data = b64;
+                    ip->len = pfx + b64len;
                     RikkaPart *ip = rmsg_add_part(a, m, RIKKA_PART_IMAGE);
                     ip->data = b64;
                     ip->len = 22 + b64len;
