@@ -202,10 +202,9 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         sendInternal(text)
     }
 
-    /** 图片 OCR：识别文本作为用户消息自动发送 */
+    /** 图片 OCR：图片消息展示 + 识别文本自动发送 */
     fun ocrImage(uri: Uri) {
         if (busy) return
-        messages.add(ChatMsg("user", "🖼️ 正在识别图片…", streaming = true))
         busy = true
         viewModelScope.launch(Dispatchers.IO) {
             val provider = JSONObject()
@@ -214,6 +213,8 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
                 .put("model", providerModel)
             try {
                 val path = copyUriToFile(uri)
+                val imgMsg = ChatMsg("user", "🖼️ 正在识别图片…", streaming = true, imagePath = path)
+                messages.add(imgMsg)
                 val result = Engine.nativeOcr(provider.toString(), path)
                 val parsed = JSONObject(result)
                 val text = if (parsed.optBoolean("ok")) {
@@ -236,6 +237,8 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
                     session.updatedAt = System.currentTimeMillis()
                     saveSession()
                     sendInternal(text)
+                } else {
+                    busy = false
                 }
             } catch (e: Exception) {
                 val idx = messages.indexOfLast { it.role == "user" && it.streaming }

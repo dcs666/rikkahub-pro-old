@@ -178,6 +178,27 @@ private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit) {
             ),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                msg.imagePath?.let { path ->
+                    val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, path) {
+                        value = try {
+                            android.graphics.BitmapFactory.decodeFile(path)
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                    bitmap?.let { bmp ->
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = "图片",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Fit,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
                 if (msg.reasoning.isNotBlank()) {
                     var showReason by remember { mutableStateOf(false) }
                     TextButton(onClick = { showReason = !showReason }) {
