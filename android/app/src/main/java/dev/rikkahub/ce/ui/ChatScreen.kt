@@ -35,6 +35,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -371,6 +372,19 @@ private fun SettingsDialog(vm: ChatViewModel, onDismiss: () -> Unit) {
                         checked = vm.autoTts,
                         onCheckedChange = { vm.updateAutoTts(it) },
                     )
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("主题", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Row {
+                    listOf(0 to "跟随系统", 1 to "浅色", 2 to "深色").forEach { (mode, label) ->
+                        FilterChip(
+                            selected = vm.themeMode == mode,
+                            onClick = { vm.updateThemeMode(mode) },
+                            label = { Text(label) },
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()

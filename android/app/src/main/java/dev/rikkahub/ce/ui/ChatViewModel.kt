@@ -48,6 +48,9 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         prefs.getString("model", "gpt-4o-mini") ?: "gpt-4o-mini")
     var autoTts by mutableStateOf(prefs.getBoolean("auto_tts", false))
         private set
+    /** 主题：0=跟随系统 1=浅色 2=深色 */
+    var themeMode by mutableStateOf(prefs.getInt("theme_mode", 0))
+        private set
 
     var busy by mutableStateOf(false)
         private set
@@ -308,6 +311,11 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
     fun updateAutoTts(on: Boolean) {
         autoTts = on
         prefs.edit().putBoolean("auto_tts", on).apply()
+    }
+
+    fun updateThemeMode(mode: Int) {
+        themeMode = mode
+        prefs.edit().putInt("theme_mode", mode).apply()
     }
 
     fun clearSession() {
