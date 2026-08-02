@@ -31,6 +31,10 @@ cd /tmp
 if [ ! -d "openssl-$VER" ]; then
   curl -fsSL "https://github.com/openssl/openssl/archive/refs/tags/openssl-$VER.tar.gz" -o ossl.tgz
   tar xzf ossl.tgz
+  # GitHub archive 解压目录名是 openssl-openssl-3.0.13(非 openssl-3.0.13)
+  if [ ! -d "openssl-$VER" ]; then
+    mv "openssl-openssl-$VER" "openssl-$VER"
+  fi
 fi
 SRC="/tmp/openssl-$VER"
 
