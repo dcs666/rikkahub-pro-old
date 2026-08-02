@@ -268,3 +268,10 @@
 - tenv.tool_whitelist 传递(白名单此前未生效)
 - tenv.workspace_cwd 设置(workspace_shell 默认在 workspaceCwd 执行, 原为 /)
 - 确认: 采样参数/custom_body 测试 / 白名单→tools JSON 自动 / memory 反调条件
+
+### 25轮深度优化(第七批) — 已提交
+- per-call 取消: cancel_id 槽表(16槽)替代全局 g_cancel — 多会话并发互不干扰
+- ask_user 完整透传 questions 数组(引擎→UI 多问题 + options 快捷选择)
+- HTTP 3xx 重定向跟随(最多3次, 对齐 OkHttp) + mock /redirect + 测试
+- CI 失败修复: memoryAction non-local return / DeviceTools import / RikkaProviderCfg 初始化器
+- 确认: 重定向 Host 头正确/Authorization 跨域保留(信任场景)/304 不跟随
