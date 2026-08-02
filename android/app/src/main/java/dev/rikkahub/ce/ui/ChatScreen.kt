@@ -254,6 +254,7 @@ private fun MessageList(vm: ChatViewModel, modifier: Modifier = Modifier) {
         }
         items(vm.messages) { msg ->
             MessageBubble(
+                vm,
                 msg,
                 onRetry = { vm.retryLast() },
                 fontSize = vm.fontSize,
@@ -314,7 +315,7 @@ private fun EmptyState(vm: ChatViewModel) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15) {
+private fun MessageBubble(vm: ChatViewModel, msg: ChatMsg, onRetry: () -> Unit, fontSize: Int = 15) {
     val isUser = msg.role == "user"
     val ctx = LocalContext.current
     var showMenu by remember { mutableStateOf(false) }

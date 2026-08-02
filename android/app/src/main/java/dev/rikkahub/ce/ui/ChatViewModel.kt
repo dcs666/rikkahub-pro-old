@@ -231,6 +231,35 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         sendInternal(text)
     }
 
+    /** 图片直发（多模态）：图片 + 描述作为一条用户消息 */
+    fun sendImage(uri: Uri, caption: String) {
+        if (busy) return
+        busy = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val session = currentSession ?: run {
+                newSession()
+                return@launch
+            }
+            try {
+                val path = copyUriToFile(uri)
+                val text = caption.ifBlank { "🖼️ 图片" }
+                session.messages.add(ChatMsg("user", text, imagePath = path))
+                if (session.title == "新会话") {
+                    session.title = "图片会话"
+                }
+                session.updatedAt = System.currentTimeMillis()
+                saveSession()
+                sendInternal(text, path)
+            } catch (e: Exception) {
+                session.messages.add(
+                    ChatMsg("assistant", "图片发送失败：${e.message}", isError = true),
+                )
+                busy = false
+                saveSession()
+            }
+        }
+    }
+
     private fun copyUriToFile(uri: Uri): String {
         val file = java.io.File(appContext.cacheDir, "ocr_input.png")
         appContext.contentResolver.openInputStream(uri)?.use { input ->
