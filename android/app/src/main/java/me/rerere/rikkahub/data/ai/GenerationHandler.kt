@@ -281,9 +281,9 @@ class GenerationHandler(
             }
         }
 
-        // ---- 消费事件 → 组装 UI 消息（90s 无事件超时保护） ----
+        // ---- 消费事件 → 组装 UI 消息（130s 无事件超时保护；引擎侧每轮 120s + 余量） ----
         val currentParts = mutableListOf<UIMessagePart>()
-        val deadline = System.currentTimeMillis() + 90_000L
+        val deadline = System.currentTimeMillis() + 130_000L
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
