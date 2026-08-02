@@ -26,4 +26,7 @@ object Engine {
 
     /** 图片 OCR：返回 {"ok":true,"text":"..."} 或 {"ok":false,"error":"..."} */
     external fun nativeOcr(providerJson: String, imagePath: String): String
+
+    /** 会话标题生成：返回 {"ok":true,"title":"..."} 或 {"ok":false,"error":"..."} */
+    external fun nativeGenerateTitle(providerJson: String, content: String): String
 }

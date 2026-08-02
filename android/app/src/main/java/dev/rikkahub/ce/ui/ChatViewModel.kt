@@ -132,7 +132,39 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         if (ok && autoTts) {
             val last = messages.lastOrNull { it.role == "assistant" && !it.isError }
             if (last != null) {
-                dev.rikkahub.ce.DeviceTools.ttsSpeak(last.text.take(500))
+                me.rerere.rikkahub.ce.DeviceTools.ttsSpeak(last.text.take(500))
+            }
+        }
+        if (ok) {
+            val s = currentSession
+            if (s != null && s.title == "新会话") {
+                generateTitle(s)
+            }
+        }
+    }
+
+    /** 会话标题 LLM 生成（首轮回复后异步，失败保留默认名） */
+    private fun generateTitle(session: ChatSession) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val provider = JSONObject()
+                    .put("base_url", providerBaseUrl)
+                    .put("api_key", providerApiKey)
+                    .put("model", providerModel)
+                val content = session.messages
+                    .take(6)
+                    .joinToString("\n") { "${it.role}: ${it.text.take(200)}" }
+                val result = Engine.nativeGenerateTitle(provider.toString(), content)
+                val parsed = JSONObject(result)
+                if (parsed.optBoolean("ok")) {
+                    val t = parsed.optString("title").trim().take(20)
+                    if (t.isNotBlank()) {
+                        session.title = t
+                        saveSessionMeta()
+                    }
+                }
+            } catch (_: Exception) {
+                // 标题生成失败不影响主流程
             }
         }
     }

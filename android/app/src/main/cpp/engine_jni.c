@@ -358,6 +358,90 @@ Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
     return result;
 }
 
+JNIEXPORT jstring JNICALL
+Java_dev_rikkahub_ce_Engine_nativeGenerateTitle(JNIEnv *env, jclass cls,
+                                                jstring provider_json,
+                                                jstring content) {
+    (void)cls;
+    const char *pj = provider_json ? (*env)->GetStringUTFChars(env, provider_json, NULL) : NULL;
+    const char *ct = content ? (*env)->GetStringUTFChars(env, content, NULL) : NULL;
+    if (!pj || !ct) {
+        if (pj) (*env)->ReleaseStringUTFChars(env, provider_json, pj);
+        if (ct) (*env)->ReleaseStringUTFChars(env, content, ct);
+        return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"bad args\"}");
+    }
+    Arena *a = arena_create(0);
+    size_t jerr = 0;
+    RJson *pv = rjson_parse(a, pj, strlen(pj), &jerr);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI,
+                            jstr(pv, "base_url") ? jstr(pv, "base_url") : "",
+                            jstr(pv, "api_key") ? jstr(pv, "api_key") : "",
+                            jstr(pv, "model") ? jstr(pv, "model") : "",
+                            4096, 0, NULL, {0}};
+
+    /* system = 标题 prompt；user = 会话内容 */
+    const char *names[2] = {"locale", "content"};
+    const char *values[2] = {"zh-CN", ct};
+    char *sys = rk_prompt_fill(a, RK_PROMPT_TITLE, names, values, 2);
+    RikkaMessage *sm = rmsg_new(a, RIKKA_ROLE_SYSTEM);
+    RikkaPart *sp = rmsg_add_part(a, sm, RIKKA_PART_TEXT);
+    sp->data = sys;
+    sp->len = strlen(sys);
+    RikkaMessage *um = rmsg_new(a, RIKKA_ROLE_USER);
+    RikkaPart *up = rmsg_add_part(a, um, RIKKA_PART_TEXT);
+    up->data = ct;
+    up->len = strlen(ct);
+    const RikkaMessage *msgs[2] = {sm, um};
+    RikkaStream out;
+    rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+    int rc = rp_chat_stream(&cfg, msgs, 2, &out, 60000, NULL);
+    char *text = NULL;
+    if (rc == 0) {
+        /* 提取文本 parts 拼接 */
+        Buf b;
+        buf_init(&b);
+        for (size_t i = 0; i < out.msg->part_count; i++) {
+            const RikkaPart *p = &out.msg->parts[i];
+            if (p->type == RIKKA_PART_TEXT && p->data) buf_append(&b, p->data, p->len);
+        }
+        if (b.len > 0) {
+            text = (char *)malloc(b.len + 1);
+            if (text) {
+                memcpy(text, b.data, b.len);
+                text[b.len] = '\0';
+            }
+        }
+        buf_free(&b);
+    }
+    rstream_destroy(&out);
+
+    Buf out_json;
+    buf_init(&out_json);
+    if (text && text[0]) {
+        buf_append_str(&out_json, "{\"ok\":true,\"title\":");
+        buf_append_byte(&out_json, '"');
+        for (const char *q = text; *q; q++) {
+            if (*q == '"' || *q == '\\') {
+                buf_append_byte(&out_json, '\\');
+                buf_append_byte(&out_json, (uint8_t)*q);
+            } else {
+                buf_append_byte(&out_json, (uint8_t)*q);
+            }
+        }
+        buf_append_byte(&out_json, '"');
+        buf_append_str(&out_json, "}");
+    } else {
+        buf_append_str(&out_json, "{\"ok\":false,\"error\":\"title generation failed\"}");
+    }
+    jstring result = (*env)->NewStringUTF(env, (const char *)out_json.data);
+    free(text);
+    buf_free(&out_json);
+    arena_destroy(a);
+    (*env)->ReleaseStringUTFChars(env, provider_json, pj);
+    (*env)->ReleaseStringUTFChars(env, content, ct);
+    return result;
+}
+
 /* ---------- JNI 入口 ---------- */
 
 JNIEXPORT jstring JNICALL
