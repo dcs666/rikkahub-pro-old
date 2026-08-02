@@ -377,7 +377,15 @@ Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
     buf_init(&raw);
     char rb[8192];
     size_t n;
-    while ((n = fread(rb, 1, sizeof(rb), f)) > 0) buf_append(&raw, rb, n);
+    while ((n = fread(rb, 1, sizeof(rb), f)) > 0) {
+        if (raw.len + n > 16 * 1024 * 1024) { /* 超大图保护(16MB) */
+            buf_free(&raw);
+            fclose(f);
+            return (*env)->NewStringUTF(env,
+                "{\"ok\":false,\"error\":\"image too large\"}");
+        }
+        buf_append(&raw, rb, n);
+    }
     fclose(f);
     char *b64 = (char *)malloc(((raw.len + 2) / 3) * 4 + 1);
     if (!b64) { buf_free(&raw); return (*env)->NewStringUTF(env, "{\"ok\":false,\"error\":\"oom\"}"); }
