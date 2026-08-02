@@ -281,9 +281,10 @@ class GenerationHandler(
             }
         }
 
-        // ---- 消费事件 → 组装 UI 消息（130s 无事件超时保护；引擎侧每轮 120s + 余量） ----
+        // ---- 消费事件 → 组装 UI 消息（滚动超时：130s 无事件保护；
+        // 引擎侧每轮 120s，多轮工具循环总时长可能更长 → 收到事件即续期） ----
         val currentParts = mutableListOf<UIMessagePart>()
-        val deadline = System.currentTimeMillis() + 130_000L
+        var deadline = System.currentTimeMillis() + 130_000L
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
@@ -296,6 +297,7 @@ class GenerationHandler(
                 logMsg(TAG, "generateText: channel closed or timeout, stopping")
                 break
             }
+            deadline = System.currentTimeMillis() + 130_000L
             when (evt) {
                 is Evt.Delta -> {
                     if (evt.kind == 1) {
