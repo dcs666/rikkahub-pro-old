@@ -113,7 +113,7 @@ static int parse_history(Arena *a, const char *history_json,
                 fclose(f);
                 if (raw.len > 0) {
                     size_t cap_b64 = ((raw.len + 2) / 3) * 4 + 64;
-                    char *b64 = (char *)arena_alloc(a, cap_b64);
+                    char *b64 = (char *)arena_alloc(a, 8, cap_b64);
                     size_t b64len = b64_encode(raw.data, raw.len, b64);
                     memmove(b64 + 22, b64, b64len);
                     memcpy(b64, "data:image/png;base64,", 22);
