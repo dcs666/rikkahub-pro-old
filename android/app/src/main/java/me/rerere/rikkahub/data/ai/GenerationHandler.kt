@@ -271,18 +271,4 @@ class GenerationHandler(
     }
 }
 
-/** [CE] ProviderSetting 具体子类字段提取（baseUrl/apiKey 在子类） */
-private fun ProviderSetting.baseUrlOr(): String = when (this) {
-    is ProviderSetting.OpenAI -> baseUrl
-    is ProviderSetting.Google -> baseUrl
-    is ProviderSetting.Claude -> baseUrl
-    else -> ""
-}
-
-private fun ProviderSetting.apiKeyOr(): String = when (this) {
-    is ProviderSetting.OpenAI -> apiKey
-    is ProviderSetting.Google -> apiKey
-    is ProviderSetting.Claude -> apiKey
-    else -> ""
-}
 

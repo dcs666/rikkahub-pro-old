@@ -89,23 +89,24 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         val settings = get<SettingsStore>().settingsFlow.value
         val model = settings.findModelById(settings.ocrModelId) ?: return "[Image]"
         val providerSetting = model.findProvider(settings.providers) ?: return "[Image]"
-        val provider = get<ProviderManager>().getProviderByType(providerSetting)
-        val result = provider.generateText(
-            providerSetting = providerSetting,
-            messages = listOf(
-                UIMessage.system(settings.ocrPrompt),
-                UIMessage(
-                    role = MessageRole.USER,
-                    parts = listOf(UIMessagePart.Image(part.url))
-                )
-            ),
-            params = TextGenerationParams(
-                model = model,
-                customHeaders = model.customHeaders,
-                customBody = model.customBodies,
-            ),
-        )
-        val content = result.choices[0].message?.toText() ?: "[ERROR, OCR failed]"
+        // [CE] 走 C 引擎 rk_ocr_image（JNI）
+        val path = part.url.removePrefix("file://").removePrefix("file:")
+        val result = withContext(Dispatchers.IO) {
+            dev.rikkahub.ce.Engine.nativeOcr(
+                org.json.JSONObject()
+                    .put("base_url", providerSetting.baseUrlOr().trimEnd('/'))
+                    .put("api_key", providerSetting.apiKeyOr())
+                    .put("model", model.modelId)
+                    .toString(),
+                path,
+            )
+        }
+        val content = try {
+            val parsed = org.json.JSONObject(result)
+            if (parsed.optBoolean("ok")) parsed.optString("text") else "[ERROR, OCR failed]"
+        } catch (_: Exception) {
+            "[ERROR, OCR failed]"
+        }
         Log.i(TAG, "performOcr: $content")
         val ocrResult = """
             <image_file_ocr>
