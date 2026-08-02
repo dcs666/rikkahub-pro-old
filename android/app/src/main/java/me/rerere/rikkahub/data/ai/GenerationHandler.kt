@@ -286,4 +286,3 @@ private fun ProviderSetting.apiKeyOr(): String = when (this) {
     else -> ""
 }
 
-.flowOn(Dispatchers.IO)
