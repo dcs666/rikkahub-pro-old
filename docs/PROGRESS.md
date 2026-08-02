@@ -247,3 +247,9 @@
 - 事件消费滚动超时(130s 无事件保护; 多轮工具循环不再中断)
 - 确认: get_time_info 输出对齐 / ChatCallback 签名一致 / 注入管线不重复 /
   workspaceCwd 链路一致 / timeout 每轮 120s 语义
+
+### 待办(发布后)
+- 系统代理支持: turbo 用 OkHttp 自动走系统代理, C 引擎直连不走代理 → 需 HTTP CONNECT + Android 系统代理读取(JNI)
+- MCP 客户端接线: 引擎 mcp.c 完备但未注册为工具(JNI 桥缺失)
+- 多会话 g_cancel 全局互扰(现 UI 单会话生成, 风险低)
+- ask_user 多问题 UI(引擎已支持 questions 数组, 壳层 UI 未做多问题展示)
