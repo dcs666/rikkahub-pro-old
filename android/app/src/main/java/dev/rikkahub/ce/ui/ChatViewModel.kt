@@ -347,10 +347,14 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
         val arr = JSONArray()
         for (m in s.messages) {
             if (m.tool != null) continue  // 工具消息不持久化（重启后模型上下文亦排除）
-            arr.put(JSONObject()
+            val jo = JSONObject()
                 .put("role", m.role)
                 .put("text", m.text)
-                .put("error", m.isError))
+                .put("error", m.isError)
+            if (m.imagePath != null) {
+                jo.put("image", m.imagePath)
+            }
+            arr.put(jo)
         }
         prefs.edit().putString("session_${s.id}", arr.toString()).apply()
         saveSessionMeta()
@@ -396,6 +400,7 @@ class ChatViewModel(private val appContext: Context) : ViewModel(), ChatCallback
                         role = o.getString("role"),
                         text = o.getString("text"),
                         isError = o.optBoolean("error", false),
+                        imagePath = if (o.has("image")) o.getString("image") else null,
                     ))
                 }
             } catch (_: Exception) {
