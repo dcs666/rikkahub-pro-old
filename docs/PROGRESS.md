@@ -122,3 +122,9 @@
   - 崩溃: SQLiteException dlopen libsimple.so not found (coil MemoryCacheService 加载 SQLite 扩展)
   - 根因: .gitignore 的 *.so 把 jniLibs/libsimple.so 排除, APK 缺库
   - 修复: 强制提交 libsimple.so (arm64/x86_64) + .gitignore 例外规则
+
+- **1b5c361: CI 全绿 — 助手无回复诊断修复** (2026-08-02)
+  - 用户反馈: 消息能发但助手不回复
+  - 修复: provider 日志(掩码 apiKey)/nativeChat 返回校验(补发 Finish)/90s 超时/空配置提前报错
+  - 待发 v0.7.2 诊断版, 用户复测 + logcat
+- 轮询间隔: 140 秒 (用户指定)
