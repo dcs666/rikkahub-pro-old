@@ -349,6 +349,59 @@ static const RJsonStreamPathElem P_CLAUDE_THINK[] = {
 static const RJsonStreamPathElem P_GOOG_TEXT[] = {
     {0, {.key = "candidates"}}, {1, {.index = 0}}, {0, {.key = "content"}},
     {0, {.key = "parts"}}, {1, {.index = 0}}, {0, {.key = "text"}}, {-2, {0}}};
+static const RJsonStreamPathElem P_GOOG_FC[] = {
+    {0, {.key = "candidates"}}, {1, {.index = 0}}, {0, {.key = "content"}},
+    {0, {.key = "parts"}}, {1, {.index = 0}}, {0, {.key = "functionCall"}},
+    {-2, {0}}};
+
+/* Google functionCall（完整对象，非分片）：解析 name/args 构造 TOOL_CALL part */
+static void google_finalize_tool_call(RikkaStreamSession *ss) {
+    if (!ss->out || !ss->out->msg || ss->tc_args_buf.len == 0) return;
+    Arena *a = arena_create(0);
+    size_t err = 0;
+    RJson *v = rjson_parse(a, (const char *)ss->tc_args_buf.data,
+                           ss->tc_args_buf.len, &err);
+    if (v && v->type == RJSON_OBJECT) {
+        const RJson *name = rjson_obj_get(v, "name");
+        const RJson *args = rjson_obj_get(v, "args");
+        if (name && name->type == RJSON_STRING) {
+            RikkaPart *p = rmsg_add_part(a, ss->out->msg, RIKKA_PART_TOOL_CALL);
+            if (p) {
+                size_t nlen = name->u.str.len;
+                char *nc = (char *)arena_alloc(a, 1, nlen + 1);
+                if (nc) {
+                    memcpy(nc, name->u.str.ptr, nlen);
+                    nc[nlen] = '\0';
+                    p->tool_name = nc;
+                }
+                if (args) {
+                    RJsonOut jo;
+                    rjson_out_init(&jo);
+                    rjson_write_value(&jo, args);
+                    buf_append(&ss->tc_args_buf, jo.buf, jo.len);
+                    buf_append_byte(&ss->tc_args_buf, '\0');
+                    char *ac = (char *)arena_alloc(a, 1, jo.len + 1);
+                    if (ac) {
+                        memcpy(ac, jo.buf, jo.len);
+                        ac[jo.len] = '\0';
+                        p->data = ac;
+                        p->len = jo.len;
+                    }
+                    rjson_out_free(&jo);
+                } else {
+                    char *ac = (char *)arena_alloc(a, 1, 3);
+                    if (ac) {
+                        memcpy(ac, "{}", 3);
+                        p->data = ac;
+                        p->len = 2;
+                    }
+                }
+            }
+        }
+    }
+    arena_destroy(a);
+    buf_reset(&ss->tc_args_buf);
+}
 /* OpenAI tool_calls delta（index 0 单调用；并行多 index 打磨期扩展） */
 static const RJsonStreamPathElem P_OAI_TC_NAME[] = {
     {0, {.key = "choices"}}, {1, {.index = 0}}, {0, {.key = "delta"}},
@@ -468,6 +521,9 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
     case RIKKA_PROVIDER_GOOGLE:
         if (strcmp(event, "message") == 0) {
             run_extract(ss->js_text, data, len);
+            /* functionCall 完整对象捕获（非分片）：捕获后立即解析构造 */
+            run_extract(ss->js_tc_args, data, len);
+            google_finalize_tool_call(ss);
         }
         break;
     }
@@ -667,6 +723,7 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
             break;
         case RIKKA_PROVIDER_GOOGLE:
             rjson_stream_set_path(ss->js_text, P_GOOG_TEXT);
+            rjson_stream_set_path(ss->js_tc_args, P_GOOG_FC);
             break;
     }
     return 0;

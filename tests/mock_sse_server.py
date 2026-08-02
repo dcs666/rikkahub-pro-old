@@ -524,6 +524,28 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, ValueError):
                 pass
+        elif self.path == '/google_tool':
+            # Google functionCall 回放（完整对象）
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            evs = [
+                'data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"get_time_info","args":{"time":"now"}}}]}}]}\n\n',
+                'data: [DONE]\n\n',
+            ]
+            for e in evs:
+                try:
+                    b = e.encode()
+                    self.wfile.write(('%x\r\n' % len(b)).encode() + b + b'\r\n')
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    break
+            try:
+                self.wfile.write(b'0\r\n\r\n')
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ValueError):
+                pass
         elif self.path == '/google':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
