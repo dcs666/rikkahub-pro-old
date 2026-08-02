@@ -18,6 +18,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
@@ -216,9 +217,9 @@ class GenerationHandler(
             }
         }
         job.join()
+        Log.i(TAG, "generateText done: parts=${currentParts.size}")
         }
         processingStatus.value = null
-        Log.i(TAG, "generateText done: parts=${currentParts.size}")
     }
 
     /** [CE] 翻译：走 C 引擎单轮生成 */
