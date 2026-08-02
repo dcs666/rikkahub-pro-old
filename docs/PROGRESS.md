@@ -94,3 +94,10 @@
 - **1a2fda5: android-build 全绿 — turbo UI 工程 + C 引擎集成构建成功!** (2026-08-02)
   - 10 模块 + web-ui 前端 + material-color-utilities submodule 全部就位
   - 待办: GenerationHandler.kt C 化 (JNI 调 rk_chat)
+
+- **4533e5e: GenerationHandler C 化提交** (2026-08-02)
+  - generateText 内部改 JNI 调 C 引擎 (rk_chat): 消息/配置序列化 JSON,
+    回调事件 channel 桥 → UIMessagePart 组装 → 流式 emit
+  - translateText 同步 C 化
+  - C 侧 parse_history 支持 image_url (http 图片直传)
+  - 待验证: CI 编译 + 真机行为
