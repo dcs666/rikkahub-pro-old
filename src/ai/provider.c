@@ -719,75 +719,109 @@ static int start_once(RikkaStreamSession *ss, const char *path,
     char host[256], prefix[512], full[1024];
     uint16_t port;
     int tls;
-    if (rhttp_parse_url(ss->cfg.base_url, host, sizeof(host), &port, &tls,
-                        prefix, sizeof(prefix)) != 0)
-        return -1;
-    if (!path) {
-        /* baseUrl 尾斜杠(如 https://x/v1/)时去掉，防拼接双斜杠 */
-        size_t pl = strlen(prefix);
-        while (pl > 1 && prefix[pl - 1] == '/') prefix[--pl] = '\0';
-        if (ss->cfg.id == RIKKA_PROVIDER_GOOGLE) {
-            /* 字面量格式串：model 作为 %.240s 参数（防 model 含 % 被当格式符） */
-            snprintf(full, sizeof(full),
-                     "%s/v1beta/models/%.240s:streamGenerateContent?alt=sse",
-                     prefix, ss->cfg.model ? ss->cfg.model : "");
-        } else {
-            snprintf(full, sizeof(full), "%s%s", prefix, default_chat_path(ss->cfg.id));
+    char redir_base[2048];
+    char loc_path[1024];
+    const char *cur_base = ss->cfg.base_url ? ss->cfg.base_url : "";
+    const char *cur_path = path;
+    int redirects = 0;
+    redir_base[0] = '\0';
+    loc_path[0] = '\0';
+    for (;;) {
+        if (rhttp_parse_url(cur_base, host, sizeof(host), &port, &tls,
+                            prefix, sizeof(prefix)) != 0)
+            return -1;
+        if (!cur_path) {
+            /* baseUrl 尾斜杠(如 https://x/v1/)时去掉，防拼接双斜杠 */
+            size_t pl = strlen(prefix);
+            while (pl > 1 && prefix[pl - 1] == '/') prefix[--pl] = '\0';
+            if (ss->cfg.id == RIKKA_PROVIDER_GOOGLE) {
+                /* 字面量格式串：model 作为 %.240s 参数（防 model 含 % 被当格式符） */
+                snprintf(full, sizeof(full),
+                         "%s/v1beta/models/%.240s:streamGenerateContent?alt=sse",
+                         prefix, ss->cfg.model ? ss->cfg.model : "");
+            } else {
+                snprintf(full, sizeof(full), "%s%s", prefix, default_chat_path(ss->cfg.id));
+            }
+            cur_path = full;
         }
-        path = full;
-    }
-    RHttpConn *conn = rhttp_connect(host, port, tls, timeout_ms);
-    if (!conn) {
-        /* 记录连接/TLS 失败详情（供上层诊断） */
-        unsigned long e = ERR_get_error();
-        char msg[192];
-        if (e) {
-            const char *r = ERR_reason_error_string(e);
-            snprintf(msg, sizeof(msg), "connect/TLS failed: %s",
-                     r ? r : "unknown error");
-        } else {
-            snprintf(msg, sizeof(msg),
-                     "connect failed (dns/timeout/refused)");
+        RHttpConn *conn = rhttp_connect(host, port, tls, timeout_ms);
+        if (!conn) {
+            /* 记录连接/TLS 失败详情（供上层诊断） */
+            unsigned long e = ERR_get_error();
+            char msg[192];
+            if (e) {
+                const char *r = ERR_reason_error_string(e);
+                snprintf(msg, sizeof(msg), "connect/TLS failed: %s",
+                         r ? r : "unknown error");
+            } else {
+                snprintf(msg, sizeof(msg),
+                         "connect failed (dns/timeout/refused)");
+            }
+            free(ss->last_error);
+            ss->last_error = strdup(msg);
+            return -1;
         }
-        free(ss->last_error);
-        ss->last_error = strdup(msg);
-        return -1;
-    }
 
-    char auth[512];
-    const char *hdrs[8];
-    int nh = 0;
-    if (ss->cfg.api_key && ss->cfg.id != RIKKA_PROVIDER_GOOGLE) {
-        snprintf(auth, sizeof(auth), "Bearer %s", ss->cfg.api_key);
-        hdrs[nh++] = "Authorization";
-        hdrs[nh++] = auth;
-    } else if (ss->cfg.api_key) {
-        hdrs[nh++] = "x-goog-api-key";
-        hdrs[nh++] = ss->cfg.api_key;
-    }
-    hdrs[nh++] = "Content-Type";
-    hdrs[nh++] = "application/json";
-    hdrs[nh++] = "Accept";
-    hdrs[nh++] = "text/event-stream";
-    hdrs[nh] = NULL;
+        char auth[512];
+        const char *hdrs[8];
+        int nh = 0;
+        if (ss->cfg.api_key && ss->cfg.id != RIKKA_PROVIDER_GOOGLE) {
+            snprintf(auth, sizeof(auth), "Bearer %s", ss->cfg.api_key);
+            hdrs[nh++] = "Authorization";
+            hdrs[nh++] = auth;
+        } else if (ss->cfg.api_key) {
+            hdrs[nh++] = "x-goog-api-key";
+            hdrs[nh++] = ss->cfg.api_key;
+        }
+        hdrs[nh++] = "Content-Type";
+        hdrs[nh++] = "application/json";
+        hdrs[nh++] = "Accept";
+        hdrs[nh++] = "text/event-stream";
+        hdrs[nh] = NULL;
 
-    if (rhttp_send(conn, "POST", path, hdrs, body, body_len) != 0) {
-        rhttp_close(conn);
-        return -1;
+        if (rhttp_send(conn, "POST", cur_path, hdrs, body, body_len) != 0) {
+            rhttp_close(conn);
+            return -1;
+        }
+        RHttpResp resp;
+        if (rhttp_read_headers(conn, &resp, timeout_ms) != 0) {
+            rhttp_close(conn);
+            return -1;
+        }
+        /* 跟随 3xx 重定向(最多 3 次; 对齐 OkHttp 行为) */
+        if (resp.status >= 300 && resp.status < 400 && resp.status != 304 &&
+            redirects < 3) {
+            char loc[1024];
+            if (rhttp_resp_header(conn, "Location", loc, sizeof(loc)) == 0 &&
+                loc[0]) {
+                rhttp_close(conn);
+                redirects++;
+                if (loc[0] == '/') {
+                    /* 相对路径: 同 host 换路径重连 */
+                    snprintf(loc_path, sizeof(loc_path), "%s", loc);
+                    cur_path = loc_path;
+                } else if (strncmp(loc, "http://", 7) == 0 ||
+                           strncmp(loc, "https://", 8) == 0) {
+                    /* 绝对 URL: 换 base, 路径按新 base 重新构造 */
+                    snprintf(redir_base, sizeof(redir_base), "%s", loc);
+                    cur_base = redir_base;
+                    cur_path = NULL;
+                } else {
+                    break; /* 无法处理的重定向 */
+                }
+                continue;
+            }
+        }
+        if (http_status) *http_status = resp.status;
+        if (resp.status < 200 || resp.status >= 300) {
+            capture_error_detail(ss, conn);
+            rhttp_close(conn);
+            return -2;
+        }
+        ss->conn = conn;
+        return 0;
     }
-    RHttpResp resp;
-    if (rhttp_read_headers(conn, &resp, timeout_ms) != 0) {
-        rhttp_close(conn);
-        return -1;
-    }
-    if (http_status) *http_status = resp.status;
-    if (resp.status < 200 || resp.status >= 300) {
-        capture_error_detail(ss, conn);
-        rhttp_close(conn);
-        return -2;
-    }
-    ss->conn = conn;
-    return 0;
+    return -1;
 }
 
 int rp_stream_start(RikkaStreamSession *ss, const char *path,

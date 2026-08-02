@@ -260,6 +260,13 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Content-Length', '0')
             self.end_headers()
             return
+        if self.path == '/redirect':
+            # 重定向测试钩子：302 → /openai（相对路径，跟随后应拿到 chat SSE 流）
+            self.send_response(302)
+            self.send_header('Location', '/openai')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         if self.path == '/mcp/sse':
             self._sse_stream('/mcp/messages')  # 相对 endpoint（主路径）
         if self.path == '/mcp/sse_abs':

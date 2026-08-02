@@ -484,6 +484,39 @@ TEST(stream_retry_success_after_500) {
     stop_mock_server();
 }
 
+/* 重定向跟随: 302 /redirect → /sse(相对 Location) */
+TEST(stream_redirect_follow) {
+    start_mock_server();
+    char base[64];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d", g_port);
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_OPENAI, base, "test-key", "mock-model", 100, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaStream out;
+    rstream_init(&out, a, RIKKA_ROLE_ASSISTANT);
+    RikkaStreamSession *ss = rp_session_create(&cfg);
+    ASSERT_NOT_NULL(ss);
+    Buf body;
+    buf_init(&body);
+    rp_build_request(&cfg, msgs, 1, 1, &body);
+    int status = 0;
+    int rc = rp_stream_start(ss, "/redirect", (const char *)body.data, body.len, &out, 5000, &status);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_EQ_INT(200, status); /* 跟随后落到 /sse */
+    ASSERT_EQ_INT(0, rp_stream_pump(ss, 3000));
+    rstream_freeze(&out);
+    char text[512];
+    text_of(&out, text, sizeof(text), 0);
+    ASSERT(strstr(text, "Hello") != NULL);
+    rstream_destroy(&out);
+    rmsg_free_bufs(out.msg);
+    buf_free(&body);
+    rp_session_destroy(ss);
+    arena_destroy(a);
+    stop_mock_server();
+}
+
 /* 重试中间件：429 限流两次后成功 */
 TEST(stream_retry_429_then_success) {
     start_mock_server();
@@ -767,6 +800,7 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, build_openai_tool),
         RIKKA_TEST_REGISTER(provider, stream_retry_on_500),
         RIKKA_TEST_REGISTER(provider, stream_retry_success_after_500),
+        RIKKA_TEST_REGISTER(provider, stream_redirect_follow),
         RIKKA_TEST_REGISTER(provider, stream_retry_429_then_success),
         RIKKA_TEST_REGISTER(provider, stream_retry_4xx_no_retry),
         RIKKA_TEST_REGISTER(provider, stream_openai),
