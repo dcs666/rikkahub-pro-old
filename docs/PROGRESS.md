@@ -356,3 +356,10 @@
 - 会话索引接线(1b96f16): ChatStore.init + saveConversation 索引钩子
   (recent_chats/conversation_search 工具数据源; 此前恒空)
 - ChatStore 索引上限(45957e4): 会话 200/消息 500 防 prefs 膨胀
+
+### 🎉 v0.7.12-ce 发布中(e85b241, 2026-08-03)
+- CI 全绿(含 Kotlin 编译验证); tag v0.7.12-ce 已推, Release 构建中
+- 核心: 消息膨胀修复(稳定 id) + 会话索引接线 + ChatStore 上限
+- 新增: 输入变换接线(模式注入/lorebook/模板/OCR/文档/时间提醒全部激活)
+  + 输出正则替换接线(assistant.regexes)
+- 版本 0.7.12/712
