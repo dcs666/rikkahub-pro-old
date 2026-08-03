@@ -31,7 +31,7 @@ C 引擎的 Android 壳层（`android/` 目录，NDK + Kotlin/Compose）：
 
 ```bash
 make            # 构建全部
-make test       # 单元测试 (190/190)
+make test       # 单元测试 (200/200)
 make check      # 零 warning 门禁 + 全测试
 make strict     # 严格告警门禁 (-Wshadow/-Wconversion/...)
 make bench      # 性能基准
