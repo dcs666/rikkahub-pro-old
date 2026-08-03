@@ -313,6 +313,63 @@ TEST(stream_retry_on_500) {
 }
 
 /* 带 tools 的请求体必须是合法 JSON(回归: tools 曾在 } 之后拼接 → 非法) */
+static void test_custom_body_claude(void) {
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[2];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_SYSTEM, "s");
+    msgs[1] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_CLAUDE, "https://api.anthropic.com", "sk", "m", 100, 0,
+                            NULL, {0}, NULL, 0, -1, -1, NULL, NULL};
+    cfg.custom_body = "\"extra\":{\"k\":\"v\"}";
+    Buf out;
+    buf_init(&out);
+    ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 2, 1, &out));
+    Arena *a2 = arena_create(0);
+    size_t err = 0;
+    RJson *v = rjson_parse(a2, (const char *)out.data, out.len, &err);
+    ASSERT_NOT_NULL(v);
+    const RJson *ex = rjson_obj_get(v, "extra");
+    ASSERT_NOT_NULL(ex);
+    buf_free(&out);
+    arena_destroy(a);
+    arena_destroy(a2);
+}
+
+static void test_custom_body_google(void) {
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_GOOGLE, "https://generativelanguage.googleapis.com", "gk", "m", 100, 0,
+                            NULL, {0}, NULL, 0, -1, -1, NULL, NULL};
+    cfg.custom_body = "\"extra\":{\"k\":\"v\"}";
+    Buf out;
+    buf_init(&out);
+    ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 1, 1, &out));
+    Arena *a2 = arena_create(0);
+    size_t err = 0;
+    RJson *v = rjson_parse(a2, (const char *)out.data, out.len, &err);
+    ASSERT_NOT_NULL(v);
+    const RJson *ex = rjson_obj_get(v, "extra");
+    ASSERT_NOT_NULL(ex);
+    buf_free(&out);
+    arena_destroy(a);
+    arena_destroy(a2);
+}
+
+static void test_custom_headers_json(void) {
+    /* custom_headers 是 HTTP 层消费(JSON 对象), 这里验证 JSON 合法 */
+    Arena *a = arena_create(0);
+    size_t err = 0;
+    const char *hj = "{\"X-Test\":\"abc\",\"X-Num\":\"42\"}";
+    RJson *v = rjson_parse(a, hj, strlen(hj), &err);
+    ASSERT_NOT_NULL(v);
+    ASSERT(v->type == RJSON_OBJECT);
+    const RJson *xt = rjson_obj_get(v, "X-Test");
+    ASSERT_NOT_NULL(xt);
+    ASSERT(xt->type == RJSON_STRING);
+    arena_destroy(a);
+}
+
 static void test_build_openai_tools_json_valid(void) {
     Arena *a = arena_create(0);
     const RikkaMessage *msgs[1];
@@ -815,6 +872,9 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, provider_sampling_params),
         RIKKA_TEST_REGISTER(provider, reasoning_body),
         RIKKA_TEST_REGISTER(provider, stream_usage),
+        RIKKA_TEST_REGISTER(provider, custom_body_claude),
+        RIKKA_TEST_REGISTER(provider, custom_body_google),
+        RIKKA_TEST_REGISTER(provider, custom_headers_json),
     };
     return run_suite("provider", tests, sizeof(tests) / sizeof(tests[0]));
 }
