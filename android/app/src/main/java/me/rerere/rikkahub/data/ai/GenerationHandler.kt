@@ -52,6 +52,10 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "GenerationHandler(CE)"
 
+/** 工具输出截断(对齐 turbo maybeTruncateToolOutput: 32KB 上限, 保留 4KB 预览) */
+private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
+private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
+
 /** 日志双写：android.util.Log + turbo Logging（设置页日志页可见） */
 private fun logMsg(tag: String, msg: String) {
     android.util.Log.i(tag, msg)
@@ -625,11 +629,18 @@ class GenerationHandler(
                 val json = runCatching { me.rerere.rikkahub.utils.JsonInstant.parseToJsonElement(args) }
                     .getOrElse { JsonObject(emptyMap()) }
                 val parts = runBlocking { tool.execute(json) }
-                parts.joinToString("
-") { part ->
-                    when (part) {
-                        is UIMessagePart.Text -> part.text
-                        else -> ""
+                // 工具输出截断(对齐 turbo maybeTruncateToolOutput; 防超长结果膨胀上下文)
+                val text = parts.filterIsInstance<UIMessagePart.Text>()
+                    .joinToString("\n") { it.text }
+                if (text.length > MAX_TOOL_OUTPUT_CHARS) {
+                    "[Tool output truncated: ${text.length} characters total]\n" +
+                        text.take(TOOL_OUTPUT_PREVIEW_CHARS)
+                } else {
+                    parts.joinToString("\n") { part ->
+                        when (part) {
+                            is UIMessagePart.Text -> part.text
+                            else -> ""
+                        }
                     }
                 }
             }
