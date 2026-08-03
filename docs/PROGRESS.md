@@ -402,3 +402,17 @@
   ⑧ custom_body 字符串转义修复(反斜杠丢失致 Kotlin 语法错误)
   ⑨ workspace 工具修复(双重排除 → JVM proot 通道)
 - 测试数: 200 → 205
+
+### v0.7.14 CI 状态(2026-08-03 12:2x, 提交 284988d)
+- 引擎 205 测试(零告警)✅ / UBSan ✅ / ASan ✅ / TSan ✅ / NDK librikka.so ✅
+- ⏳ Assemble debug APK(Gradle)已 60 分钟未完成 — 网络高峰(jitpack/pnpm),与 v0.7.13 经验一致
+- 全绿后: tag v0.7.14-ce → release.yml 自动构建 APK → 验证双 ABI/zip/签名 → 通知用户
+- v0.7.14-ce 内容汇总:
+  性能(v0.7.13): 流式 O(n²) 修复/StringBuilder+32ms 降频/flowOn IO/pipe_reader 5s 轮询取消
+  功能对齐(v0.7.14): 自定义 HTTP 头(引擎 custom_headers 全 provider)/
+  自定义 HTTP 体(引擎扩展 Claude+Google)/MCP 工具透传(外部工具通道: 定义合并+
+  JNI 反调 DeviceTools.executeTool)/workspace 工具修复(JVM proot 通道)/
+  工具输出截断(32KB/4KB 对齐 turbo)/Claude+Google 请求 tools 定义(格式转换)
+- 测试数 200 → 205(custom_body×2 + custom_headers + tools_claude + tools_google)
+- 踩坑记录: python heredoc 写 Kotlin 字符串时反斜杠会被吃掉(append("\":") 变
+  append("":") 致 Kotlin 语法错误 185:56) — 写入后用 od -c 验证字节!
