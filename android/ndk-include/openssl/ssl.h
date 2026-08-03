@@ -71,6 +71,12 @@ int SSL_set1_host(SSL *ssl, const char *hostname);
 X509_STORE *SSL_CTX_get_cert_store(const SSL_CTX *ctx);
 void X509_STORE_set_flags(X509_STORE *ctx, long flags);
 const char *X509_verify_cert_error_string(long n);
+int X509_STORE_add_cert(X509_STORE *ctx, X509 *x);
+X509 *d2i_X509(X509 **a, const unsigned char **pp, long length);
+void X509_free(X509 *a);
+void *X509_STORE_get0_objects(X509_STORE *ctx);   /* STACK_OF(X509_OBJECT)* */
+int sk_X509_OBJECT_num(const void *sk);
+SSL_CTX *SSL_get_SSL_CTX(const SSL *ssl);
 
 /* SSL_set_tlsext_host_name 是宏（OpenSSL 1.1）；55 = SSL_CTRL_SET_TLSEXT_HOSTNAME */
 long SSL_ctrl(SSL *ssl, int cmd, long larg, void *parg);

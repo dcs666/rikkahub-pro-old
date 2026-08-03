@@ -18,6 +18,8 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/x509.h>
+#include "builtin_roots.h"
 
 /* ---------- 全局 TLS 上下文 ---------- */
 
@@ -36,39 +38,39 @@ static void ssl_init_once(void) {
     g_ssl_ctx = SSL_CTX_new(TLS_client_method());
     if (g_ssl_ctx) {
 #ifdef RK_ANDROID
-        int ca_ok = 0;
         /* Android 无 /etc/ssl/certs：系统 CA 在 /system/etc/security/cacerts
            (文件名 hash.0, OpenSSL 兼容格式)。
-           同时加载用户安装的 CA(/data/misc/user/0/cacerts-added)——
-           新 CA(如 2025 年 TrustAsia 根)系统目录可能缺失, 用户手动装根可解决。 */
+           同时加载用户安装的 CA(/data/misc/user/0/cacerts-added)。
+           任一加载失败仅记录诊断(不降级)—— 内置根兜底保证验证仍可用。 */
         if (SSL_CTX_load_verify_locations(g_ssl_ctx, NULL,
-                                          "/system/etc/security/cacerts") == 1)
-            ca_ok = 1;
-        else if (getenv("HTTP_DEBUG"))
-            fprintf(stderr, "[http] system CA dir load failed\n");
-        /* 用户 CA(存在时追加) */
+                                          "/system/etc/security/cacerts") != 1) {
+            snprintf(g_tls_err, sizeof(g_tls_err),
+                     "system CA dir load FAILED");
+        }
         if (access("/data/misc/user/0/cacerts-added", R_OK) == 0) {
             if (SSL_CTX_load_verify_locations(g_ssl_ctx, NULL,
-                                              "/data/misc/user/0/cacerts-added") == 1)
-                ca_ok = 1;
-            else if (getenv("HTTP_DEBUG"))
-                fprintf(stderr, "[http] user CA dir load failed\n");
+                                              "/data/misc/user/0/cacerts-added") != 1) {
+                snprintf(g_tls_err, sizeof(g_tls_err),
+                         "user CA dir load FAILED");
+            }
         }
-        /* 部分链: 服务器链终止于信任库中的任意证书(根或中间)即通过。
-           兼容"系统 CA 只有中间/缺根"的受限环境。 */
-        if (ca_ok) {
-            SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
-            X509_STORE *st = SSL_CTX_get_cert_store(g_ssl_ctx);
-            if (st) X509_STORE_set_flags(st, X509_V_FLAG_PARTIAL_CHAIN);
-        } else {
-            SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_NONE, NULL);
-        }
-#else
-        SSL_CTX_set_default_verify_paths(g_ssl_ctx);
-        SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
-        X509_STORE *st = SSL_CTX_get_cert_store(g_ssl_ctx);
-        if (st) X509_STORE_set_flags(st, X509_V_FLAG_PARTIAL_CHAIN);
 #endif
+        /* 内置信任根: 即使系统 CA 目录加载失败/缺新根, 常见根仍可验证。
+           仅增加信任(不绕过链验证与主机名校验)。 */
+        X509_STORE *st = SSL_CTX_get_cert_store(g_ssl_ctx);
+        if (st) {
+            for (size_t i = 0; i < RIKKA_BUILTIN_ROOTS_COUNT; i++) {
+                const unsigned char *p = RIKKA_BUILTIN_ROOTS[i].der;
+                X509 *x = d2i_X509(NULL, &p, (long)RIKKA_BUILTIN_ROOTS[i].len);
+                if (x) {
+                    X509_STORE_add_cert(st, x);
+                    X509_free(x);
+                }
+            }
+            X509_STORE_set_flags(st, X509_V_FLAG_PARTIAL_CHAIN);
+        }
+        /* 信任库永远非空(内置根)→ 始终 VERIFY_PEER */
+        SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
         SSL_CTX_set_min_proto_version(g_ssl_ctx, TLS1_2_VERSION);
     }
 }
@@ -186,12 +188,16 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
                 continue;
             }
             {
-                /* 证书验证失败时记录 X509 错误码(用户可见错误详情) */
+                /* 证书验证失败时记录 X509 错误码 + 信任库诊断(用户可见) */
                 long vr = SSL_get_verify_result(c->ssl);
                 if (vr != X509_V_OK) {
+                    long n = 0;
+                    void *objs = X509_STORE_get0_objects(
+                        SSL_CTX_get_cert_store(SSL_get_SSL_CTX(c->ssl)));
+                    if (objs) n = sk_X509_OBJECT_num(objs);
                     snprintf(g_tls_err, sizeof(g_tls_err),
-                             "certificate verify failed: %s",
-                             X509_verify_cert_error_string(vr));
+                             "certificate verify failed: %s (trust store: %ld certs)",
+                             X509_verify_cert_error_string(vr), n);
                     if (getenv("HTTP_DEBUG"))
                         fprintf(stderr, "[http] TLS handshake failed: %s\n", g_tls_err);
                 } else {

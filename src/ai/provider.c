@@ -354,9 +354,11 @@ struct RikkaStreamSession {
     RJsonStream *js_type;    /* Claude delta.type → type_buf */
     RJsonStream *js_text;    /* content/text → text part */
     RJsonStream *js_reason;  /* reasoning/thinking → reasoning part */
-    RJsonStream *js_tc_name; /* Claude tool_use name（单槽） */
+    RJsonStream *js_tc_index;/* Claude tool_use block index */
+    RJsonStream *js_tc_name; /* Claude tool_use name（按块 index 槽位） */
     RJsonStream *js_tc_id;   /* Claude tool_use id */
     RJsonStream *js_tc_args; /* OpenAI args / Claude partial_json / Google functionCall */
+    int cur_tc_index;        /* 当前 Claude content_block index（槽位） */
     RikkaStream *out;
     RikkaSessionStats stats;
     Buf type_buf;
@@ -392,11 +394,11 @@ static const RJsonStreamPathElem P_GOOG_FC[] = {
 
 /* Google functionCall（完整对象，非分片）：解析 name/args 构造 TOOL_CALL part */
 static void google_finalize_tool_call(RikkaStreamSession *ss) {
-    if (!ss->out || !ss->out->msg || ss->tc_args_buf.len == 0) return;
+    if (!ss->out || !ss->out->msg || ss->tc_calls[0].args.len == 0) return;
     Arena *a = ss->out->arena; /* part 结构/数据必须分配在消息 arena */
     size_t err = 0;
-    RJson *v = rjson_parse(a, (const char *)ss->tc_args_buf.data,
-                           ss->tc_args_buf.len, &err);
+    RJson *v = rjson_parse(a, (const char *)ss->tc_calls[0].args.data,
+                           ss->tc_calls[0].args.len, &err);
     if (v && v->type == RJSON_OBJECT) {
         const RJson *name = rjson_obj_get(v, "name");
         const RJson *args = rjson_obj_get(v, "args");
@@ -490,6 +492,8 @@ static void oai_parse_tool_calls(RikkaStreamSession *ss, const char *data, size_
 }
 /* Claude tool_calls: content_block_start 的 content_block.name/id;
  * content_block_delta 的 delta.partial_json（流式累积） */
+static const RJsonStreamPathElem P_CLAUDE_TC_INDEX[] = {
+    {0, {.key = "content_block"}}, {0, {.key = "index"}}, {-2, {0}}};
 static const RJsonStreamPathElem P_CLAUDE_TC_NAME[] = {
     {0, {.key = "content_block"}}, {0, {.key = "name"}}, {-2, {0}}};
 static const RJsonStreamPathElem P_CLAUDE_TC_ID[] = {
@@ -517,21 +521,37 @@ static void sink_type(void *ctx, const char *data, size_t len) {
 }
 
 /* tool_calls delta：name/id 每次新块覆盖（index 0），arguments 累积拼接 */
+static void sink_tc_index(void *ctx, const char *data, size_t len) {
+    RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
+    if (len == 0) return;
+    char tmp[16];
+    size_t n = len < sizeof(tmp) - 1 ? len : sizeof(tmp) - 1;
+    memcpy(tmp, data, n);
+    tmp[n] = '\0';
+    int idx = atoi(tmp);
+    ss->cur_tc_index = (idx >= 0 && idx < 8) ? idx : 0;
+    if ((size_t)ss->cur_tc_index + 1 > ss->tc_count) ss->tc_count = (size_t)ss->cur_tc_index + 1;
+}
+
 static void sink_tc_name(void *ctx, const char *data, size_t len) {
     RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
-    buf_reset(&ss->tc_name_buf);
-    buf_append(&ss->tc_name_buf, data, len);
+    RkTcCall *c = &ss->tc_calls[ss->cur_tc_index];
+    size_t n = len < sizeof(c->name) - 1 ? len : sizeof(c->name) - 1;
+    memcpy(c->name, data, n);
+    c->name[n] = '\0';
 }
 
 static void sink_tc_args(void *ctx, const char *data, size_t len) {
     RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
-    buf_append(&ss->tc_args_buf, data, len);
+    buf_append(&ss->tc_calls[ss->cur_tc_index].args, data, len);
 }
 
 static void sink_tc_id(void *ctx, const char *data, size_t len) {
     RikkaStreamSession *ss = (RikkaStreamSession *)ctx;
-    buf_reset(&ss->tc_id_buf);
-    buf_append(&ss->tc_id_buf, data, len);
+    RkTcCall *c = &ss->tc_calls[ss->cur_tc_index];
+    size_t n = len < sizeof(c->id) - 1 ? len : sizeof(c->id) - 1;
+    memcpy(c->id, data, n);
+    c->id[n] = '\0';
 }
 
 static void run_extract(RJsonStream *js, const char *data, size_t len) {
@@ -601,7 +621,8 @@ static void on_sse_event(void *ctx, const char *event, const char *data, size_t 
         break;
     case RIKKA_PROVIDER_CLAUDE:
         if (strcmp(event, "content_block_start") == 0) {
-            /* 新块：若为 tool_use 则重置调用缓冲（sink 仅覆盖 name/id） */
+            /* 新块：提取 index → 槽位；tool_use 的 name/id 写入该槽 */
+            run_extract(ss->js_tc_index, data, len);
             run_extract(ss->js_tc_name, data, len);
             run_extract(ss->js_tc_id, data, len);
         } else if (strcmp(event, "content_block_delta") == 0) {
@@ -669,6 +690,7 @@ void rp_session_destroy(RikkaStreamSession *ss) {
     if (ss->js_text) rjson_stream_destroy(ss->js_text);
     if (ss->js_reason) rjson_stream_destroy(ss->js_reason);
     if (ss->js_tc_name) rjson_stream_destroy(ss->js_tc_name);
+    if (ss->js_tc_index) rjson_stream_destroy(ss->js_tc_index);
     if (ss->js_tc_args) rjson_stream_destroy(ss->js_tc_args);
     if (ss->js_tc_id) rjson_stream_destroy(ss->js_tc_id);
     buf_free(&ss->type_buf);
@@ -869,11 +891,13 @@ int rp_stream_start(RikkaStreamSession *ss, const char *path,
     ss->js_type = rjson_stream_create(P_CLAUDE_TYPE, sink_type, ss);
     ss->js_text = rjson_stream_create(P_OAI_CONTENT, sink_text, ss);
     ss->js_reason = rjson_stream_create(P_OAI_REASON, sink_reason, ss);
+    ss->js_tc_index = rjson_stream_create(P_CLAUDE_TC_INDEX, sink_tc_index, ss);
     ss->js_tc_name = rjson_stream_create(P_CLAUDE_TC_NAME, sink_tc_name, ss);
     ss->js_tc_args = rjson_stream_create(P_CLAUDE_TC_JSON, sink_tc_args, ss);
     ss->js_tc_id = rjson_stream_create(P_CLAUDE_TC_ID, sink_tc_id, ss);
     if (!ss->sse || !ss->js_type || !ss->js_text || !ss->js_reason ||
-        !ss->js_tc_name || !ss->js_tc_args || !ss->js_tc_id) return -1; /* OOM 防御 */
+        !ss->js_tc_index || !ss->js_tc_name || !ss->js_tc_args || !ss->js_tc_id)
+        return -1; /* OOM 防御 */
     switch (ss->cfg.id) {
         case RIKKA_PROVIDER_OPENAI:
             rjson_stream_set_path(ss->js_text, P_OAI_CONTENT);
@@ -928,27 +952,26 @@ static void finalize_tool_calls(RikkaStreamSession *ss) {
         }
         return;
     }
-    if (ss->tc_name_buf.len == 0) return;
-    RikkaPart *p = rmsg_add_part(a, ss->out->msg, RIKKA_PART_TOOL_CALL);
-    if (!p) return;
-    p->tool_name = (const char *)arena_alloc(a, 1, ss->tc_name_buf.len + 1);
-    if (p->tool_name && ss->tc_name_buf.len > 0) {
-        memcpy((void *)p->tool_name, ss->tc_name_buf.data, ss->tc_name_buf.len);
-        ((char *)p->tool_name)[ss->tc_name_buf.len] = '\0';
-    }
-    if (ss->tc_id_buf.len > 0) {
-        p->tool_id = (const char *)arena_alloc(a, 1, ss->tc_id_buf.len + 1);
-        if (p->tool_id) {
-            memcpy((void *)p->tool_id, ss->tc_id_buf.data, ss->tc_id_buf.len);
-            ((char *)p->tool_id)[ss->tc_id_buf.len] = '\0';
+    /* Claude/Google：按槽遍历(Google 单槽 index=0; Claude 多块各槽;
+     * 遍历全部槽位, 不依赖 tc_count —— 无 index 字段的流也能提取) */
+    for (size_t i = 0; i < 8; i++) {
+        RkTcCall *c = &ss->tc_calls[i];
+        if (!c->name[0]) continue;
+        RikkaPart *p = rmsg_add_part(a, ss->out->msg, RIKKA_PART_TOOL_CALL);
+        if (!p) continue;
+        p->tool_name = (const char *)arena_alloc(a, 1, strlen(c->name) + 1);
+        if (p->tool_name) strcpy((char *)p->tool_name, c->name);
+        if (c->id[0]) {
+            p->tool_id = (const char *)arena_alloc(a, 1, strlen(c->id) + 1);
+            if (p->tool_id) strcpy((char *)p->tool_id, c->id);
         }
+        p->data = (const char *)arena_alloc(a, 1, c->args.len + 1);
+        if (p->data && c->args.len > 0) {
+            memcpy((void *)p->data, c->args.data, c->args.len);
+            ((char *)p->data)[c->args.len] = '\0';
+        }
+        p->len = c->args.len;
     }
-    p->data = (const char *)arena_alloc(a, 1, ss->tc_args_buf.len + 1);
-    if (p->data && ss->tc_args_buf.len > 0) {
-        memcpy((void *)p->data, ss->tc_args_buf.data, ss->tc_args_buf.len);
-        ((char *)p->data)[ss->tc_args_buf.len] = '\0';
-    }
-    p->len = ss->tc_args_buf.len;
 }
 
 int rp_stream_pump(RikkaStreamSession *ss, int timeout_ms) {
