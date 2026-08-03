@@ -335,7 +335,12 @@
 - 验证: shim 头编译全引擎文件, nm 审计 22 个未定义 OpenSSL 符号全部导出
 - 版本 0.7.11/711
 
-### 🎉 v0.7.11-ce 发布中(de628c0, 2026-08-03)
+### 🎉 v0.7.11-ce 已发布(2026-08-03)
+- APK rikkahub-ce-0.7.11-ce.apk(44MB)验证通过(双 ABI/zip 完整)
+- dlopen 崩溃修复(sk_X509_OBJECT_num 未导出符号) + 全引擎符号审计
+- 用户验证: 安装后库正常加载; DeepSeek 走内置 18 根
+- 后续新提交(1b96f16): 会话索引接线(recent_chats/conversation_search 数据源)
+- 发布中记录(de628c0)
 - CI 全绿; tag v0.7.11-ce 已推, Release 构建中
 - 核心修复: 移除未导出符号 sk_X509_OBJECT_num(用户 v0.7.10 崩溃:
   UnsatisfiedLinkError cannot locate symbol) → 诊断改用 CA 源状态
