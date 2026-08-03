@@ -363,3 +363,13 @@
 - 新增: 输入变换接线(模式注入/lorebook/模板/OCR/文档/时间提醒全部激活)
   + 输出正则替换接线(assistant.regexes)
 - 版本 0.7.12/712
+
+### v0.7.13 候选(性能修复, 用户反馈"生成特别卡/经常卡死")
+- 🔴 根因1: 流式 text O(n²) — CE 版每 delta last.copy(text+delta) O(n) 复制整段,
+  长回答累计 O(n²) → IO 忙 + GC 压力(对照 turbo 有 [TURBO] O(n²) 缓解, CE 缺);
+  修复(2044ac7): StringBuilder 累积 O(1) + 32ms 降频 flush
+- 🔴 根因2: 消费循环在 Main 线程(flow 块默认收集线程) → 每 token 处理占主线程;
+  修复(4e2f441): flowOn(Dispatchers.IO), Main 只收 30fps sample 结果
+- 其余: 工具执行期无事件(有 Tool loading 显示, 可接受);
+  引擎 120s×8 轮上限(每轮有事件, 可接受)
+- 版本 0.7.13/713 待发
