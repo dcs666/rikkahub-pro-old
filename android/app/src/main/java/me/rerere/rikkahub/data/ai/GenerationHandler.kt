@@ -597,8 +597,9 @@ class GenerationHandler(
         val engineBuiltin = setOf(
             "get_time_info", "clipboard_tool", "text_to_speech", "ask_user",
             "calendar_query", "calendar_create", "get_screen_time", "eval_javascript",
-            "workspace_read_file", "workspace_write_file", "workspace_edit_file",
-            "workspace_shell", "memory_tool", "use_skill", "web_search",
+            // workspace_* 不排除: Android 上引擎不注册内置(workspace_root 未传),
+            // 必须走 JVM WorkspaceTools(proot 执行)外部通道
+            "memory_tool", "use_skill", "web_search",
             "recent_chats", "conversation_search",
         )
         val arr = JSONArray()
