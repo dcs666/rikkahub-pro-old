@@ -351,6 +351,22 @@ class GenerationHandler(
         // 本次生成的消息 id(流式期间稳定, 防 UI 消息版本膨胀)
         val assistantMsgId = Uuid.random()
         var deadline = System.currentTimeMillis() + 130_000L
+        // [CE] 流式 text O(n²) 缓解(对齐 turbo [TURBO] 优化): 长回答"text 暴涨"阶段
+        // 每 token `lastText + delta` 是 O(n) 复制, IO 线程累计 O(n²) → 末段出字变慢+GC 压力;
+        // 改用 StringBuilder 累积(每 token O(1) append), ~32ms 降频才 flush 回 currentParts
+        var textBuf: StringBuilder? = null
+        var textBaseParts: List<UIMessagePart>? = null
+        var lastFlush = 0L
+
+        fun flushTextBuf() {
+            val buf = textBuf ?: return
+            val base = textBaseParts ?: return
+            currentParts.clear()
+            currentParts.addAll(base)
+            currentParts.add(UIMessagePart.Text(buf.toString()))
+            textBuf = null
+            textBaseParts = null
+        }
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
@@ -367,7 +383,8 @@ class GenerationHandler(
             when (evt) {
                 is Evt.Delta -> {
                     if (evt.kind == 1) {
-                        // reasoning
+                        // reasoning: 先 flush 文本累积器(part 类型切换), 再累积
+                        flushTextBuf()
                         val last = currentParts.lastOrNull()
                         if (last is UIMessagePart.Reasoning) {
                             currentParts[currentParts.size - 1] =
@@ -377,16 +394,25 @@ class GenerationHandler(
                         }
                     } else {
                         val last = currentParts.lastOrNull()
-                        if (last is UIMessagePart.Text) {
-                            currentParts[currentParts.size - 1] =
-                                last.copy(text = last.text + evt.text)
+                        if (textBuf != null) {
+                            textBuf!!.append(evt.text)
+                        } else if (last is UIMessagePart.Text) {
+                            textBuf = StringBuilder(last.text).append(evt.text)
+                            textBaseParts = currentParts.take(currentParts.size - 1)
                         } else {
-                            currentParts.add(UIMessagePart.Text(evt.text))
+                            textBuf = StringBuilder(evt.text)
+                            textBaseParts = currentParts
+                        }
+                        val now = System.currentTimeMillis()
+                        if (now - lastFlush >= 32L) {
+                            flushTextBuf()
+                            lastFlush = now
                         }
                     }
                     emitChunk(messages, currentParts, assistantMsgId).let { emit(it) }
                 }
                 is Evt.ToolCall -> {
+                    flushTextBuf()
                     currentParts.add(
                         UIMessagePart.Tool(
                             toolCallId = "tool-${toolSeq.incrementAndGet()}",
@@ -410,6 +436,7 @@ class GenerationHandler(
                     emitChunk(messages, currentParts, assistantMsgId).let { emit(it) }
                 }
                 is Evt.Finish -> {
+                    flushTextBuf()
                     // [CE] 输出正则替换(assistant.regexes, 对齐 turbo onGenerationFinish)
                     if (assistant.regexes.isNotEmpty()) {
                         val scope = me.rerere.rikkahub.data.model.AssistantAffectScope.ASSISTANT
@@ -434,6 +461,7 @@ class GenerationHandler(
             }
         }
         job.join()
+        flushTextBuf()
         // 引擎返回 JSON 里的 usage(Finish 事件后到达) → 重新 emit 带用量统计的最终消息
         nativeUsage?.let { usage ->
             emit(emitChunk(messages, currentParts, assistantMsgId, usage))
