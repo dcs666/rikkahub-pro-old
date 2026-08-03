@@ -295,7 +295,7 @@ static void jesc(Buf *out, const char *s) {
 
 static jclass g_dev_cls = NULL;
 static jmethodID g_dev_ask_user, g_dev_clip, g_dev_clip_read, g_dev_tts, g_dev_cal, g_dev_cal_create,
-                 g_dev_st, g_dev_js, g_dev_web_search, g_dev_mem;
+                 g_dev_st, g_dev_js, g_dev_web_search, g_dev_mem, g_dev_exec_tool;
 static jclass g_store_cls = NULL;
 static jmethodID g_store_recent, g_store_search;
 
@@ -332,6 +332,8 @@ static void ensure_device_cls(JNIEnv *env) {
                                          "(Ljava/lang/String;)Ljava/lang/String;");
     g_dev_js = (*env)->GetStaticMethodID(env, g_dev_cls, "javascriptEval",
                                          "(Ljava/lang/String;)Ljava/lang/String;");
+    g_dev_exec_tool = (*env)->GetStaticMethodID(env, g_dev_cls, "executeTool",
+                                                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
     (*env)->DeleteLocalRef(env, c);
 }
 
@@ -481,10 +483,11 @@ static char *jni_calendar_create(const char *args, void *ud) {
 
 /* 外部工具执行(JVM tools_json 定义; 注册表未命中 → DeviceTools.executeTool) */
 static char *jni_external_tool(const char *name, const char *args, void *ud) {
-    JniCb *jc = (JniCb *)ud;
+    (void)ud;
     int attached = 0;
     JNIEnv *env = jni_thread_env(&attached);
     if (!env) return NULL;
+    ensure_device_cls(env);
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
     jstring n = (*env)->NewStringUTF(env, name);
     jstring a = (*env)->NewStringUTF(env, args ? args : "{}");
@@ -682,7 +685,7 @@ Java_dev_rikkahub_ce_Engine_nativeOcr(JNIEnv *env, jclass cls,
                             jstr(pv, "base_url") ? jstr(pv, "base_url") : "",
                             jstr(pv, "api_key") ? jstr(pv, "api_key") : "",
                             jstr(pv, "model") ? jstr(pv, "model") : "",
-                            4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
+                            4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL, NULL};
     char *text = NULL;
     char *detail = NULL;
     int rc = rk_ocr_image(&cfg, RK_PROMPT_OCR, data_uri, 120000, &text, &detail);
@@ -733,7 +736,7 @@ Java_dev_rikkahub_ce_Engine_nativeGenerateTitle(JNIEnv *env, jclass cls,
                             jstr(pv, "base_url") ? jstr(pv, "base_url") : "",
                             jstr(pv, "api_key") ? jstr(pv, "api_key") : "",
                             jstr(pv, "model") ? jstr(pv, "model") : "",
-                            4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
+                            4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL, NULL};
 
     /* system = 标题 prompt；user = 会话内容 */
     const char *names[2] = {"locale", "content"};
@@ -830,7 +833,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
                              base_url ? base_url : "",
                              api_key ? api_key : "",
                              model ? model : "",
-                             4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL};
+                             4096, 0, NULL, {0}, NULL, 0, -1, -1, NULL, NULL};
     /* 思考模式(DeepSeek 等): reasoning_effort / thinking */
     pcfg.reasoning_effort = jstr(pv, "reasoning_effort");
     if (jstr(pv, "thinking")) pcfg.thinking_enabled = 1;
