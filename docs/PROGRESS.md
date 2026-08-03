@@ -315,7 +315,11 @@
 - 顺带: Claude 多 content_block 工具槽(index)/Google 适配新槽/symlink 逃逸防护/BOM 跳过
 - 版本 0.7.10/710
 
-### 🎉 v0.7.10-ce 发布中(7223900, 2026-08-03)
+### 🎉 v0.7.10-ce 已发布(2026-08-03)
+- APK rikkahub-ce-0.7.10-ce.apk(44MB, 1497 条目, 双 ABI)验证通过
+- TLS 修复收官: 内置 18 根 + VERIFY_PEER 恒启用 + trust store 计数诊断
+- 用户验证: 安装后重试 DeepSeek; 仍失败则日志带 trust store: N certs 可精准定位
+- 发布中记录(7223900)
 - CI 全绿(build-test/sanitizers/android-build); tag v0.7.10-ce 已推, Release 构建中
 - 内置信任根 18 个主流 CA(DigiCert G2/G3/ISRG X1/X2/GlobalSign R3/R6/USERTrust/
   Amazon R1-R4/Starfield/GoDaddy/CFCA/Entrust/GTS R1/R3/R4)
