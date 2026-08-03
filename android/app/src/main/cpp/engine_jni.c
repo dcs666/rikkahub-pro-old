@@ -479,6 +479,31 @@ static char *jni_calendar_create(const char *args, void *ud) {
     return out;
 }
 
+/* 外部工具执行(JVM tools_json 定义; 注册表未命中 → DeviceTools.executeTool) */
+static char *jni_external_tool(const char *name, const char *args, void *ud) {
+    JniCb *jc = (JniCb *)ud;
+    int attached = 0;
+    JNIEnv *env = jni_thread_env(&attached);
+    if (!env) return NULL;
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    jstring n = (*env)->NewStringUTF(env, name);
+    jstring a = (*env)->NewStringUTF(env, args ? args : "{}");
+    jstring r = NULL;
+    if (n && a && g_dev_exec_tool)
+        r = (jstring)(*env)->CallStaticObjectMethod(env, g_dev_cls, g_dev_exec_tool, n, a);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    char *out = NULL;
+    if (r) {
+        const char *c = (*env)->GetStringUTFChars(env, r, NULL);
+        if (c) { out = strdup(c); (*env)->ReleaseStringUTFChars(env, r, c); }
+        (*env)->DeleteLocalRef(env, r);
+    }
+    if (n) (*env)->DeleteLocalRef(env, n);
+    if (a) (*env)->DeleteLocalRef(env, a);
+    if (attached) (*g_vm)->DetachCurrentThread(g_vm);
+    return out;
+}
+
 static char *jni_web_search(const char *query, void *ud) {
     (void)ud;
     JNIEnv *env = env_of();
@@ -855,6 +880,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     tenv.recent_chats = enable_recent ? jni_recent_chats : NULL;
     tenv.conversation_search = enable_recent ? jni_conversation_search : NULL;
     tenv.web_search = enable_web_search ? jni_web_search : NULL;
+    tenv.on_external_tool = jni_external_tool;
     tenv.memory_create = jni_memory_create;
     tenv.memory_edit = jni_memory_edit;
     tenv.memory_delete = jni_memory_delete;
@@ -893,6 +919,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     cc.provider = pcfg;
     cc.tools = &reg;
     cc.tool_env = &tenv;
+    cc.external_tools_json = jstr(pv, "external_tools_json");
     cc.timeout_ms = 120000;
     cc.cancel_flag = local_cancel ? local_cancel : &g_cancel;
 

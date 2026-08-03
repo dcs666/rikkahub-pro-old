@@ -223,6 +223,21 @@ int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
         buf_append_byte(&tools_buf, '\0'); /* provider 以 strlen 消费，须 NUL 结尾 */
         pcfg.tools_json = (const char *)tools_buf.data;
     }
+    /* JVM 外部工具定义(数组)与注册表工具合并(去首尾括号拼接到 tools_buf) */
+    if (cfg->external_tools_json && cfg->external_tools_json[0]) {
+        size_t el = strlen(cfg->external_tools_json);
+        if (el > 2) {
+            if (tools_buf.len == 0) {
+                buf_append_str(&tools_buf, "[");
+            } else {
+                buf_append_byte(&tools_buf, ',');
+            }
+            buf_append(&tools_buf, cfg->external_tools_json + 1, el - 2);
+            buf_append_byte(&tools_buf, ']');
+            buf_append_byte(&tools_buf, '\0');
+            pcfg.tools_json = (const char *)tools_buf.data;
+        }
+    }
 
     /* 冻结消息（freeze 转移来的 malloc 缓冲）统一释放 */
     RikkaMessage *owned[16];
@@ -302,6 +317,10 @@ int rk_chat_run(const RkChatConfig *cfg, RkChatCallbacks *cb,
             const RkTool *t = cfg->tools ? rk_tools_find(cfg->tools, name) : NULL;
             if (t && cfg->tool_env) {
                 (void)rk_tool_call(t, args, cfg->tool_env, &result);
+            }
+            /* 外部工具(JVM 定义): 注册表未命中 → 壳层执行回调 */
+            if (!result && cfg->tool_env && cfg->tool_env->on_external_tool) {
+                result = cfg->tool_env->on_external_tool(name, args, cfg->tool_env->ud);
             }
             if (!result) result = rk_tool_result_error("tool not available");
             if (cb && cb->on_tool_result) cb->on_tool_result(cb->ud, name, result);

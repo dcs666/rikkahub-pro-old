@@ -42,6 +42,9 @@ struct RkToolEnv {
     int (*tts_speak)(const char *text, void *ud);
     char *(*javascript_eval)(const char *code, void *ud);
     char *(*web_search)(const char *query, void *ud);
+    /* 外部工具(JVM tools_json 定义; 注册表未命中时执行; NULL=不支持)。
+     * 返回 malloc JSON 字符串(工具结果), NULL=工具不存在。 */
+    char *(*on_external_tool)(const char *name, const char *args, void *ud);
     /* skills 根目录（use_skill 读取；NULL = 默认 /skills） */
     const char *skills_root;
     /* 本地工具白名单（JSON 数组字符串；NULL/空 = 全部注册，仅过滤设备工具） */

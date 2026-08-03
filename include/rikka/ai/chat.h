@@ -44,6 +44,9 @@ typedef struct RkChatConfig {
     const RkToolRegistry *tools;  /* 工具集（NULL = 无工具） */
     const RkToolEnv *tool_env;    /* 工具环境（tools 非 NULL 时必填） */
     int max_tool_rounds;          /* 0 = 默认 8 */
+    /* JVM 外部工具定义(OpenAI tools 数组, 已排除内置工具名; NULL=无)。
+     * 与注册表工具合并后发给模型; 执行时注册表未命中走 env.on_external_tool。 */
+    const char *external_tools_json;
     int timeout_ms;               /* 每轮超时；0 = 默认 60000 */
     /* 取消标志（volatile int*；非 NULL 时生成期间周期检查，置 1 则中断返回 -1）。 */
     volatile int *cancel_flag;

@@ -10,6 +10,7 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.view.WindowManager
+import java.util.concurrent.ConcurrentHashMap
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -45,6 +46,22 @@ object DeviceTools {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+    }
+
+    /** 外部工具注册表（JVM tools_json 定义；引擎注册表未命中时反调执行） */
+    private val externalTools = ConcurrentHashMap<String, (String) -> String>()
+
+    @JvmStatic
+    fun registerExternalTools(tools: Map<String, (String) -> String>) {
+        externalTools.putAll(tools)
+    }
+
+    /** 引擎外部工具执行入口（JNI 反调；返回 JSON 字符串，工具不存在返回 null） */
+    @JvmStatic
+    fun executeTool(name: String, args: String): String? {
+        val fn = externalTools[name] ?: return null
+        return runCatching { fn(args) }
+            .getOrElse { e -> "{\"error\":\"${e.message?.replace("\"", "'") ?: "tool failed"}\"}" }
     }
 
     /** 向用户提问（模态对话框，阻塞等待回答；支持 questions 数组：多问题 + options 快捷选择） */

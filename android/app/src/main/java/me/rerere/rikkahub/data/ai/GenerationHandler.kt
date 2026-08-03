@@ -27,6 +27,9 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import me.rerere.ai.core.InputSchema
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -178,6 +181,12 @@ class GenerationHandler(
                 sb.append('"').append(cb.key).append("":").append(cb.value)
             }
             providerJson.put("custom_body", sb.toString())
+        }
+        // JVM 外部工具(MCP 等; 引擎内置工具名排除防重复) → 引擎 tools 定义 + 执行注册表
+        val (extToolsJson, extToolsExec) = buildExternalTools(tools)
+        if (extToolsJson != "[]") {
+            providerJson.put("external_tools_json", extToolsJson)
+            dev.rikkahub.ce.DeviceTools.registerExternalTools(extToolsExec)
         }
 
         val history = JSONArray()
@@ -579,6 +588,52 @@ class GenerationHandler(
                 usage = usage,
             ),
         )
+    }
+
+    /** JVM 外部工具 → 引擎 tools 定义 + 执行映射。
+     * 引擎内置工具(env 注册)名称排除, 防重复定义; 执行时注册表未命中
+     * 由引擎反调 DeviceTools.executeTool → 这里注册的 lambda。 */
+    private fun buildExternalTools(tools: List<Tool>): Pair<String, Map<String, (String) -> String>> {
+        val engineBuiltin = setOf(
+            "get_time_info", "clipboard_tool", "text_to_speech", "ask_user",
+            "calendar_query", "calendar_create", "get_screen_time", "eval_javascript",
+            "workspace_read_file", "workspace_write_file", "workspace_edit_file",
+            "workspace_shell", "memory_tool", "use_skill", "web_search",
+            "recent_chats", "conversation_search",
+        )
+        val arr = JSONArray()
+        val exec = mutableMapOf<String, (String) -> String>()
+        for (tool in tools) {
+            if (tool.name in engineBuiltin) continue
+            val fn = JSONObject()
+                .put("type", "function")
+                .put(
+                    "function",
+                    JSONObject().put("name", tool.name).put("description", tool.description),
+                )
+            val schema = runCatching { tool.parameters?.invoke() }.getOrNull()
+            if (schema is InputSchema.Obj) {
+                val p = JSONObject()
+                p.put("type", "object")
+                p.put("properties", JSONObject(schema.properties.toString()))
+                schema.required?.let { req -> p.put("required", JSONArray(req)) }
+                (fn.getJSONObject("function") as JSONObject).put("parameters", p)
+            }
+            arr.put(fn)
+            exec[tool.name] = { args ->
+                val json = runCatching { me.rerere.ai.utils.JsonInstant.parseToJsonElement(args) }
+                    .getOrElse { JsonObject(emptyMap()) }
+                val parts = runBlocking { tool.execute(json) }
+                parts.joinToString("
+") { part ->
+                    when (part) {
+                        is UIMessagePart.Text -> part.text
+                        else -> ""
+                    }
+                }
+            }
+        }
+        return arr.toString() to exec
     }
 
     /** 工具白名单(对齐 turbo: assistant.localTools + enableMemory + enabledSkills)。
