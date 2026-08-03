@@ -182,7 +182,7 @@ class GenerationHandler(
             val sb = StringBuilder()
             extraBodies.forEachIndexed { i, cb ->
                 if (i > 0) sb.append(',')
-                sb.append('"').append(cb.key).append("":").append(cb.value)
+                sb.append('"').append(cb.key).append("\":").append(cb.value)
             }
             providerJson.put("custom_body", sb.toString())
         }
