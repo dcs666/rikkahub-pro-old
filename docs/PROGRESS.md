@@ -326,3 +326,11 @@
 - 模拟空信任库(系统 CA 加载失败)验证: DeepSeek/OpenAI/Anthropic/Google/Moonshot 全 PASS
 - 诊断: 握手失败报 trust store 证书数(用户可见)
 - 顺带: Claude 多 content_block 工具槽/symlink 逃逸防护/BOM/SSL WANT_*
+
+### v0.7.11 — dlopen 崩溃修复(用户反馈 v0.7.10)
+- 崩溃: UnsatisfiedLinkError cannot locate symbol "sk_X509_OBJECT_num" (librikka.so)
+- 根因: sk_X509_OBJECT_num 是 OpenSSL 内部宏, libcrypto.so 不导出; shim 声明为函数
+  → -z undefs 允许未定义引用 → 运行时 dlopen 失败
+- 修复: 诊断改用 CA 源状态(system CA: ok/failed, user CA: ok/none/failed, builtin: N)
+- 验证: shim 头编译全引擎文件, nm 审计 22 个未定义 OpenSSL 符号全部导出
+- 版本 0.7.11/711
