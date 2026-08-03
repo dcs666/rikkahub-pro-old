@@ -26,6 +26,9 @@ static pthread_once_t g_ssl_once = PTHREAD_ONCE_INIT;
 static SSL_CTX *g_ssl_ctx = NULL;
 /* 最近一次 TLS 握手失败的详细原因(含 X509 验证码; 供上层错误消息) */
 static char g_tls_err[192];
+/* CA 加载状态(诊断; 不依赖 OpenSSL 内部符号计数) */
+static int g_ca_system_ok = -1; /* -1 未初始化/平台无系统CA, 0 失败, 1 成功 */
+static int g_ca_user_ok = -1;   /* -1 不存在, 0 加载失败, 1 成功 */
 
 const char *rhttp_last_tls_error(void) {
     return g_tls_err[0] ? g_tls_err : NULL;
@@ -42,21 +45,21 @@ static void ssl_init_once(void) {
            同时加载用户安装的 CA(/data/misc/user/0/cacerts-added)。
            任一加载失败仅记录诊断(不降级)—— 内置根兜底保证验证仍可用。 */
         if (SSL_CTX_load_verify_locations(g_ssl_ctx, NULL,
-                                          "/system/etc/security/cacerts") != 1) {
-            snprintf(g_tls_err, sizeof(g_tls_err),
-                     "system CA dir load FAILED");
-        }
+                                          "/system/etc/security/cacerts") == 1)
+            g_ca_system_ok = 1;
+        else
+            g_ca_system_ok = 0;
         if (access("/data/misc/user/0/cacerts-added", R_OK) == 0) {
-            if (SSL_CTX_load_verify_locations(g_ssl_ctx, NULL,
-                                              "/data/misc/user/0/cacerts-added") != 1) {
-                snprintf(g_tls_err, sizeof(g_tls_err),
-                         "user CA dir load FAILED");
-            }
+            g_ca_user_ok = SSL_CTX_load_verify_locations(
+                g_ssl_ctx, NULL, "/data/misc/user/0/cacerts-added") == 1 ? 1 : 0;
+        } else {
+            g_ca_user_ok = -1;
         }
 #endif
 #ifndef RK_ANDROID
         /* Linux/桌面: 系统 CA 路径(/etc/ssl/certs 等) */
         SSL_CTX_set_default_verify_paths(g_ssl_ctx);
+        g_ca_system_ok = 1;
 #endif
         /* 内置信任根: 即使系统 CA 目录加载失败/缺新根, 常见根仍可验证。
            仅增加信任(不绕过链验证与主机名校验)。 */
@@ -191,16 +194,18 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
                 continue;
             }
             {
-                /* 证书验证失败时记录 X509 错误码 + 信任库诊断(用户可见) */
+                /* 证书验证失败时记录 X509 错误码 + CA 源状态(用户可见诊断) */
                 long vr = SSL_get_verify_result(c->ssl);
                 if (vr != X509_V_OK) {
-                    long n = 0;
-                    void *objs = X509_STORE_get0_objects(
-                        SSL_CTX_get_cert_store(SSL_get_SSL_CTX(c->ssl)));
-                    if (objs) n = sk_X509_OBJECT_num(objs);
                     snprintf(g_tls_err, sizeof(g_tls_err),
-                             "certificate verify failed: %s (trust store: %ld certs)",
-                             X509_verify_cert_error_string(vr), n);
+                             "certificate verify failed: %s "
+                             "(system CA: %s, user CA: %s, builtin: %d)",
+                             X509_verify_cert_error_string(vr),
+                             g_ca_system_ok == 1 ? "ok" :
+                                 (g_ca_system_ok == 0 ? "load FAILED" : "n/a"),
+                             g_ca_user_ok == 1 ? "ok" :
+                                 (g_ca_user_ok == 0 ? "load FAILED" : "none"),
+                             (int)RIKKA_BUILTIN_ROOTS_COUNT);
                     if (getenv("HTTP_DEBUG"))
                         fprintf(stderr, "[http] TLS handshake failed: %s\n", g_tls_err);
                 } else {
