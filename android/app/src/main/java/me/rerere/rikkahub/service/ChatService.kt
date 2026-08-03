@@ -1001,6 +1001,26 @@ class ChatService(
             return // 新会话且为空时不保存
         }
 
+        // [CE] 会话/消息索引(引擎 recent_chats / conversation_search 工具数据源)
+        if (conversation.messageNodes.isNotEmpty()) {
+            dev.rikkahub.ce.ChatStore.indexConversation(
+                conversation.id.toString(),
+                conversation.title.ifBlank { "Untitled" },
+                System.currentTimeMillis(),
+            )
+            conversation.messageNodes.forEach { node ->
+                node.messages.forEach { msg ->
+                    msg.parts.forEach { part ->
+                        if (part is me.rerere.ai.ui.UIMessagePart.Text && part.text.isNotBlank()) {
+                            dev.rikkahub.ce.ChatStore.indexMessage(
+                                conversation.id.toString(), part.text,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         val updatedConversation = conversation.copy()
         updateConversation(conversationId, updatedConversation)
 

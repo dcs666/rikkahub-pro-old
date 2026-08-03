@@ -72,6 +72,8 @@ class RikkaHubApp : Application() {
 
         // [CE] 设备工具桥初始化(ask_user/clipboard/calendar/TTS/屏幕时间反调需要 context)
         dev.rikkahub.ce.DeviceTools.init(this)
+        // [CE] 会话索引桥初始化(引擎 recent_chats/conversation_search 工具数据源)
+        dev.rikkahub.ce.ChatStore.init(this)
         // [CE] 跟踪前台 Activity(askUser 对话框需要窗口 token)
         registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(a: android.app.Activity) {

@@ -76,6 +76,35 @@ object ChatStore {
         return out.toString()
     }
 
+    /** [CE] 会话索引写入(ChatService.saveConversation 调用; 引擎 recent_chats 数据源) */
+    @JvmStatic
+    fun indexConversation(id: String, title: String, updated: Long) {
+        val p = prefs() ?: return
+        val sessions = loadSessions(p) ?: JSONArray()
+        val out = JSONArray()
+        for (i in 0 until sessions.length()) {
+            val s = sessions.optJSONObject(i) ?: continue
+            if (s.optString("id") != id) out.put(s)
+        }
+        out.put(JSONObject().put("id", id).put("title", title).put("updated", updated))
+        p.edit().putString("sessions", out.toString()).apply()
+    }
+
+    /** [CE] 会话消息索引写入(引擎 conversation_search 数据源; 每条文本消息追加) */
+    @JvmStatic
+    fun indexMessage(id: String, text: String) {
+        if (text.isBlank()) return
+        val p = prefs() ?: return
+        val key = "session_$id"
+        val arr = try {
+            JSONArray(p.getString(key, null) ?: "[]")
+        } catch (_: Exception) {
+            JSONArray()
+        }
+        arr.put(JSONObject().put("text", text.take(4000)))
+        p.edit().putString(key, arr.toString()).apply()
+    }
+
     private fun loadSessions(p: android.content.SharedPreferences): JSONArray? {
         val raw = p.getString("sessions", null) ?: return null
         return try {
