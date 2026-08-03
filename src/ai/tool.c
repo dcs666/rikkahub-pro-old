@@ -120,10 +120,25 @@ int rk_tool_arg_bool(const char *args_json, const char *key, int dflt) {
 }
 
 char *rk_tool_result_json(const char *key, const char *value) {
-    size_t cap = strlen(key) + strlen(value) + 16;
-    char *out = (char *)malloc(cap);
-    if (!out) return NULL;
-    snprintf(out, cap, "{\"%s\":\"%s\"}", key, value);
+    /* 完整 JSON 转义(结果可能含用户数据; 每次 write 后取增量) */
+    Buf b;
+    buf_init(&b);
+    buf_append_byte(&b, '{');
+    RJsonOut o;
+    rjson_out_init(&o);
+    size_t base = 0;
+    rjson_write_string(&o, key ? key : "", key ? strlen(key) : 0);
+    buf_append(&b, o.buf + base, o.len - base);
+    base = o.len;
+    buf_append_byte(&b, ':');
+    rjson_write_string(&o, value ? value : "", value ? strlen(value) : 0);
+    buf_append(&b, o.buf + base, o.len - base);
+    buf_append_byte(&b, '}');
+    buf_append_byte(&b, '\0');
+    rjson_out_free(&o);
+    char *out = (char *)malloc(b.len);
+    if (out) memcpy(out, b.data, b.len);
+    buf_free(&b);
     return out;
 }
 
