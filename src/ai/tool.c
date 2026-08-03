@@ -135,8 +135,8 @@ char *rk_tool_result_error(const char *message) {
     size_t cap = o.len + 16;
     char *out = (char *)malloc(cap);
     if (out) {
-        int n = snprintf(out, cap, "{\"error\":");
-        if (n > 0 && (size_t)n < cap) memcpy(out + n, o.buf, o.len + 1);
+        int n = snprintf(out, cap, "{\"error\":%s}", o.buf);
+        (void)n;
     }
     rjson_out_free(&o);
     return out;
