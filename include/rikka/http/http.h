@@ -24,6 +24,8 @@ typedef struct {
 
 /* 建立连接（use_tls=1 时 TLS 握手；timeout_ms 连接超时）。失败返回 NULL */
 RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeout_ms);
+/* 最近一次 TLS 握手失败的详细原因(含 X509 验证码); 无则 NULL */
+const char *rhttp_last_tls_error(void);
 void rhttp_close(RHttpConn *c);
 
 /* 发送请求。headers 交替 key/value 以 NULL 结尾。返回 0 成功 */

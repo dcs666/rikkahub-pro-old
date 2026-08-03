@@ -746,16 +746,21 @@ static int start_once(RikkaStreamSession *ss, const char *path,
         }
         RHttpConn *conn = rhttp_connect(host, port, tls, timeout_ms);
         if (!conn) {
-            /* 记录连接/TLS 失败详情（供上层诊断） */
-            unsigned long e = ERR_get_error();
+            /* 记录连接/TLS 失败详情（供上层诊断；优先用 http 层的详细原因） */
+            const char *tls_detail = rhttp_last_tls_error();
             char msg[192];
-            if (e) {
-                const char *r = ERR_reason_error_string(e);
-                snprintf(msg, sizeof(msg), "connect/TLS failed: %s",
-                         r ? r : "unknown error");
+            if (tls_detail) {
+                snprintf(msg, sizeof(msg), "connect/TLS failed: %s", tls_detail);
             } else {
-                snprintf(msg, sizeof(msg),
-                         "connect failed (dns/timeout/refused)");
+                unsigned long e = ERR_get_error();
+                if (e) {
+                    const char *r = ERR_reason_error_string(e);
+                    snprintf(msg, sizeof(msg), "connect/TLS failed: %s",
+                             r ? r : "unknown error");
+                } else {
+                    snprintf(msg, sizeof(msg),
+                             "connect failed (dns/timeout/refused)");
+                }
             }
             free(ss->last_error);
             ss->last_error = strdup(msg);

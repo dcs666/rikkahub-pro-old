@@ -23,6 +23,12 @@
 
 static pthread_once_t g_ssl_once = PTHREAD_ONCE_INIT;
 static SSL_CTX *g_ssl_ctx = NULL;
+/* 最近一次 TLS 握手失败的详细原因(含 X509 验证码; 供上层错误消息) */
+static char g_tls_err[192];
+
+const char *rhttp_last_tls_error(void) {
+    return g_tls_err[0] ? g_tls_err : NULL;
+}
 
 static void ssl_init_once(void) {
     SSL_library_init();
@@ -179,14 +185,18 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
                 if (wait_fd(fd, POLLOUT, timeout_ms) != 0) { rhttp_close(c); return NULL; }
                 continue;
             }
-            if (getenv("HTTP_DEBUG")) {
-                /* 证书验证失败时输出 X509 错误码(便于诊断 CA/链问题) */
+            {
+                /* 证书验证失败时记录 X509 错误码(用户可见错误详情) */
                 long vr = SSL_get_verify_result(c->ssl);
                 if (vr != X509_V_OK) {
-                    fprintf(stderr, "[http] TLS handshake failed: verify_err=%ld (%s)\n",
-                            vr, X509_verify_cert_error_string(vr));
+                    snprintf(g_tls_err, sizeof(g_tls_err),
+                             "certificate verify failed: %s",
+                             X509_verify_cert_error_string(vr));
+                    if (getenv("HTTP_DEBUG"))
+                        fprintf(stderr, "[http] TLS handshake failed: %s\n", g_tls_err);
                 } else {
-                    fprintf(stderr, "[http] TLS handshake failed: ssl_err=%d\n", err);
+                    snprintf(g_tls_err, sizeof(g_tls_err),
+                             "TLS handshake failed (ssl_err=%d)", err);
                 }
             }
             rhttp_close(c);
@@ -194,9 +204,11 @@ RHttpConn *rhttp_connect(const char *host, uint16_t port, int use_tls, int timeo
         }
         /* 证书链结果（VERIFY_PEER 模式下握手已校验; NONE 模式返回 OK 兜底） */
         if (SSL_get_verify_result(c->ssl) != X509_V_OK) {
+            snprintf(g_tls_err, sizeof(g_tls_err), "certificate verify failed");
             rhttp_close(c);
             return NULL;
         }
+        g_tls_err[0] = '\0';
     }
     return c;
 }
