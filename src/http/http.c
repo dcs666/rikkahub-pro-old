@@ -332,6 +332,10 @@ static ssize_t fill_rbuf(RHttpConn *c, int timeout_ms) {
                     if (wait_fd(c->fd, POLLIN, timeout_ms) != 0) return -1;
                     continue;
                 }
+                if (err == SSL_ERROR_WANT_WRITE) {  /* 重协商等罕见路径 */
+                    if (wait_fd(c->fd, POLLOUT, timeout_ms) != 0) return -1;
+                    continue;
+                }
                 return 0; /* EOF 或错误按 EOF */
             }
             n = rc;
