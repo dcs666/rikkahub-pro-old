@@ -334,3 +334,11 @@
 - 修复: 诊断改用 CA 源状态(system CA: ok/failed, user CA: ok/none/failed, builtin: N)
 - 验证: shim 头编译全引擎文件, nm 审计 22 个未定义 OpenSSL 符号全部导出
 - 版本 0.7.11/711
+
+### 🎉 v0.7.11-ce 发布中(de628c0, 2026-08-03)
+- CI 全绿; tag v0.7.11-ce 已推, Release 构建中
+- 核心修复: 移除未导出符号 sk_X509_OBJECT_num(用户 v0.7.10 崩溃:
+  UnsatisfiedLinkError cannot locate symbol) → 诊断改用 CA 源状态
+- 全引擎文件 nm 审计: 22 个未定义 OpenSSL 符号全部导出(防再崩)
+- 顺带: JSON 转义全面审计(jstrz_buf/chats_search/tool_result_error/tool_result_json)
+- 版本 0.7.11/711
