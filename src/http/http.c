@@ -373,6 +373,10 @@ static int raw_write_all(RHttpConn *c, const char *buf, size_t len) {
             if (n <= 0) {
                 int err = SSL_get_error(c->ssl, n);
                 if (err == SSL_ERROR_WANT_WRITE) continue;
+                if (err == SSL_ERROR_WANT_READ) {  /* TLS 重协商等罕见路径 */
+                    if (wait_fd(c->fd, POLLIN, 30000) != 0) return -1;
+                    continue;
+                }
                 return -1;
             }
         } else {
