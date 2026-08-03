@@ -313,6 +313,62 @@ TEST(stream_retry_on_500) {
 }
 
 /* 带 tools 的请求体必须是合法 JSON(回归: tools 曾在 } 之后拼接 → 非法) */
+static void test_tools_claude(void) {
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_CLAUDE, "https://api.anthropic.com", "sk", "m", 100, 0,
+        "[{\"type\":\"function\",\"function\":{\"name\":\"f1\",\"description\":\"d1\",\"parameters\":{\"type\":\"object\"}}}]",
+        {0}, NULL, 0, -1, -1, NULL, NULL};
+    Buf out;
+    buf_init(&out);
+    ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 1, 1, &out));
+    Arena *a2 = arena_create(0);
+    size_t err = 0;
+    RJson *v = rjson_parse(a2, (const char *)out.data, out.len, &err);
+    ASSERT_NOT_NULL(v);
+    const RJson *t = rjson_obj_get(v, "tools");
+    ASSERT_NOT_NULL(t);
+    ASSERT(t->type == RJSON_ARRAY && t->u.arr.count == 1);
+    /* Claude 格式: {name, description, input_schema} */
+    const RJson *t0 = t->u.arr.items[0];
+    ASSERT_NOT_NULL(rjson_obj_get(t0, "name"));
+    ASSERT_NOT_NULL(rjson_obj_get(t0, "input_schema"));
+    buf_free(&out);
+    arena_destroy(a);
+    arena_destroy(a2);
+}
+
+static void test_tools_google(void) {
+    Arena *a = arena_create(0);
+    const RikkaMessage *msgs[1];
+    msgs[0] = mk_msg(a, RIKKA_ROLE_USER, "hi");
+    RikkaProviderCfg cfg = {RIKKA_PROVIDER_GOOGLE, "https://generativelanguage.googleapis.com", "gk", "m", 100, 0,
+        "[{\"type\":\"function\",\"function\":{\"name\":\"f1\",\"description\":\"d1\",\"parameters\":{\"type\":\"object\"}}}]",
+        {0}, NULL, 0, -1, -1, NULL, NULL};
+    Buf out;
+    buf_init(&out);
+    ASSERT_EQ_INT(0, rp_build_request(&cfg, msgs, 1, 1, &out));
+    Arena *a2 = arena_create(0);
+    size_t err = 0;
+    RJson *v = rjson_parse(a2, (const char *)out.data, out.len, &err);
+    ASSERT_NOT_NULL(v);
+    const RJson *t = rjson_obj_get(v, "tools");
+    ASSERT_NOT_NULL(t);
+    ASSERT(t->type == RJSON_ARRAY && t->u.arr.count == 1);
+    /* Google 格式: [{functionDeclarations:[...]}] */
+    const RJson *t0 = t->u.arr.items[0];
+    const RJson *fd = rjson_obj_get(t0, "functionDeclarations");
+    ASSERT_NOT_NULL(fd);
+    ASSERT(fd->type == RJSON_ARRAY && fd->u.arr.count == 1);
+    const RJson *fd0 = fd->u.arr.items[0];
+    ASSERT_NOT_NULL(rjson_obj_get(fd0, "name"));
+    ASSERT_NOT_NULL(rjson_obj_get(fd0, "parameters"));
+    buf_free(&out);
+    arena_destroy(a);
+    arena_destroy(a2);
+}
+
 static void test_custom_body_claude(void) {
     Arena *a = arena_create(0);
     const RikkaMessage *msgs[2];
@@ -875,6 +931,8 @@ int run_provider_suite(void) {
         RIKKA_TEST_REGISTER(provider, custom_body_claude),
         RIKKA_TEST_REGISTER(provider, custom_body_google),
         RIKKA_TEST_REGISTER(provider, custom_headers_json),
+        RIKKA_TEST_REGISTER(provider, tools_claude),
+        RIKKA_TEST_REGISTER(provider, tools_google),
     };
     return run_suite("provider", tests, sizeof(tests) / sizeof(tests[0]));
 }

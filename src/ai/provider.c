@@ -210,6 +210,74 @@ static void google_content(Buf *out, const RikkaMessage *m) {
     buf_append_str(out, "]}");
 }
 
+/* OpenAI tools 数组 → Claude/Google 格式并追加到 out（供 rp_build_request 使用） */
+static void append_tools_for_provider(Buf *out, const RikkaProviderCfg *cfg,
+                                      RikkaProviderId id) {
+    if (!cfg->tools_json || !cfg->tools_json[0]) return;
+    Arena *ta = arena_create(0);
+    size_t terr = 0;
+    RJson *tv = rjson_parse(ta, cfg->tools_json, strlen(cfg->tools_json), &terr);
+    if (!tv || tv->type != RJSON_ARRAY) { arena_destroy(ta); return; }
+    if (id == RIKKA_PROVIDER_CLAUDE) {
+        buf_append_str(out, ",\"tools\":[");
+        int first = 1;
+        for (size_t ti = 0; ti < tv->u.arr.count; ti++) {
+            const RJson *fn = rjson_obj_get(tv->u.arr.items[ti], "function");
+            if (!fn || fn->type != RJSON_OBJECT) continue;
+            const RJson *name = rjson_obj_get(fn, "name");
+            const RJson *desc = rjson_obj_get(fn, "description");
+            const RJson *params = rjson_obj_get(fn, "parameters");
+            if (!first) buf_append_str(out, ",");
+            first = 0;
+            buf_append_str(out, "{\"name\":");
+            jstr(out, name && name->type == RJSON_STRING ? name->u.str.ptr : "",
+                 name && name->type == RJSON_STRING ? name->u.str.len : 0);
+            buf_append_str(out, ",\"description\":");
+            jstr(out, desc && desc->type == RJSON_STRING ? desc->u.str.ptr : "",
+                 desc && desc->type == RJSON_STRING ? desc->u.str.len : 0);
+            if (params) {
+                buf_append_str(out, ",\"input_schema\":");
+                RJsonOut jo;
+                rjson_out_init(&jo);
+                rjson_write_value(&jo, params);
+                buf_append(out, jo.buf, jo.len);
+                rjson_out_free(&jo);
+            }
+            buf_append_str(out, "}");
+        }
+        buf_append_str(out, "]");
+    } else if (id == RIKKA_PROVIDER_GOOGLE) {
+        buf_append_str(out, ",\"tools\":[{\"functionDeclarations\":[");
+        int first = 1;
+        for (size_t ti = 0; ti < tv->u.arr.count; ti++) {
+            const RJson *fn = rjson_obj_get(tv->u.arr.items[ti], "function");
+            if (!fn || fn->type != RJSON_OBJECT) continue;
+            const RJson *name = rjson_obj_get(fn, "name");
+            const RJson *desc = rjson_obj_get(fn, "description");
+            const RJson *params = rjson_obj_get(fn, "parameters");
+            if (!first) buf_append_str(out, ",");
+            first = 0;
+            buf_append_str(out, "{\"name\":");
+            jstr(out, name && name->type == RJSON_STRING ? name->u.str.ptr : "",
+                 name && name->type == RJSON_STRING ? name->u.str.len : 0);
+            buf_append_str(out, ",\"description\":");
+            jstr(out, desc && desc->type == RJSON_STRING ? desc->u.str.ptr : "",
+                 desc && desc->type == RJSON_STRING ? desc->u.str.len : 0);
+            if (params) {
+                buf_append_str(out, ",\"parameters\":");
+                RJsonOut jo;
+                rjson_out_init(&jo);
+                rjson_write_value(&jo, params);
+                buf_append(out, jo.buf, jo.len);
+                rjson_out_free(&jo);
+            }
+            buf_append_str(out, "}");
+        }
+        buf_append_str(out, "]}]");
+    }
+    arena_destroy(ta);
+}
+
 /* ---------- 入口 ---------- */
 
 int rp_build_request(const RikkaProviderCfg *cfg,
@@ -300,6 +368,8 @@ int rp_build_request(const RikkaProviderCfg *cfg,
             buf_append_str(out, "}");
         }
         buf_append_str(out, "]");
+        /* tools(OpenAI 数组 → Claude tools 格式) */
+        append_tools_for_provider(out, cfg, RIKKA_PROVIDER_CLAUDE);
         /* 附加 body(不带前导逗号的 JSON 片段; 对齐 OpenAI) */
         if (cfg->custom_body && cfg->custom_body[0]) {
             buf_append_str(out, ",");
@@ -336,6 +406,8 @@ int rp_build_request(const RikkaProviderCfg *cfg,
             int k2 = snprintf(t2, sizeof(t2), ",\"generationConfig\":{\"maxOutputTokens\":%d}", cfg->max_tokens);
             buf_append(out, t2, (size_t)k2);
         }
+        /* tools(OpenAI 数组 → Google functionDeclarations) */
+        append_tools_for_provider(out, cfg, RIKKA_PROVIDER_GOOGLE);
         /* 附加 body(不带前导逗号的 JSON 片段) */
         if (cfg->custom_body && cfg->custom_body[0]) {
             buf_append_str(out, ",");
