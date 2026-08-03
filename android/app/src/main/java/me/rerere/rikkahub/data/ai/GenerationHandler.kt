@@ -469,7 +469,9 @@ class GenerationHandler(
         logMsg(TAG, "generateText done: parts=${currentParts.size}")
         }
         processingStatus.value = null
-    }
+        // 消费循环(事件处理/字符串累积/消息构造)全部在 IO 线程执行;
+        // Main 只收 30fps 的 sample 结果做 UI 更新, 生成期间主线程不再被占
+    }.flowOn(Dispatchers.IO)
 
     /** [CE] 翻译：走 C 引擎单轮生成 */
     fun translateText(
