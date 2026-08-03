@@ -265,6 +265,12 @@ static RJson *parse_value(ParseCtx *c) {
 RJson *rjson_parse(Arena *arena, const char *text, size_t len, size_t *err_pos) {
     ParseCtx c;
     c.arena = arena;
+    /* 跳过 UTF-8 BOM(EF BB BF) — 部分服务器响应带 BOM */
+    if (len >= 3 && (unsigned char)text[0] == 0xEF &&
+        (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF) {
+        text += 3;
+        len -= 3;
+    }
     c.p = text;
     c.end = text + len;
     c.err_pos = 0;
