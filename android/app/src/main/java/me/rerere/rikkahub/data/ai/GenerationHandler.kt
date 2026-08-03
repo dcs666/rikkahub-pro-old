@@ -156,6 +156,29 @@ class GenerationHandler(
         val (effort, thinking) = reasoningArgs(baseUrl, assistant.reasoningLevel)
         if (effort != null) providerJson.put("reasoning_effort", effort)
         if (thinking) providerJson.put("thinking", true)
+        // 自定义请求头/体(对齐 turbo: assistant.customHeaders/customBodies + model.customHeaders/customBodies
+        // 合并; 引擎按 provider 格式追加到请求)
+        val extraHeaders = buildList {
+            addAll(assistant.customHeaders)
+            addAll(model.customHeaders)
+        }
+        if (extraHeaders.isNotEmpty()) {
+            val hj = JSONObject()
+            extraHeaders.forEach { hj.put(it.name, it.value) }
+            providerJson.put("custom_headers", hj.toString())
+        }
+        val extraBodies = buildList {
+            addAll(assistant.customBodies)
+            addAll(model.customBodies)
+        }
+        if (extraBodies.isNotEmpty()) {
+            val sb = StringBuilder()
+            extraBodies.forEachIndexed { i, cb ->
+                if (i > 0) sb.append(',')
+                sb.append('"').append(cb.key).append("":").append(cb.value)
+            }
+            providerJson.put("custom_body", sb.toString())
+        }
 
         val history = JSONArray()
         // ---- system prompt(对齐 turbo: assistant.systemPrompt + 会话覆盖 + 记忆注入) ----

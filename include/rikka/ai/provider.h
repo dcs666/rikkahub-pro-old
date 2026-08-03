@@ -47,6 +47,9 @@ typedef struct {
     float temperature;
     float top_p;
     const char *custom_body;
+    /* 自定义请求头(JSON 对象 {"X-Foo":"bar"}); NULL=不发送。
+     * 追加在标准头之后(同名覆盖); 键/值须为 JSON 字符串。 */
+    const char *custom_headers;
 } RikkaProviderCfg;
 
 /* 构建 chat completion 请求体（stream=1 时含 stream:true）。返回 0 成功 */

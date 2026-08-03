@@ -817,6 +817,7 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     const RJson *j_tp = rjson_obj_get(pv, "top_p");
     if (j_tp && rjson_is(j_tp, RJSON_NUMBER)) pcfg.top_p = (float)j_tp->u.number;
     pcfg.custom_body = jstr(pv, "custom_body");
+    pcfg.custom_headers = jstr(pv, "custom_headers");
 
     /* memory_tool 反调目标 assistant_id(enableMemory 时 Kotlin 传入; per-call 传递) */
     const char *aid = jstr(pv, "assistant_id");

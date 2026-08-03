@@ -299,7 +299,13 @@ int rp_build_request(const RikkaProviderCfg *cfg,
             claude_content(out, msgs[i]);
             buf_append_str(out, "}");
         }
-        buf_append_str(out, "]}");
+        buf_append_str(out, "]");
+        /* 附加 body(不带前导逗号的 JSON 片段; 对齐 OpenAI) */
+        if (cfg->custom_body && cfg->custom_body[0]) {
+            buf_append_str(out, ",");
+            buf_append_str(out, cfg->custom_body);
+        }
+        buf_append_str(out, "}");
         break;
     }
     case RIKKA_PROVIDER_GOOGLE: {
@@ -329,6 +335,11 @@ int rp_build_request(const RikkaProviderCfg *cfg,
             char t2[96];
             int k2 = snprintf(t2, sizeof(t2), ",\"generationConfig\":{\"maxOutputTokens\":%d}", cfg->max_tokens);
             buf_append(out, t2, (size_t)k2);
+        }
+        /* 附加 body(不带前导逗号的 JSON 片段) */
+        if (cfg->custom_body && cfg->custom_body[0]) {
+            buf_append_str(out, ",");
+            buf_append_str(out, cfg->custom_body);
         }
         buf_append_str(out, "}");
         break;
@@ -790,7 +801,8 @@ static int start_once(RikkaStreamSession *ss, const char *path,
         }
 
         char auth[512];
-        const char *hdrs[8];
+        const char *hdrs[24];
+        char hdr_buf[24][640]; /* 自定义头键/值槽(请求期间有效) */
         int nh = 0;
         if (ss->cfg.api_key && ss->cfg.id != RIKKA_PROVIDER_GOOGLE) {
             snprintf(auth, sizeof(auth), "Bearer %s", ss->cfg.api_key);
@@ -804,6 +816,32 @@ static int start_once(RikkaStreamSession *ss, const char *path,
         hdrs[nh++] = "application/json";
         hdrs[nh++] = "Accept";
         hdrs[nh++] = "text/event-stream";
+        /* 自定义请求头(JSON 对象; 键/值复制到本地槽, 防 arena 失效) */
+        if (ss->cfg.custom_headers && ss->cfg.custom_headers[0]) {
+            Arena *ha = arena_create(0);
+            size_t herr = 0;
+            RJson *hv = rjson_parse(ha, ss->cfg.custom_headers,
+                                    strlen(ss->cfg.custom_headers), &herr);
+            if (hv && hv->type == RJSON_OBJECT) {
+                int hslot = 0;
+                for (size_t ki = 0; ki < hv->u.obj.count && nh + 2 < 24 &&
+                                    hslot + 2 <= 24; ki++) {
+                    const RJson *val = hv->u.obj.values[ki];
+                    if (!val || val->type != RJSON_STRING) continue;
+                    const char *k = hv->u.obj.keys[ki];
+                    size_t kl = strlen(k);
+                    size_t vl = val->u.str.len;
+                    if (kl == 0 || kl > 120 || vl > 500) continue;
+                    char *s1 = hdr_buf[hslot++];
+                    char *s2 = hdr_buf[hslot++];
+                    memcpy(s1, k, kl); s1[kl] = '\0';
+                    memcpy(s2, val->u.str.ptr, vl); s2[vl] = '\0';
+                    hdrs[nh++] = s1;
+                    hdrs[nh++] = s2;
+                }
+            }
+            arena_destroy(ha);
+        }
         hdrs[nh] = NULL;
 
         if (rhttp_send(conn, "POST", cur_path, hdrs, body, body_len) != 0) {
