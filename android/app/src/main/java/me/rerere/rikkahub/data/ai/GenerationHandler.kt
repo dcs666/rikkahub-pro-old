@@ -38,6 +38,7 @@ import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.replaceRegexes
 import dev.rikkahub.ce.Engine
 import dev.rikkahub.ce.ChatCallback
 import org.json.JSONArray
