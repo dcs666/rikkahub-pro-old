@@ -330,6 +330,8 @@ class GenerationHandler(
         // ---- 消费事件 → 组装 UI 消息（滚动超时：130s 无事件保护；
         // 引擎侧每轮 120s，多轮工具循环总时长可能更长 → 收到事件即续期） ----
         val currentParts = mutableListOf<UIMessagePart>()
+        // 本次生成的消息 id(流式期间稳定, 防 UI 消息版本膨胀)
+        val assistantMsgId = Uuid.random()
         var deadline = System.currentTimeMillis() + 130_000L
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
@@ -364,7 +366,7 @@ class GenerationHandler(
                             currentParts.add(UIMessagePart.Text(evt.text))
                         }
                     }
-                    emitChunk(messages, currentParts).let { emit(it) }
+                    emitChunk(messages, currentParts, assistantMsgId).let { emit(it) }
                 }
                 is Evt.ToolCall -> {
                     currentParts.add(
@@ -375,7 +377,7 @@ class GenerationHandler(
                             approvalState = ToolApprovalState.Auto,
                         ),
                     )
-                    emitChunk(messages, currentParts).let { emit(it) }
+                    emitChunk(messages, currentParts, assistantMsgId).let { emit(it) }
                 }
                 is Evt.ToolResult -> {
                     val idx = currentParts.indexOfLast {
@@ -387,12 +389,12 @@ class GenerationHandler(
                             output = listOf(UIMessagePart.Text(evt.result.take(4000))),
                         )
                     }
-                    emitChunk(messages, currentParts).let { emit(it) }
+                    emitChunk(messages, currentParts, assistantMsgId).let { emit(it) }
                 }
                 is Evt.Finish -> {
                     if (!evt.ok && currentParts.isEmpty()) {
                         currentParts.add(UIMessagePart.Text(evt.err ?: "生成失败"))
-                        emitChunk(messages, currentParts).let { emit(it) }
+                        emitChunk(messages, currentParts, assistantMsgId).let { emit(it) }
                     }
                     break
                 }
@@ -401,7 +403,7 @@ class GenerationHandler(
         job.join()
         // 引擎返回 JSON 里的 usage(Finish 事件后到达) → 重新 emit 带用量统计的最终消息
         nativeUsage?.let { usage ->
-            emit(emitChunk(messages, currentParts, usage))
+            emit(emitChunk(messages, currentParts, assistantMsgId, usage))
         }
         logMsg(TAG, "generateText done: parts=${currentParts.size}")
         }
@@ -478,10 +480,18 @@ class GenerationHandler(
     private fun emitChunk(
         base: List<UIMessage>,
         parts: List<UIMessagePart>,
+        assistantId: Uuid,
         usage: TokenUsage? = null,
     ): GenerationChunk {
+        // 流式期间必须用稳定 id: UIMessage 默认 id=random, 每次 delta 新 id 会触发
+        // Conversation.updateCurrentMessages 慢速路径 add → 消息节点无限膨胀(如 28 条)
         return GenerationChunk.Messages(
-            base + UIMessage(role = MessageRole.ASSISTANT, parts = parts.toList(), usage = usage),
+            base + UIMessage(
+                id = assistantId,
+                role = MessageRole.ASSISTANT,
+                parts = parts.toList(),
+                usage = usage,
+            ),
         )
     }
 
