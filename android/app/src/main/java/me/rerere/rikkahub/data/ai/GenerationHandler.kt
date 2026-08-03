@@ -621,7 +621,7 @@ class GenerationHandler(
             }
             arr.put(fn)
             exec[tool.name] = { args ->
-                val json = runCatching { me.rerere.ai.utils.JsonInstant.parseToJsonElement(args) }
+                val json = runCatching { me.rerere.rikkahub.utils.JsonInstant.parseToJsonElement(args) }
                     .getOrElse { JsonObject(emptyMap()) }
                 val parts = runBlocking { tool.execute(json) }
                 parts.joinToString("
