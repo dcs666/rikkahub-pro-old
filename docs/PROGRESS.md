@@ -373,3 +373,12 @@
 - 其余: 工具执行期无事件(有 Tool loading 显示, 可接受);
   引擎 120s×8 轮上限(每轮有事件, 可接受)
 - 版本 0.7.13/713 待发
+
+### 🎉 v0.7.13-ce 发布中(c3c70b3, 2026-08-03)
+- CI 全绿; tag v0.7.13-ce 已推, Release 构建中
+- 性能修复(用户反馈"生成特别卡/经常卡死", 对照 turbo 源码):
+  ① 流式 text O(n²) 缓解 — StringBuilder + 32ms 降频 flush(对齐 turbo [TURBO] 优化)
+  ② generateText 消费循环 flowOn(IO) — 主线程不再被生成占用
+  ③ pipe_reader 5s 轮询 — 停止按钮在无数据期 ≤5s 生效(原最长 120s)
+  ④ Gradle 网络超时 180s — 防 jitpack 快照解析超时(2bd4b8c 曾因 jitpack 30s 超时失败)
+- 版本 0.7.13/713
