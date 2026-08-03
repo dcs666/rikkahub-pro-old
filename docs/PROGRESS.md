@@ -305,3 +305,12 @@
 - 根因: 手机系统 CA 缺 TrustAsia 2025 新根(系统更新慢); 沙箱系统 CA 验证 OK
 - 修复: 加载用户 CA(/data/misc/user/0/cacerts-added) + PARTIAL_CHAIN + X509 错误码透传
 - 版本 0.7.9/709
+
+### TLS 精准修复 v0.7.10(bc53443) — 2026-08-03
+- 用户反馈错误码 19 (self-signed certificate in certificate chain) = 信任库空/缺根
+- 根因: 手机系统 CA 目录加载失败(路径/权限) → VERIFY_PEER + 空信任库 → 全 TLS 失败
+- 修复: 内置 DigiCert Global Root G2(DER, d2i_X509)兜底 + VERIFY_PEER 恒启用
+- 验证(沙箱): 空 CA 目录 + 内置根 → DeepSeek 握手 PASS; 系统 CA + 内置根共存 → google/deepseek 双 PASS
+- 诊断: 握手失败报告 trust store 证书数(用户可见精准定位)
+- 顺带: Claude 多 content_block 工具槽(index)/Google 适配新槽/symlink 逃逸防护/BOM 跳过
+- 版本 0.7.10/710
