@@ -1003,6 +1003,9 @@ static void *pipe_reader(void *v) {
     PipeIO *io = (PipeIO *)v;
     RikkaStreamSession *ss = io->ss;
     char buf[16384];
+    /* 每 5s 轮询读超时: 无数据(模型思考/流式暂停)期间可响应取消;
+     * SSL_read 阻塞本身不检查 cancel_flag, 原来最长等满 120s 才停 */
+    long poll_left = io->timeout_ms;
     for (;;) {
         if (io->cancel && *io->cancel) {
             /* 取消：关闭连接让读立即返回 */
@@ -1011,9 +1014,23 @@ static void *pipe_reader(void *v) {
             io->reader_rc = -1;
             break;
         }
-        ssize_t n = rhttp_read_body(ss->conn, buf, sizeof(buf), io->timeout_ms);
-        if (n < 0) { io->reader_rc = -1; break; }
+        int chunk_to = poll_left > 5000 ? 5000 : (int)poll_left;
+        ssize_t n = rhttp_read_body(ss->conn, buf, sizeof(buf), chunk_to);
+        if (n < 0) {
+            /* 5s 无数据: 先响应取消, 否则继续轮询(总超时 io->timeout_ms) */
+            if (io->cancel && *io->cancel) {
+                rhttp_close(ss->conn);
+                ss->conn = NULL;
+                io->reader_rc = -1;
+                rk_spsc_close(&io->q);
+                return NULL;
+            }
+            poll_left -= chunk_to;
+            if (poll_left <= 0) { io->reader_rc = -1; break; }
+            continue;
+        }
         if (n == 0) break;
+        poll_left = io->timeout_ms; /* 有数据: 重置总超时 */
         while (rk_spsc_push(&io->q, buf, (size_t)n) != 0) {
             if (io->cancel && *io->cancel) {
                 rhttp_close(ss->conn);
