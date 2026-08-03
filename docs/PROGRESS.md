@@ -299,3 +299,9 @@
 - Release: rikkahub-ce-0.7.8-ce.apk(44MB, 1497 条目, 双 ABI arm64+x86_64)
 - 验证: zip 完整/签名通过(CI apksigner)/librikka+libssl+libcrypto 齐全
 - 含全部修复: 设备工具 context/主机名校验/重定向/per-call 取消/翻译对齐/白名单 等
+
+### TLS 证书验证增强(v0.7.9) — 用户反馈修复
+- 用户反馈: v0.7.8 生成报 connect/TLS failed: certificate verify failed(DeepSeek)
+- 根因: 手机系统 CA 缺 TrustAsia 2025 新根(系统更新慢); 沙箱系统 CA 验证 OK
+- 修复: 加载用户 CA(/data/misc/user/0/cacerts-added) + PARTIAL_CHAIN + X509 错误码透传
+- 版本 0.7.9/709
