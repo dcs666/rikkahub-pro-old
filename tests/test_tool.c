@@ -186,6 +186,14 @@ TEST(tool_workspace_files) {
     ASSERT_EQ_INT(0, rk_tool_call(rd, "{\"path\":\"c.txt\"}", &env, &result));
     ASSERT(strstr(result, "b b") != NULL);
     free(result);
+    result = NULL;
+    /* symlink 逃逸: root 内 symlink 指向 root 外 → 拒绝 */
+    char esc[160];
+    snprintf(esc, sizeof(esc), "ln -s /etc/passwd %s/evil_link", root);
+    { int _rc = system(esc); (void)_rc; }
+    TOOL_FAIL(rk_tool_call(rd, "{\"path\":\"evil_link\"}", &env, &result), result);
+    snprintf(esc, sizeof(esc), "rm -f %s/evil_link", root);
+    { int _rc = system(esc); (void)_rc; }
     rk_tools_destroy(&r);
     /* 清理 */
     unlink("/tmp/rk_tool_ws_tmp"); /* no-op 安全 */

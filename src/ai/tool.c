@@ -211,6 +211,19 @@ static char *resolve_path(const char *root, const char *user_path) {
     memcpy(full, root, rl);
     full[rl] = '/';
     memcpy(full + rl + 1, user_path, pl + 1);
+    /* 防 symlink 逃逸：目标已存在时解析真实路径，必须仍在 root 内。
+     * (不存在=新建场景, 拼接路径本身已在 root 内, 无逃逸可能) */
+    char *real = realpath(full, NULL);
+    if (real) {
+        size_t rrl = strlen(real);
+        if (rrl < rl + 1 || strncmp(real, root, rl) != 0 || real[rl] != '/') {
+            free(real);
+            free(full);
+            return NULL;
+        }
+        free(full);
+        full = real; /* 用解析后的真实路径打开(防 symlink 指向 root 外) */
+    }
     return full;
 }
 
