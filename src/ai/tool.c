@@ -128,10 +128,17 @@ char *rk_tool_result_json(const char *key, const char *value) {
 }
 
 char *rk_tool_result_error(const char *message) {
-    size_t cap = strlen(message) + 16;
+    /* 完整 JSON 转义(错误消息可能含用户输入/路径/引号/控制字符) */
+    RJsonOut o;
+    rjson_out_init(&o);
+    rjson_write_string(&o, message ? message : "", message ? strlen(message) : 0);
+    size_t cap = o.len + 16;
     char *out = (char *)malloc(cap);
-    if (!out) return NULL;
-    snprintf(out, cap, "{\"error\":\"%s\"}", message);
+    if (out) {
+        int n = snprintf(out, cap, "{\"error\":");
+        if (n > 0 && (size_t)n < cap) memcpy(out + n, o.buf, o.len + 1);
+    }
+    rjson_out_free(&o);
     return out;
 }
 
