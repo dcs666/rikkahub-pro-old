@@ -347,3 +347,12 @@
 - 全引擎文件 nm 审计: 22 个未定义 OpenSSL 符号全部导出(防再崩)
 - 顺带: JSON 转义全面审计(jstrz_buf/chats_search/tool_result_error/tool_result_json)
 - 版本 0.7.11/711
+
+### v0.7.12 候选(f5bf34e, CI 全绿, 未发布)
+- 🔴 消息膨胀修复: 用户反馈"一个对话28次回答" — 根因 emitChunk 每次 delta
+  构造新 UIMessage(random id) → updateCurrentMessages 快速路径失效 → 慢速路径
+  add → 节点内消息版本无限膨胀(24/28 分页 = 28 个版本);
+  修复: 每次 generateText 生成稳定 assistantMsgId, 流式期间原地更新
+- 会话索引接线(1b96f16): ChatStore.init + saveConversation 索引钩子
+  (recent_chats/conversation_search 工具数据源; 此前恒空)
+- ChatStore 索引上限(45957e4): 会话 200/消息 500 防 prefs 膨胀
