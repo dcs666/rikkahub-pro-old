@@ -394,3 +394,11 @@
      + engine_jni 不注册引擎内置 workspace(防重复)
 - 待办: 外部工具审批流程(workspace/MCP 需确认)/外部工具超时/工具结果截断/
   streamOutput 非流式
+
+- v0.7.14 追加修复:
+  ⑥ Claude/Google 请求 tools 定义(此前仅 OpenAI 发送; Claude {name,description,
+     input_schema} / Google {functionDeclarations} 格式转换 + 2 测试)
+  ⑦ 外部工具输出截断(workspace_shell/MCP 超长结果, 32KB/4KB 对齐 turbo)
+  ⑧ custom_body 字符串转义修复(反斜杠丢失致 Kotlin 语法错误)
+  ⑨ workspace 工具修复(双重排除 → JVM proot 通道)
+- 测试数: 200 → 205
