@@ -7,6 +7,7 @@
 #include "rikka/util/arena.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <time.h>
 
 static const char *TAG_OPEN = "<think>";
@@ -148,21 +149,27 @@ static char *extract_text(const RikkaMessage *m) {
     return out;
 }
 
-/* JSON 字符串转义（工具定义生成用） */
+/* JSON 字符串转义（工具定义生成用）: 引号/反斜杠/全部控制字符 */
 static void jstrz_buf(Buf *out, const char *s) {
     buf_append_byte(out, '"');
     for (const char *p = s; *p; p++) {
-        if (*p == '"' || *p == '\\') {
-            buf_append_byte(out, '\\');
-            buf_append_byte(out, (uint8_t)*p);
-        } else if (*p == '\n') {
-            buf_append_str(out, "\\n");
-        } else if (*p == '\r') {
-            buf_append_str(out, "\\r");
-        } else if (*p == '\t') {
-            buf_append_str(out, "\\t");
-        } else {
-            buf_append_byte(out, (uint8_t)*p);
+        unsigned char ch = (unsigned char)*p;
+        switch (ch) {
+            case '"':  buf_append_str(out, "\\\""); break;
+            case '\\': buf_append_str(out, "\\\\"); break;
+            case '\n': buf_append_str(out, "\\n"); break;
+            case '\r': buf_append_str(out, "\\r"); break;
+            case '\t': buf_append_str(out, "\\t"); break;
+            case '\b': buf_append_str(out, "\\b"); break;
+            case '\f': buf_append_str(out, "\\f"); break;
+            default:
+                if (ch < 0x20) {
+                    char hex[8];
+                    snprintf(hex, sizeof(hex), "\\u%04x", ch);
+                    buf_append_str(out, hex);
+                } else {
+                    buf_append_byte(out, ch);
+                }
         }
     }
     buf_append_byte(out, '"');
