@@ -314,3 +314,11 @@
 - 诊断: 握手失败报告 trust store 证书数(用户可见精准定位)
 - 顺带: Claude 多 content_block 工具槽(index)/Google 适配新槽/symlink 逃逸防护/BOM 跳过
 - 版本 0.7.10/710
+
+### 🎉 v0.7.10-ce 发布中(7223900, 2026-08-03)
+- CI 全绿(build-test/sanitizers/android-build); tag v0.7.10-ce 已推, Release 构建中
+- 内置信任根 18 个主流 CA(DigiCert G2/G3/ISRG X1/X2/GlobalSign R3/R6/USERTrust/
+  Amazon R1-R4/Starfield/GoDaddy/CFCA/Entrust/GTS R1/R3/R4)
+- 模拟空信任库(系统 CA 加载失败)验证: DeepSeek/OpenAI/Anthropic/Google/Moonshot 全 PASS
+- 诊断: 握手失败报 trust store 证书数(用户可见)
+- 顺带: Claude 多 content_block 工具槽/symlink 逃逸防护/BOM/SSL WANT_*
