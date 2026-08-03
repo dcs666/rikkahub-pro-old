@@ -195,8 +195,25 @@ class GenerationHandler(
         if (systemBuilder.isNotBlank()) {
             history.put(JSONObject().put("role", "system").put("content", systemBuilder.toString()))
         }
+        // ---- 输入变换(模式注入/lorebook/模板/workspace 提醒; 对齐 turbo) ----
+        var inputMsgs = messages
+        if (inputTransformers.isNotEmpty()) {
+            val tctx = me.rerere.rikkahub.data.ai.transformers.TransformerContext(
+                context = context,
+                model = model,
+                assistant = assistant,
+                settings = settings,
+                conversationModeInjectionIds = conversationModeInjectionIds,
+                conversationLorebookIds = conversationLorebookIds,
+                processingStatus = processingStatus,
+                workspaceCwd = workspaceCwd,
+            )
+            for (t in inputTransformers) {
+                inputMsgs = t.transform(tctx, inputMsgs)
+            }
+        }
         // ---- 上下文截断(limitContext, 对齐 turbo) ----
-        val effectiveMessages = messages.limitContext(assistant.contextMessageLimit)
+        val effectiveMessages = inputMsgs.limitContext(assistant.contextMessageLimit)
         for (m in effectiveMessages) {
             if (m.role != MessageRole.USER && m.role != MessageRole.ASSISTANT) continue
             for (part in m.parts) {
