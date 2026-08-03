@@ -6,6 +6,7 @@
 #include "rikka/core/buffer.h"
 #include "rikka/data/index.h"
 #include "rikka/data/store.h"
+#include "rikka/json/json.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -190,26 +191,26 @@ char *rk_chats_search(RkChatIndex *ci, const char *query) {
         buf_init(&snip);
         make_snippet(e->s[RK_ENT_CHAT_CONTENT] ? e->s[RK_ENT_CHAT_CONTENT] : "",
                      query, &snip);
-        char head[512];
-        int n2 = snprintf(head, sizeof(head),
-                          "{\"id\":\"%s\",\"title\":\"%s\",\"snippet\":\"",
-                          e->s[RK_ENT_CHAT_ID] ? e->s[RK_ENT_CHAT_ID] : "",
-                          e->s[RK_ENT_CHAT_TITLE] ? e->s[RK_ENT_CHAT_TITLE] : "");
-        if (n2 > 0 && (size_t)n2 < sizeof(head)) buf_append_str(&out, head);
-        /* snippet 转义后写入 */
-        for (size_t k = 0; k < snip.len; k++) {
-            unsigned char c = (unsigned char)snip.data[k];
-            if (c == '"' || c == '\\') {
-                buf_append_byte(&out, '\\');
-                buf_append_byte(&out, c);
-            } else {
-                buf_append_byte(&out, c);
-            }
-        }
+        RJsonOut jo;
+        rjson_out_init(&jo);
+        rjson_write_string(&jo, e->s[RK_ENT_CHAT_ID] ? e->s[RK_ENT_CHAT_ID] : "",
+                           strlen(e->s[RK_ENT_CHAT_ID] ? e->s[RK_ENT_CHAT_ID] : ""));
+        buf_append_str(&out, "{\"id\":");
+        buf_append(&out, jo.buf, jo.len);
+        rjson_write_string(&jo, e->s[RK_ENT_CHAT_TITLE] ? e->s[RK_ENT_CHAT_TITLE] : "",
+                           strlen(e->s[RK_ENT_CHAT_TITLE] ? e->s[RK_ENT_CHAT_TITLE] : ""));
+        buf_append_str(&out, ",\"title\":");
+        buf_append(&out, jo.buf, jo.len);
+        buf_append_str(&out, ",\"snippet\":");
+        /* snippet 完整转义(控制字符/引号/反斜杠) */
+        rjson_write_string(&jo, (const char *)snip.data, snip.len);
+        buf_append(&out, jo.buf, jo.len);
+        rjson_write_string(&jo, date, strlen(date));
+        buf_append_str(&out, ",\"date\":");
+        buf_append(&out, jo.buf, jo.len);
+        buf_append_str(&out, "}");
+        rjson_out_free(&jo);
         buf_free(&snip);
-        char tail[64];
-        snprintf(tail, sizeof(tail), "\",\"date\":\"%s\"}", date);
-        buf_append_str(&out, tail);
         wrote++;
     }
     buf_append_byte(&out, ']');
