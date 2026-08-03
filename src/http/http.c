@@ -18,7 +18,6 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <openssl/x509.h>
 #include "builtin_roots.h"
 
 /* ---------- 全局 TLS 上下文 ---------- */
@@ -54,6 +53,10 @@ static void ssl_init_once(void) {
                          "user CA dir load FAILED");
             }
         }
+#endif
+#ifndef RK_ANDROID
+        /* Linux/桌面: 系统 CA 路径(/etc/ssl/certs 等) */
+        SSL_CTX_set_default_verify_paths(g_ssl_ctx);
 #endif
         /* 内置信任根: 即使系统 CA 目录加载失败/缺新根, 常见根仍可验证。
            仅增加信任(不绕过链验证与主机名校验)。 */
