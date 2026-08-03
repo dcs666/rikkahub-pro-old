@@ -87,6 +87,8 @@ object ChatStore {
             if (s.optString("id") != id) out.put(s)
         }
         out.put(JSONObject().put("id", id).put("title", title).put("updated", updated))
+        // 会话索引上限 200(防 prefs 无限增长)
+        while (out.length() > 200) out.remove(0)
         p.edit().putString("sessions", out.toString()).apply()
     }
 
@@ -102,6 +104,8 @@ object ChatStore {
             JSONArray()
         }
         arr.put(JSONObject().put("text", text.take(4000)))
+        // 单会话消息索引上限 500 条(防 prefs 无限增长)
+        while (arr.length() > 500) arr.remove(0)
         p.edit().putString(key, arr.toString()).apply()
     }
 
