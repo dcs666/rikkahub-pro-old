@@ -442,6 +442,8 @@ struct RJsonStream {
     const char *lit;
     int skip_u_need;
     int skip_key_mode;   /* 当前转义序列是否处于对象键中 */
+
+    int bom_skip;        /* 根值前 UTF-8 BOM 跳过进度(0-3) */
 };
 
 /* 内部状态 */
@@ -558,6 +560,7 @@ RJsonStream *rjson_stream_create(const RJsonStreamPathElem *path,
     if (path) while (path[s->path_len].is_index != -2) s->path_len++;
     s->state = ST_ROOT;
     s->pending_match = -1;
+    s->bom_skip = 0;
     return s;
 }
 
@@ -575,6 +578,7 @@ void rjson_stream_reset(RJsonStream *s) {
     s->depth = 0;
     s->state = ST_ROOT;
     s->pending_match = -1;
+    s->bom_skip = 0;
     s->hit = 0;
     s->done = 0;
     s->error = 0;
@@ -598,6 +602,12 @@ RJsonStreamStatus rjson_stream_feed(RJsonStream *s, const char *data, size_t len
         switch (s->state) {
         case ST_ROOT:
             if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') break;
+            /* UTF-8 BOM(EF BB BF) 跳过 — 根值前的 3 字节 */
+            if (s->bom_skip < 3) {
+                static const unsigned char bom[3] = {0xEF, 0xBB, 0xBF};
+                if ((unsigned char)ch == bom[s->bom_skip]) { s->bom_skip++; break; }
+                s->bom_skip = 3; /* 非 BOM 开头, 不再跳过 */
+            }
             s->state = ST_VALUE;
             i--; /* 交给 ST_VALUE */
             break;

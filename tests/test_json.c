@@ -189,6 +189,48 @@ TEST(stream_extract_content) {
     rjson_stream_destroy(st);
 }
 
+TEST(stream_bom_skip) {
+    /* UTF-8 BOM 前缀的 JSON: 完整喂入 + 分片喂入均应提取成功 */
+    const char *ev = "{\"choices\":[{\"delta\":{\"content\":\"B\"}}]}";
+    /* 完整喂入(带 BOM) */
+    SinkCtx ctx; buf_init(&ctx.b);
+    RJsonStream *st = rjson_stream_create(path_choices_content, sink_cb, &ctx);
+    feed_all(st, "\xef\xbb\xbf");
+    feed_all(st, ev);
+    ASSERT(rjson_stream_hit(st));
+    rjson_stream_finish(st);
+    ASSERT_EQ_SIZE(1, ctx.b.len);
+    ASSERT(memcmp(ctx.b.data, "B", 1) == 0);
+    buf_free(&ctx.b);
+    rjson_stream_destroy(st);
+    /* 1 字节分片(含 BOM 逐字节) */
+    SinkCtx ctx2; buf_init(&ctx2.b);
+    RJsonStream *st2 = rjson_stream_create(path_choices_content, sink_cb, &ctx2);
+    const char *bom = "\xef\xbb\xbf";
+    size_t nb = 3, ne = strlen(ev);
+    RJsonStreamStatus sts = RJSON_STREAM_OK;
+    for (size_t i = 0; i < nb && sts == RJSON_STREAM_OK; i++) {
+        sts = rjson_stream_feed(st2, bom + i, 1);
+    }
+    for (size_t i = 0; i < ne && sts == RJSON_STREAM_OK; i++) {
+        sts = rjson_stream_feed(st2, ev + i, 1);
+    }
+    ASSERT(rjson_stream_hit(st2));
+    rjson_stream_finish(st2);
+    ASSERT_EQ_SIZE(1, ctx2.b.len);
+    ASSERT(memcmp(ctx2.b.data, "B", 1) == 0);
+    buf_free(&ctx2.b);
+    rjson_stream_destroy(st2);
+    /* 完整解析 API 也跳 BOM */
+    Arena *a = arena_create(0);
+    size_t jerr = 0;
+    const char *doc = "\xef\xbb\xbf{\"a\":1}";
+    RJson *v = rjson_parse(a, doc, strlen(doc), &jerr);
+    ASSERT_NOT_NULL(v);
+    ASSERT_NOT_NULL(rjson_obj_get(v, "a"));
+    arena_destroy(a);
+}
+
 TEST(stream_fragmented_bytes) {
     /* 1 字节分片 + 转义/unicode 跨分片 */
     const char *ev = "{\"choices\":[{\"delta\":{\"content\":\"a\\n\\u4e2d\\uD83D\\uDE00b\"}}]}";
@@ -348,6 +390,7 @@ int run_json_suite(void) {
         RIKKA_TEST_REGISTER(json, parse_deep_nesting_guarded),
         RIKKA_TEST_REGISTER(json, parse_nested),
         RIKKA_TEST_REGISTER(json, serialize_roundtrip),
+        RIKKA_TEST_REGISTER(json, stream_bom_skip),
         RIKKA_TEST_REGISTER(json, stream_extract_content),
         RIKKA_TEST_REGISTER(json, stream_fragmented_bytes),
         RIKKA_TEST_REGISTER(json, stream_fragmented_escape_split),
