@@ -867,8 +867,11 @@ Java_dev_rikkahub_ce_Engine_nativeChat(JNIEnv *env, jclass cls,
     /* 工具（内置 + 设备工具 + 会话工具 + workspace 沙箱） */
     RkToolRegistry reg;
     RkToolEnv tenv = {0};
-    tenv.workspace_root = wr;   /* workspace 沙箱根（JNI 传入） */
-    tenv.workspace_cwd = wr;    /* shell 默认工作目录 */
+    /* workspace 沙箱: Android 场景不注册引擎内置(引擎 fork /bin/sh 不适配),
+     * workspace 读/写/编辑/shell 全部走 JVM WorkspaceTools(proot)外部通道 */
+    tenv.workspace_root = NULL;
+    tenv.workspace_cwd = NULL;
+    (void)wr;
     tenv.ask_user = jni_ask_user;
     tenv.clipboard_write = jni_clipboard_write;
     tenv.tts_speak = jni_tts_speak;
