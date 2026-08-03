@@ -382,3 +382,15 @@
   ③ pipe_reader 5s 轮询 — 停止按钮在无数据期 ≤5s 生效(原最长 120s)
   ④ Gradle 网络超时 180s — 防 jitpack 快照解析超时(2bd4b8c 曾因 jitpack 30s 超时失败)
 - 版本 0.7.13/713
+
+### v0.7.14 候选(功能对齐, 2026-08-03)
+- 对照 turbo 功能清单全面排查, 发现并修复 4 个差异:
+  ① 自定义 HTTP 头(聊天): 引擎新增 RikkaProviderCfg.custom_headers(JSON 对象, 全 provider)
+  ② 自定义 HTTP 体(聊天): 引擎扩展 Claude/Google + Kotlin 合并 assistant/model customBodies
+  ③ MCP 工具不可用: 外部工具通道(引擎合并 JVM tools 定义 + 注册表未命中
+     JNI 反调 DeviceTools.executeTool → Tool.execute) — 修复 MCP/workspace 等 JVM 工具
+  ④ workspace_shell 不可用: 引擎内置需 workspace_root(未传) + Kotlin 侧被
+     engineBuiltin 排除 → 双重丢失; 修复: 排除列表移除 workspace_*(走 JVM proot 通道)
+     + engine_jni 不注册引擎内置 workspace(防重复)
+- 待办: 外部工具审批流程(workspace/MCP 需确认)/外部工具超时/工具结果截断/
+  streamOutput 非流式
