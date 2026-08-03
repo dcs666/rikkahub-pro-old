@@ -409,6 +409,21 @@ class GenerationHandler(
                     emitChunk(messages, currentParts, assistantMsgId).let { emit(it) }
                 }
                 is Evt.Finish -> {
+                    // [CE] 输出正则替换(assistant.regexes, 对齐 turbo onGenerationFinish)
+                    if (assistant.regexes.isNotEmpty()) {
+                        val scope = me.rerere.rikkahub.data.model.AssistantAffectScope.ASSISTANT
+                        val newParts = currentParts.map { part ->
+                            when (part) {
+                                is UIMessagePart.Text ->
+                                    part.copy(text = part.text.replaceRegexes(assistant, scope, visual = false))
+                                is UIMessagePart.Reasoning ->
+                                    part.copy(reasoning = part.reasoning.replaceRegexes(assistant, scope, visual = false))
+                                else -> part
+                            }
+                        }
+                        currentParts.clear()
+                        currentParts.addAll(newParts)
+                    }
                     if (!evt.ok && currentParts.isEmpty()) {
                         currentParts.add(UIMessagePart.Text(evt.err ?: "生成失败"))
                         emitChunk(messages, currentParts, assistantMsgId).let { emit(it) }
